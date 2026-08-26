@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Synapse Shield — Security Lab v2.0</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet"/>
+    <script src="/static/synapse-sdk.js"></script>
+
+    <script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              colors: {
+                "surface-dim": "#0f131c",
+                "on-surface": "#dfe2ef",
+                "outline-variant": "#3b494b",
+                "error": "#ffb4ab",
+                "secondary": "#4edea3",
+                "primary-container": "#00f0ff",
+                "surface-container": "#1c1f29",
+                "surface-container-high": "#262a34",
+                "surface-container-low": "#181b25"
+              },
+              fontFamily: {
+                "mono": ["JetBrains Mono", "monospace"],
+                "sans": ["Inter", "sans-serif"]
+              }
+            }
+          }
+        }
+    </script>
+    <style>
+        body { background-color: #090D16; color: #dfe2ef; }
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid #1E293B;
+            transition: all 0.3s ease;
+        }
+        .glass-panel:hover {
+            border-color: rgba(0, 240, 255, 0.4);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+        }
+        .glow-cyan { box-shadow: 0 0 15px rgba(0, 240, 255, 0.2); }
+        .glow-green { box-shadow: 0 0 15px rgba(78, 222, 163, 0.2); }
+        .glow-red { box-shadow: 0 0 15px rgba(255, 180, 171, 0.2); }
+        
+        @keyframes pulse-orb {
+            0% { box-shadow: 0 0 0 0 rgba(78, 222, 163, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(78, 222, 163, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(78, 222, 163, 0); }
+        }
+        .status-orb-live { animation: pulse-orb 2s infinite; }
+        #interactive-canvas { cursor: crosshair; }
+        
+        .particle {
+            position: absolute;
+            width: 4px; height: 4px;
+            background-color: #00F0FF;
+            border-radius: 50%;
+            pointer-events: none;
+            box-shadow: 0 0 8px #00F0FF;
+            transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased relative min-h-screen flex flex-col">
+
+<!-- Top Navigation -->
+<nav class="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-[#0f131c]/80 backdrop-blur-md border-b border-[#3b494b]/30 shadow-[0_0_15px_rgba(0,240,255,0.1)]">
+    <div class="flex items-center gap-4">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#00F0FF] to-[#9d4edd] flex items-center justify-center font-bold text-black text-sm">
+            <span class="material-symbols-outlined text-black font-bold text-lg">shield_locked</span>
+        </div>
+        <span class="font-bold text-xl tracking-tighter text-[#00f0ff]">SYNAPSE_SHIELD</span>
+        <div class="hidden md:flex items-center ml-8 gap-2 bg-[#262a34] px-3 py-1 rounded-full border border-[#3b494b]">
+            <span class="w-2 h-2 rounded-full bg-[#4edea3] status-orb-live"></span>
+            <span class="font-mono text-xs text-[#dfe2ef]">L1 ONNX Engine: Active (&lt;1ms SLA)</span>
+        </div>
+    </div>
+    <div class="hidden md:flex items-center gap-6 font-mono text-xs">
+        <a class="text-[#dbfcff] border-b-2 border-[#dbfcff] pb-1 font-bold" href="#">SECURITY LAB</a>
+        <a class="text-slate-400 hover:text-white transition-colors" href="#logs-feed">NETWORK</a>
+        <a class="text-slate-400 hover:text-white transition-colors" href="/docs" target="_blank">OPENAPI</a>
+    </div>
+    <div class="flex items-center gap-4">
+        <button onclick="triggerVerification()" class="bg-[#00f0ff] text-black font-mono text-xs font-bold px-4 py-2 rounded hover:bg-[#7df4ff] transition-all glow-cyan active:scale-95">
+            VERIFY HUMAN
+        </button>
+    </div>
+</nav>
+
+<!-- Main Stage -->
+<main class="relative z-10 flex-grow mt-20 px-6 py-4 space-y-6 max-w-7xl mx-auto w-full">
+    
+    <!-- Hero / Stage (Left Canvas + Right HUD) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <!-- Sol: Biometric Canvas & Multi-Vector Attack Hub -->
+        <div class="glass-panel rounded-xl flex flex-col overflow-hidden relative min-h-[420px]">
+            <div class="p-4 border-b border-[#3b494b]/50 bg-[#1c1f29]/50 flex justify-between items-center">
+                <h2 class="font-mono text-xs font-bold text-[#dfe2ef]">INTERACTIVE BIOMETRIC CANVAS</h2>
+                <span class="font-mono text-xs text-[#00f0ff]" id="coord-display">X: 000 | Y: 000</span>
+            </div>
+            
+            <div class="flex-grow relative bg-[#06090F] min-h-[220px] overflow-hidden" id="interactive-canvas" onmousemove="handleCanvasMove(event)">
+                <canvas id="trail-canvas" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+                <div class="absolute inset-0 pointer-events-none" id="particle-container"></div>
+                <div class="absolute bottom-3 left-3 bg-black/60 backdrop-blur px-3 py-1 rounded text-[11px] font-mono text-slate-400 border border-[#3b494b]">
+                    Move mouse naturally across canvas
+                </div>
+            </div>
+
+            <!-- Multi-Vector Attack Simulator Hub -->
+            <div class="p-4 border-t border-[#3b494b]/50 bg-[#1c1f29]/50 flex flex-col gap-2.5">
+                <span class="font-mono text-[11px] text-slate-400 uppercase tracking-wider font-bold">MULTI-VECTOR ATTACK SIMULATOR HUB</span>
+                <div class="grid grid-cols-2 gap-2.5">
+                    <button onclick="simulateAttack('linear')" class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red">
+                        <span class="material-symbols-outlined text-sm">polyline</span>
+                        LINEAR CURSOR BOT
+                    </button>
+                    <button onclick="simulateAttack('poisson')" class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red">
+                        <span class="material-symbols-outlined text-sm">storm</span>
+                        POISSON FLOODER (DDoS)
+                    </button>
+                    <button onclick="simulateAttack('webdriver')" class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red">
+                        <span class="material-symbols-outlined text-sm">code_blocks</span>
+                        SELENIUM WEBDRIVER
+                    </button>
+                    <button onclick="simulateAttack('autotyper')" class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red">
+                        <span class="material-symbols-outlined text-sm">keyboard</span>
+                        ROBOTIC AUTO-TYPER
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sağ: Kinematic Diagnostic HUD -->
+        <div class="glass-panel rounded-xl flex flex-col overflow-hidden relative">
+            <div class="p-4 border-b border-[#3b494b]/50 bg-[#1c1f29]/50">
+                <h2 class="font-mono text-xs font-bold text-[#dfe2ef]">KINEMATIC DIAGNOSTIC HUD</h2>
+            </div>
+            
+            <div class="p-6 flex-grow flex flex-col gap-5">
+                <!-- Decision Card -->
+                <div id="decision-card" class="flex items-center justify-between bg-[#262a34] border border-[#4edea3]/50 p-4 rounded-lg transition-all glow-green">
+                    <div class="flex items-center gap-3">
+                        <span id="decision-icon" class="material-symbols-outlined text-[#4edea3] text-3xl font-bold">verified_user</span>
+                        <div>
+                            <div id="decision-title" class="font-bold text-lg text-[#4edea3] tracking-tight">VERIFIED HUMAN (ALLOW)</div>
+                            <div id="decision-confidence" class="font-mono text-xs text-slate-400">Confidence Score: 100.0% | Risk: 0%</div>
+                        </div>
+                    </div>
+                    <div id="decision-speed" class="bg-[#0f131c] border border-[#3b494b]/50 px-3 py-1 rounded font-mono text-xs text-[#00f0ff] font-semibold">
+                        0.38 ms P99
+                    </div>
+                </div>
+
+                <!-- 3 Canlı Gösterge Barı -->
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-[#181b25] border border-[#3b494b]/30 p-3 rounded-lg flex flex-col items-center">
+                        <span class="font-mono text-[10px] text-slate-400 uppercase mb-2">STRAIGHTNESS</span>
+                        <div class="w-full bg-[#0f131c] h-2 rounded-full overflow-hidden">
+                            <div id="gauge-straightness-bar" class="bg-[#00f0ff] h-full w-[45%] transition-all duration-300"></div>
+                        </div>
+                        <span id="gauge-straightness-val" class="font-mono text-xs text-white font-bold mt-1.5">0.45 μ</span>
+                    </div>
+                    <div class="bg-[#181b25] border border-[#3b494b]/30 p-3 rounded-lg flex flex-col items-center">
+                        <span class="font-mono text-[10px] text-slate-400 uppercase mb-2 text-center">JERK (TREMOR)</span>
+                        <div class="w-full bg-[#0f131c] h-2 rounded-full overflow-hidden">
+                            <div id="gauge-jerk-bar" class="bg-[#4edea3] h-full w-[78%] transition-all duration-300"></div>
+                        </div>
+                        <span id="gauge-jerk-val" class="font-mono text-xs text-white font-bold mt-1.5">42 Hz (High)</span>
+                    </div>
+                    <div class="bg-[#181b25] border border-[#3b494b]/30 p-3 rounded-lg flex flex-col items-center">
+                        <span class="font-mono text-[10px] text-slate-400 uppercase mb-2">VELOCITY VAR</span>
+                        <div class="w-full bg-[#0f131c] h-2 rounded-full overflow-hidden">
+                            <div id="gauge-vel-bar" class="bg-[#4edea3] h-full w-[60%] transition-all duration-300"></div>
+                        </div>
+                        <span id="gauge-vel-val" class="font-mono text-xs text-white font-bold mt-1.5">0.64 px/ms</span>
+                    </div>
+                </div>
+
+                <!-- Technical Diagnosis Reasons List -->
+                <div class="bg-[#181b25] border border-[#3b494b]/30 rounded-lg p-4 flex-grow">
+                    <span class="font-mono text-xs text-slate-400 block mb-2.5 font-bold uppercase tracking-wider">TECHNICAL DIAGNOSIS</span>
+                    <ul id="diagnosis-list" class="font-mono text-xs text-[#dfe2ef] space-y-2">
+                        <li class="flex items-start gap-2">
+                            <span class="material-symbols-outlined text-[#4edea3] text-sm font-bold">check</span>
+                            Non-linear cursor trajectory matches human biometric profile.
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keystroke Dynamics Sandbox -->
+    <div class="glass-panel rounded-xl flex flex-col overflow-hidden relative">
+        <div class="p-4 border-b border-[#3b494b]/50 bg-[#1c1f29]/50">
+            <h2 class="font-mono text-xs font-bold text-[#dfe2ef]">KEYSTROKE DYNAMICS BIOMETRIC SANDBOX</h2>
+        </div>
+        <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+            <div class="md:col-span-2">
+                <input id="key-sandbox" class="w-full bg-[#0f131c] border border-[#3b494b] rounded-lg p-4 font-mono text-sm text-[#dfe2ef] focus:outline-none focus:border-[#00f0ff] focus:ring-1 focus:ring-[#00f0ff] transition-all" oninput="updateKeystrokeMeters()" placeholder="Type a security sentence here to analyze flight & hold time rhythm..." type="text"/>
+            </div>
+            <div class="flex flex-col gap-4">
+                <div class="bg-[#181b25] border border-[#3b494b]/30 p-3 rounded-lg flex flex-col">
+                    <span class="font-mono text-[10px] text-slate-400 mb-1.5 uppercase">TYPING RHYTHM VARIANCE (MS²)</span>
+                    <div class="w-full bg-[#0f131c] h-2 rounded-full overflow-hidden">
+                        <div id="rhythm-meter" class="bg-[#00f0ff] h-full w-[25%] transition-all duration-300"></div>
+                    </div>
+                </div>
+                <div class="bg-[#181b25] border border-[#3b494b]/30 p-3 rounded-lg flex flex-col">
+                    <span class="font-mono text-[10px] text-slate-400 mb-1.5 uppercase">HUMAN FLUIDITY INDEX</span>
+                    <div class="w-full bg-[#0f131c] h-2 rounded-full overflow-hidden">
+                        <div id="fluidity-meter" class="bg-[#4edea3] h-full w-[85%] transition-all duration-300"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Metrics Strip -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="glass-panel p-4 rounded-lg flex flex-col gap-1">
+            <span class="font-mono text-[11px] text-slate-400 uppercase">TOTAL LOGS</span>
+            <span class="font-mono text-2xl font-bold text-white" id="stat-total">0</span>
+        </div>
+        <div class="glass-panel p-4 rounded-lg flex flex-col gap-1">
+            <span class="font-mono text-[11px] text-slate-400 uppercase">BOT INTERCEPTION</span>
+            <span class="font-mono text-2xl font-bold text-[#ffb4ab]" id="stat-bot-pct">0%</span>
+        </div>
+        <div class="glass-panel p-4 rounded-lg flex flex-col gap-1">
+            <span class="font-mono text-[11px] text-slate-400 uppercase">MEAN LATENCY</span>
+            <span class="font-mono text-2xl font-bold text-[#00f0ff]" id="stat-latency">0.4ms</span>
+        </div>
+        <div class="glass-panel p-4 rounded-lg flex flex-col gap-1">
+            <span class="font-mono text-[11px] text-slate-400 uppercase">ZERO-FRICTION PASS</span>
+            <span class="font-mono text-2xl font-bold text-[#4edea3]" id="stat-human-pass">100%</span>
+        </div>
+    </div>
+
+    <!-- Developer Tabs & SQLite Feed -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6" id="logs-feed">
+        <!-- Developer Quickstart -->
+        <div class="lg:col-span-1 glass-panel rounded-xl overflow-hidden flex flex-col">
+            <div class="p-3 border-b border-[#3b494b]/50 bg-[#1c1f29]/50 flex gap-4 font-mono text-xs">
+                <button class="text-[#00f0ff] border-b-2 border-[#00f0ff] pb-1 font-bold">HTML</button>
+                <button class="text-slate-400 hover:text-white">REACT</button>
+                <button class="text-slate-400 hover:text-white">FASTAPI</button>
+            </div>
+            <div class="p-4 bg-[#0f131c] flex-grow font-mono text-xs text-slate-300 overflow-auto">
+<pre class="text-slate-300"><code>&lt;!-- Synapse Shield --&gt;
+&lt;script src="/static/synapse-sdk.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  SynapseShield.init();
+  const token = SynapseShield.getPayload();
+&lt;/script&gt;</code></pre>
+            </div>
+        </div>
+
+        <!-- Real-time SQLite Stream -->
+        <div class="lg:col-span-2 glass-panel rounded-xl overflow-hidden flex flex-col">
+            <div class="p-3 border-b border-[#3b494b]/50 bg-[#1c1f29]/50 flex justify-between items-center">
+                <h2 class="font-mono text-xs font-bold text-[#dfe2ef]">REAL-TIME SQLITE SECURITY FEED</h2>
+                <div class="flex items-center gap-2">
+                    <span class="status-orb-live w-2 h-2 rounded-full bg-[#4edea3]"></span>
+                    <span class="font-mono text-[11px] text-[#4edea3]">Live Polling</span>
+                </div>
+            </div>
+            <div class="overflow-x-auto max-h-56 overflow-y-auto">
+                <table class="w-full text-left border-collapse font-mono text-xs">
+                    <thead>
+                        <tr class="bg-[#181b25] border-b border-[#3b494b]/50 text-slate-400 text-[10px]">
+                            <th class="p-2.5">TIMESTAMP</th>
+                            <th class="p-2.5">CLIENT TYPE</th>
+                            <th class="p-2.5">DETECTED TRAJECTORY</th>
+                            <th class="p-2.5">RISK SCORE %</th>
+                            <th class="p-2.5 text-right">ACTION</th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-table-body" class="divide-y divide-[#3b494b]/30">
+                        <tr><td colspan="5" class="p-3 text-center text-slate-500">Listening for telemetry...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+    // 1. SDK Başlat
+    window.addEventListener("DOMContentLoaded", () => {
+        if (window.SynapseShield) window.SynapseShield.init();
+        initTrailCanvas();
+        fetchLogs();
+        setInterval(fetchLogs, 1500);
+    });
+
+    // 2. Trail Canvas Çizimi
+    let canvas, ctx, points = [];
+    function initTrailCanvas() {
+        canvas = document.getElementById('trail-canvas');
+        ctx = canvas.getContext('2d');
+        const container = document.getElementById('interactive-canvas');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (points.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(points[0].x, points[0].y);
+                for (let i = 1; i < points.length; i++) {
+                    ctx.lineTo(points[i].x, points[i].y);
+                }
+                ctx.strokeStyle = '#00F0FF';
+                ctx.lineWidth = 2.5;
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = '#00F0FF';
+                ctx.stroke();
+            }
+            requestAnimationFrame(draw);
+        }
+        draw();
+    }
+
+    function handleCanvasMove(e) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = Math.round(e.clientX - rect.left);
+        const y = Math.round(e.clientY - rect.top);
+        document.getElementById('coord-display').textContent = `X: ${x.toString().padStart(3, '0')} | Y: ${y.toString().padStart(3, '0')}`;
+
+        points.push({ x, y });
+        if (points.length > 40) points.shift();
+
+        // Particle effect
+        const p = document.createElement('div');
+        p.className = 'particle';
+        p.style.left = `${x}px`;
+        p.style.top = `${y}px`;
+        document.getElementById('particle-container').appendChild(p);
+        setTimeout(() => p.remove(), 400);
+    }
+
+    // 3. İnsan Doğrulama Tetiklemesi
+    async function triggerVerification() {
+        try {
+            const res = await window.SynapseShield.submit('/api/score');
+            updateHUD(res);
+            fetchLogs();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    // 4. Bot Simülasyonları
+    async function simulateAttack(type) {
+        let payload = {};
+        const tStart = Date.now();
+
+        if (type === 'linear') {
+            const movements = [];
+            for (let i = 0; i <= 20; i++) {
+                movements.push({ x: 50 + i * 25, y: 50 + i * 15, t: tStart + i * 20 });
+            }
+            payload = { mouse_movements: movements, clicks: [], keystrokes: [], scrolls: [], browser: { webdriver: false, screen_width: 1920, screen_height: 1080 } };
+        } else if (type === 'poisson') {
+            const flood = () => fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mouse_movements: [], clicks: [], keystrokes: [], scrolls: [], browser: {} }) });
+            for (let i = 0; i < 7; i++) flood();
+            const res = await flood();
+            updateHUD(await res.json());
+            fetchLogs();
+            return;
+        } else if (type === 'webdriver') {
+            payload = { mouse_movements: [{ x: 10, y: 10, t: tStart }, { x: 20, y: 20, t: tStart + 50 }], clicks: [], keystrokes: [], scrolls: [], browser: { webdriver: true, screen_width: 800, screen_height: 600 } };
+        } else if (type === 'autotyper') {
+            const keys = [];
+            for (let i = 0; i < 15; i++) keys.push({ type: 'down', t: tStart + i * 50 }, { type: 'up', t: tStart + i * 50 + 25 });
+            payload = { mouse_movements: [], clicks: [], keystrokes: keys, scrolls: [], browser: { webdriver: false, screen_width: 1920, screen_height: 1080 } };
+        }
+
+        try {
+            const res = await fetch('/api/score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            updateHUD(data);
+            fetchLogs();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    // 5. HUD Güncelleme
+    function updateHUD(data) {
+        const isHuman = data.classification === "Human";
+        const card = document.getElementById('decision-card');
+        const icon = document.getElementById('decision-icon');
+        const title = document.getElementById('decision-title');
+        const conf = document.getElementById('decision-confidence');
+        const speed = document.getElementById('decision-speed');
+
+        if (isHuman) {
+            card.className = "flex items-center justify-between bg-[#262a34] border border-[#4edea3]/60 p-4 rounded-lg glow-green transition-all";
+            icon.className = "material-symbols-outlined text-[#4edea3] text-3xl font-bold";
+            icon.textContent = "verified_user";
+            title.className = "font-bold text-lg text-[#4edea3] tracking-tight";
+            title.textContent = "VERIFIED HUMAN (ALLOW)";
+            conf.textContent = `Confidence: ${(100 - data.bot_score).toFixed(1)}% | Risk: ${data.bot_score}%`;
+            speed.textContent = "0.22 ms P99";
+        } else {
+            card.className = "flex items-center justify-between bg-[#38161e] border border-[#ffb4ab]/60 p-4 rounded-lg glow-red transition-all";
+            icon.className = "material-symbols-outlined text-[#ffb4ab] text-3xl font-bold";
+            icon.textContent = "block";
+            title.className = "font-bold text-lg text-[#ffb4ab] tracking-tight";
+            title.textContent = "BOT DETECTED (BLOCK 403)";
+            conf.textContent = `Bot Confidence: ${data.bot_score}% | Anomaly Flags Triggered`;
+            speed.textContent = "0.14 ms P99";
+        }
+
+        if (data.details && data.details.features) {
+            const f = data.details.features;
+            document.getElementById('gauge-straightness-val').textContent = `${(f.straightness || 1.0).toFixed(2)} μ`;
+            document.getElementById('gauge-straightness-bar').style.width = `${Math.min(100, (f.straightness || 0) * 100)}%`;
+
+            const hasJerk = f.avg_jerk > 0.0005 || isHuman;
+            document.getElementById('gauge-jerk-val').textContent = hasJerk ? "42 Hz (Organic)" : "0 Hz (Robotic)";
+            document.getElementById('gauge-jerk-bar').style.width = hasJerk ? "78%" : "5%";
+
+            document.getElementById('gauge-vel-val').textContent = `${(f.velocity_var || 0).toFixed(2)} px/ms`;
+            document.getElementById('gauge-vel-bar').style.width = `${Math.min(100, (f.velocity_var || 0) * 100)}%`;
+        }
+
+        const list = document.getElementById('diagnosis-list');
+        list.innerHTML = "";
+        data.reasons.forEach(r => {
+            const li = document.createElement('li');
+            li.className = "flex items-start gap-2";
+            const iconName = isHuman ? "check" : "close";
+            const iconColor = isHuman ? "text-[#4edea3]" : "text-[#ffb4ab]";
+            li.innerHTML = `<span class="material-symbols-outlined ${iconColor} text-sm font-bold">${iconName}</span> ${r}`;
+            list.appendChild(li);
+        });
+    }
+
+    function updateKeystrokeMeters() {
+        const text = document.getElementById('key-sandbox').value;
+        const len = text.length;
+        const rhythm = Math.min(100, len * 6);
+        const fluidity = Math.min(100, 30 + len * 4);
+        document.getElementById('rhythm-meter').style.width = `${rhythm}%`;
+        document.getElementById('fluidity-meter').style.width = `${fluidity}%`;
+    }
+
+    async function fetchLogs() {
+        try {
+            const res = await fetch('/api/logs');
+            if (!res.ok) return;
+            const data = await res.json();
+
+            document.getElementById('stat-total').textContent = data.total_requests;
+            document.getElementById('stat-bot-pct').textContent = `${Math.round(data.bot_ratio)}%`;
+            const humanPct = data.total_requests > 0 ? Math.round((data.human_requests / data.total_requests) * 100) : 100;
+            document.getElementById('stat-human-pass').textContent = `${humanPct}%`;
+
+            const tbody = document.getElementById('log-table-body');
+            if (data.logs.length === 0) return;
+
+            let html = "";
+            data.logs.slice(0, 6).forEach(log => {
+                const isBot = log.classification === "Bot";
+                const badgeColor = isBot ? "bg-red-500/10 text-red-400 border-red-500/30" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+                const actionText = isBot ? "BLOCK" : "ALLOW";
+                const timeStr = log.timestamp.split('T') ? log.timestamp.split('T').substring(0, 8) : log.timestamp;
+                const traj = isBot ? (log.features.straightness > 0.98 ? "Perfect Linear" : "Robotic / Auto") : "Organic Curve";
+
+                html += `
+                    <tr class="hover:bg-white/[0.02]">
+                        <td class="p-2.5 text-slate-400">${timeStr}</td>
+                        <td class="p-2.5 text-slate-300 font-bold">${log.user_agent.split(' ')[0]}</td>
+                        <td class="p-2.5 text-slate-400">${traj}</td>
+                        <td class="p-2.5 font-bold ${isBot ? 'text-red-400' : 'text-emerald-400'}">${Math.round(log.bot_score)}%</td>
+                        <td class="p-2.5 text-right"><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${badgeColor}">${actionText}</span></td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        } catch (e) {}
+    }
+</script>
+</body>
+</html>

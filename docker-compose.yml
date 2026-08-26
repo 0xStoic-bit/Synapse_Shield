@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  synapse-shield:
+    build: .
+    container_name: synapse_shield_engine
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./synapse_shield.db:/app/synapse_shield.db
+    environment:
+      - PYTHONUNBUFFERED=1
