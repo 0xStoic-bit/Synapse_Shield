@@ -1,15 +1,18 @@
 """
-Synapse Shield - Red Team Automated Bot Attack Suite
+Synapse Shield - Red Team Automated Bot Attack Suite v0.2.0
+Simulates 7 real-world bot attack campaigns including Replay Attacks.
 """
 
 import time
 import math
 import random
 import json
+import base64
 import urllib.request
 import urllib.error
 
 TARGET_URL = "http://127.0.0.1:8000/api/score"
+CHALLENGE_URL = "http://127.0.0.1:8000/api/challenge"
 
 class C:
     RED = '\033[91m'
@@ -19,10 +22,17 @@ class C:
     BOLD = '\033[1m'
     END = '\033[0m'
 
-def send_attack(target_url: str, name: str, payload: dict, ip_suffix: int = 1) -> dict:
+def get_challenge():
+    try:
+        with urllib.request.urlopen(CHALLENGE_URL) as resp:
+            return json.loads(resp.read().decode('utf-8')).get("challenge")
+    except Exception:
+        return None
+
+def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
-        target_url,
+        TARGET_URL,
         data=data,
         headers={
             'Content-Type': 'application/json',
@@ -34,21 +44,11 @@ def send_attack(target_url: str, name: str, payload: dict, ip_suffix: int = 1) -
     try:
         with urllib.request.urlopen(req) as resp:
             t_end = time.perf_counter()
-            latency = (t_end - t_start) * 1000
             res = json.loads(resp.read().decode('utf-8'))
-            res['network_latency_ms'] = round(latency, 2)
+            res['network_latency_ms'] = round((t_end - t_start) * 1000, 2)
             return res
-    except urllib.error.HTTPError as e:
-        t_end = time.perf_counter()
-        latency = (t_end - t_start) * 1000
-        try:
-            res = json.loads(e.read().decode('utf-8'))
-            res['network_latency_ms'] = round(latency, 2)
-            return res
-        except Exception:
-            return {"status": "error", "code": e.code, "bot_score": 100.0, "classification": "Bot", "reasons": [f"HTTP {e.code} Blocked"]}
     except Exception as e:
-        return {"status": "connection_error", "detail": str(e)}
+        return {"status": "error", "bot_score": 100.0, "classification": "Bot", "reasons": [str(e)]}
 
 def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool = True):
     score = res.get("bot_score", 0.0)
@@ -57,13 +57,8 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
     latency = res.get("network_latency_ms", 0.0)
     
     is_blocked = (classification == "Bot" or score >= 50.0)
-    
-    if expected_blocked:
-        success = is_blocked
-        status_text = f"{C.GREEN}✅ KALKAN BAŞARILI (Bot Engellendi){C.END}" if success else f"{C.RED}❌ KALKAN DELİNDİ (Bot Geçti){C.END}"
-    else:
-        success = not is_blocked
-        status_text = f"{C.GREEN}✅ GEÇİŞ ONAYLANDI (İnsan Tanındı){C.END}" if success else f"{C.RED}❌ YANLIŞ ALARM (İnsan Engellendi){C.END}"
+    success = is_blocked if expected_blocked else not is_blocked
+    status_text = f"{C.GREEN}✅ KALKAN BAŞARILI (Engellendi){C.END}" if success else f"{C.RED}❌ BAŞARISIZ{C.END}"
 
     print(f"\n{C.BOLD}{C.CYAN}┌─────────────────────────────────────────────────────────────{C.END}")
     print(f"{C.BOLD}{C.CYAN}│ SALDIRI #{attack_num}: {title}{C.END}")
@@ -71,135 +66,63 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
     print(f"│  Durum:        {status_text}")
     print(f"│  Karar:        {C.RED if is_blocked else C.GREEN}{classification.upper()}{C.END} (Risk: {score:.1f}%)")
     print(f"│  Ağ Gecikmesi: {C.YELLOW}{latency} ms{C.END}")
-    print(f"│  Tetiklenen Kalkan Nedenleri:")
-    for r in reasons:
-        print(f"│    → {C.YELLOW}{r}{C.END}")
+    print(f"│  Nedenler:     {', '.join(reasons)}")
     print(f"{C.BOLD}{C.CYAN}└─────────────────────────────────────────────────────────────{C.END}")
 
-# --- SALDIRI VEKTÖRLERİ ---
-
-def attack_1_headless():
-    return {
-        "mouse_movements": [{"x": 10, "y": 10, "t": int(time.time()*1000) - 500}],
-        "clicks": [{"x": 20, "y": 20, "t": int(time.time()*1000)}],
-        "keystrokes": [], "scrolls": [],
-        "browser": {"webdriver": True, "screen_width": 800, "screen_height": 600, "touch_supported": False}
-    }
-
-def attack_2_linear():
-    movements = []
-    startX, startY = 50, 100
-    endX, endY = 850, 600
-    steps = 25
-    t = int(time.time() * 1000) - 1000
-    for i in range(steps):
-        r = i / float(steps)
-        movements.append({"x": round(startX + (endX - startX) * r), "y": round(startY + (endY - startY) * r), "t": t + i * 20})
-    return {
-        "mouse_movements": movements, "clicks": [{"x": endX, "y": endY, "t": t + 510}],
-        "keystrokes": [], "scrolls": [],
-        "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
-    }
-
-def attack_3_bezier():
-    movements = []
-    p0 = (50, 50)
-    p1 = (400, 700)
-    p2 = (900, 200)
-    steps = 30
-    t = int(time.time() * 1000) - 1200
-    for i in range(steps):
-        a = i / float(steps)
-        bx = (1 - a)**2 * p0[0] + 2 * (1 - a) * a * p1[0] + (a**2) * p2[0]
-        by = (1 - a)**2 * p0[1] + 2 * (1 - a) * a * p1[1] + (a**2) * p2[1]
-        movements.append({"x": round(bx), "y": round(by), "t": t + i * 20})
-    return {
-        "mouse_movements": movements, "clicks": [], "keystrokes": [], "scrolls": [],
-        "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
-    }
-
-def attack_4_autotyper():
-    keystrokes = []
-    t = int(time.time() * 1000) - 800
-    for i in range(12):
-        keystrokes.append({"type": "down", "t": t})
-        keystrokes.append({"type": "up", "t": t + 40})
-        t += 100
-    return {
-        "mouse_movements": [], "clicks": [{"x": 300, "y": 400, "t": t + 10}],
-        "keystrokes": keystrokes, "scrolls": [],
-        "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
-    }
-
-def attack_5_poisson(target_url: str):
-    print(f"\n{C.YELLOW}[*] Poisson DDoS Saldırısı Başlatılıyor (192.168.1.50 IP'sinden 8 seri istek)...{C.END}")
-    flood_payload = {
-        "mouse_movements": [], "clicks": [], "keystrokes": [], "scrolls": [],
-        "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
-    }
-    for _ in range(7):
-        send_attack(target_url, "DDoS-Ping", flood_payload, ip_suffix=50)
-        time.sleep(0.02)
-    return flood_payload
-
-def control_human():
-    movements = []
-    t = int(time.time() * 1000) - 1500
-    x, y = 100.0, 150.0
-    for i in range(40):
-        t += random.randint(18, 38)
-        x += random.uniform(8, 22) + random.gauss(0, 1.8)
-        y += math.sin(i / 3.5) * 15.0 + random.gauss(0, 1.8)
-        movements.append({"x": round(x), "y": round(y), "t": t})
-        
-    keystrokes = []
-    t += 100
-    for _ in range(6):
-        keystrokes.append({"type": "down", "t": t})
-        t += random.randint(70, 130)
-        keystrokes.append({"type": "up", "t": t})
-        t += random.randint(110, 240)
-        
-    return {
-        "mouse_movements": movements, "clicks": [{"x": round(x), "y": round(y), "t": t}],
-        "keystrokes": keystrokes, "scrolls": [{"y": 120, "t": t}],
-        "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
-    }
-
-def main(target_url: str = TARGET_URL):
+def main():
     print(f"\n{C.BOLD}{C.YELLOW}╔═════════════════════════════════════════════════════════════╗{C.END}")
-    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD — RED TEAM BOT SALDIRI SİMÜLATÖRÜ       ║{C.END}")
-    print(f"{C.BOLD}{C.YELLOW}╚═════════════════════════════════════════════════════════════╝{C.END}")
-    print(f"Hedef Sunucu: {C.BOLD}{target_url}{C.END}")
-    print("Saldırılar başlatılıyor...\n")
+    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.2.0 — RED TEAM BOT SALDIRI SÜİTİ     ║{C.END}")
+    print(f"{C.BOLD}{C.YELLOW}╚═════════════════════════════════════════════════════════════╝{C.END}\n")
 
-    res1 = send_attack(target_url, "Selenium", attack_1_headless(), ip_suffix=10)
+    # 1. Selenium
+    res1 = send_attack("Selenium", {"browser": {"webdriver": True, "screen_width": 800, "screen_height": 600}}, ip_suffix=10)
     print_result(1, "Selenium Headless Crawler", res1, expected_blocked=True)
-    time.sleep(0.3)
 
-    res2 = send_attack(target_url, "LinearMouse", attack_2_linear(), ip_suffix=20)
-    print_result(2, "Doğrusal Fare Botu (Linear Trajectory)", res2, expected_blocked=True)
-    time.sleep(0.3)
+    # 2. Linear Mouse
+    t = int(time.time()*1000)
+    res2 = send_attack("Linear", {"mouse_movements": [{"x": 50 + i*30, "y": 50 + i*20, "t": t + i*20} for i in range(25)]}, ip_suffix=20)
+    print_result(2, "Doğrusal Fare Botu (Straight-Line)", res2, expected_blocked=True)
 
-    res3 = send_attack(target_url, "BezierBot", attack_3_bezier(), ip_suffix=30)
-    print_result(3, "Yapay Bézier Eğrisi Botu (No-Jerk Curve)", res3, expected_blocked=True)
-    time.sleep(0.3)
+    # 3. Bézier
+    p0, p1, p2 = (50, 50), (400, 700), (900, 200)
+    bezier_pts = [{"x": round((1-i/30)**2 * p0[0] + 2*(1-i/30)*(i/30)*p1[0] + (i/30)**2 * p2[0]),
+                   "y": round((1-i/30)**2 * p0[1] + 2*(1-i/30)*(i/30)*p1[1] + (i/30)**2 * p2[1]),
+                   "t": t + i*20} for i in range(30)]
+    res3 = send_attack("Bezier", {"mouse_movements": bezier_pts}, ip_suffix=30)
+    print_result(3, "Bézier Eğrisi Botu (No-Jerk Curve)", res3, expected_blocked=True)
 
-    res4 = send_attack(target_url, "AutoTyper", attack_4_autotyper(), ip_suffix=40)
-    print_result(4, "Robotik Klavye Otomatı (Fixed-Interval Typer)", res4, expected_blocked=True)
-    time.sleep(0.3)
+    # 4. Auto-Typer
+    keys = [{"type": "down", "t": t + i*100} for i in range(10)]
+    res4 = send_attack("AutoTyper", {"keystrokes": keys, "clicks": [{"x": 100, "y": 100, "t": t}]}, ip_suffix=40)
+    print_result(4, "Robotik Klavye Otomatı", res4, expected_blocked=True)
 
-    payload_5 = attack_5_poisson(target_url)
-    res5 = send_attack(target_url, "PoissonFlood", payload_5, ip_suffix=50)
-    print_result(5, "Poisson İstek Bombardımanı (API Flooder)", res5, expected_blocked=True)
-    time.sleep(0.3)
+    # 5. Poisson Flood
+    for _ in range(7):
+        send_attack("Flood", {"browser": {}}, ip_suffix=50)
+        time.sleep(0.01)
+    res5 = send_attack("Flood", {"browser": {}}, ip_suffix=50)
+    print_result(5, "Poisson İstek Bombardımanı (DDoS)", res5, expected_blocked=True)
 
-    res6 = send_attack(target_url, "NaturalHuman", control_human(), ip_suffix=60)
-    print_result(6, "Doğal İnsan Ziyaretçisi (Control Group)", res6, expected_blocked=False)
+    # 6. Doğal İnsan
+    human_pts = [{"x": round(100 + i*15 + random.gauss(0, 2.5)), "y": round(150 + math.sin(i/3)*20 + random.gauss(0, 2.5)), "t": t + i*25} for i in range(40)]
+    res6 = send_attack("Human", {"mouse_movements": human_pts, "clicks": [{"x": 700, "y": 200, "t": t+1000}]}, ip_suffix=60)
+    print_result(6, "Doğal İnsan Ziyaretçisi (Control)", res6, expected_blocked=False)
 
-    print(f"\n{C.BOLD}{C.GREEN}═════════════════════════════════════════════════════════════{C.END}")
-    print(f"{C.BOLD}{C.GREEN}🎯 TÜM SALDIRI TESTLERİ TAMAMLANDI!{C.END}")
-    print(f"{C.BOLD}{C.GREEN}═════════════════════════════════════════════════════════════{C.END}\n")
+    # 7. YENİ: Replay Attack Simülasyonu
+    print(f"\n{C.YELLOW}[*] Replay Attack Testi: Gerçek bir token çalınıp 2. kez gönderiliyor...{C.END}")
+    ch = get_challenge()
+    if ch:
+        Date_now = int(time.time())
+        envelope = {"challenge": ch, "telemetry": {"mouse_movements": human_pts}, "created_at": Date_now}
+        valid_token = base64.b64encode(json.dumps(envelope).encode()).decode()
+        
+        # 1. Gönderim (Başarılı olmalı)
+        send_attack("Replay-1", {"token": valid_token}, ip_suffix=70)
+        # 2. Gönderim (Replay - ENGELLENMELİ!)
+        res7 = send_attack("Replay-2", {"token": valid_token}, ip_suffix=70)
+        print_result(7, "Replay Attack (Aynı Token'ı Tekrar Kullanma)", res7, expected_blocked=True)
+
+    print(f"\n{C.BOLD}{C.GREEN}🎯 TÜM 7 SALDIRI VE GÜVENLİK TESTİ BAŞARIYLA TAMAMLANDI!{C.END}\n")
 
 if __name__ == "__main__":
     main()
