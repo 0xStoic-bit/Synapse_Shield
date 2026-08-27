@@ -5,7 +5,7 @@ Allows developers to protect any route with a single decorator: @shield_protect
 
 from functools import wraps
 from fastapi import Request, HTTPException
-from engine import analyze_behavior
+from .engine import analyze_behavior
 
 def shield_protect(max_risk_score: float = 50.0):
     """

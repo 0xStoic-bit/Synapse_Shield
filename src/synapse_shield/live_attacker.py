@@ -19,15 +19,15 @@ class C:
     BOLD = '\033[1m'
     END = '\033[0m'
 
-def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
+def send_attack(target_url: str, name: str, payload: dict, ip_suffix: int = 1) -> dict:
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
-        TARGET_URL,
+        target_url,
         data=data,
         headers={
             'Content-Type': 'application/json',
             'User-Agent': f'SynapseShield-RedTeamBot/2.0 ({name})',
-            'X-Forwarded-For': f'192.168.1.{ip_suffix}'  # Simüle edilmiş istemci IP'si
+            'x-forwarded-for': f'192.168.1.{ip_suffix}'
         }
     )
     t_start = time.perf_counter()
@@ -103,13 +103,15 @@ def attack_2_linear():
 
 def attack_3_bezier():
     movements = []
-    p0, p1, p2 = (50, 50), (400, 700), (900, 200)
+    p0 = (50, 50)
+    p1 = (400, 700)
+    p2 = (900, 200)
     steps = 30
     t = int(time.time() * 1000) - 1200
     for i in range(steps):
         a = i / float(steps)
-        bx = (1 - a)**2 * p0[0] + 2 * (1 - a) * a * p1[0] + a**2 * p2[0]
-        by = (1 - a)**2 * p0 + 2 * (1 - a) * a * p1 + a**2 * p2
+        bx = (1 - a)**2 * p0[0] + 2 * (1 - a) * a * p1[0] + (a**2) * p2[0]
+        by = (1 - a)**2 * p0[1] + 2 * (1 - a) * a * p1[1] + (a**2) * p2[1]
         movements.append({"x": round(bx), "y": round(by), "t": t + i * 20})
     return {
         "mouse_movements": movements, "clicks": [], "keystrokes": [], "scrolls": [],
@@ -129,14 +131,14 @@ def attack_4_autotyper():
         "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
     }
 
-def attack_5_poisson():
+def attack_5_poisson(target_url: str):
     print(f"\n{C.YELLOW}[*] Poisson DDoS Saldırısı Başlatılıyor (192.168.1.50 IP'sinden 8 seri istek)...{C.END}")
     flood_payload = {
         "mouse_movements": [], "clicks": [], "keystrokes": [], "scrolls": [],
         "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
     }
     for _ in range(7):
-        send_attack("DDoS-Ping", flood_payload, ip_suffix=50)
+        send_attack(target_url, "DDoS-Ping", flood_payload, ip_suffix=50)
         time.sleep(0.02)
     return flood_payload
 
@@ -164,35 +166,35 @@ def control_human():
         "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080}
     }
 
-def main():
+def main(target_url: str = TARGET_URL):
     print(f"\n{C.BOLD}{C.YELLOW}╔═════════════════════════════════════════════════════════════╗{C.END}")
     print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD — RED TEAM BOT SALDIRI SİMÜLATÖRÜ       ║{C.END}")
     print(f"{C.BOLD}{C.YELLOW}╚═════════════════════════════════════════════════════════════╝{C.END}")
-    print(f"Hedef Sunucu: {C.BOLD}{TARGET_URL}{C.END}")
+    print(f"Hedef Sunucu: {C.BOLD}{target_url}{C.END}")
     print("Saldırılar başlatılıyor...\n")
 
-    res1 = send_attack("Selenium", attack_1_headless(), ip_suffix=10)
+    res1 = send_attack(target_url, "Selenium", attack_1_headless(), ip_suffix=10)
     print_result(1, "Selenium Headless Crawler", res1, expected_blocked=True)
     time.sleep(0.3)
 
-    res2 = send_attack("LinearMouse", attack_2_linear(), ip_suffix=20)
+    res2 = send_attack(target_url, "LinearMouse", attack_2_linear(), ip_suffix=20)
     print_result(2, "Doğrusal Fare Botu (Linear Trajectory)", res2, expected_blocked=True)
     time.sleep(0.3)
 
-    res3 = send_attack("BezierBot", attack_3_bezier(), ip_suffix=30)
+    res3 = send_attack(target_url, "BezierBot", attack_3_bezier(), ip_suffix=30)
     print_result(3, "Yapay Bézier Eğrisi Botu (No-Jerk Curve)", res3, expected_blocked=True)
     time.sleep(0.3)
 
-    res4 = send_attack("AutoTyper", attack_4_autotyper(), ip_suffix=40)
+    res4 = send_attack(target_url, "AutoTyper", attack_4_autotyper(), ip_suffix=40)
     print_result(4, "Robotik Klavye Otomatı (Fixed-Interval Typer)", res4, expected_blocked=True)
     time.sleep(0.3)
 
-    payload_5 = attack_5_poisson()
-    res5 = send_attack("PoissonFlood", payload_5, ip_suffix=50)
+    payload_5 = attack_5_poisson(target_url)
+    res5 = send_attack(target_url, "PoissonFlood", payload_5, ip_suffix=50)
     print_result(5, "Poisson İstek Bombardımanı (API Flooder)", res5, expected_blocked=True)
     time.sleep(0.3)
 
-    res6 = send_attack("NaturalHuman", control_human(), ip_suffix=60)
+    res6 = send_attack(target_url, "NaturalHuman", control_human(), ip_suffix=60)
     print_result(6, "Doğal İnsan Ziyaretçisi (Control Group)", res6, expected_blocked=False)
 
     print(f"\n{C.BOLD}{C.GREEN}═════════════════════════════════════════════════════════════{C.END}")

@@ -1,0 +1,17 @@
+LICENSE
+README.md
+pyproject.toml
+src/synapse_shield/__init__.py
+src/synapse_shield/cli.py
+src/synapse_shield/engine.py
+src/synapse_shield/features.py
+src/synapse_shield/live_attacker.py
+src/synapse_shield/middleware.py
+src/synapse_shield.egg-info/PKG-INFO
+src/synapse_shield.egg-info/SOURCES.txt
+src/synapse_shield.egg-info/dependency_links.txt
+src/synapse_shield.egg-info/entry_points.txt
+src/synapse_shield.egg-info/requires.txt
+src/synapse_shield.egg-info/top_level.txt
+src/synapse_shield/static/index.html
+src/synapse_shield/static/synapse-sdk.js

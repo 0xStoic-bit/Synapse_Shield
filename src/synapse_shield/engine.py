@@ -1,6 +1,6 @@
 import math
 from typing import Dict, Any, List, Tuple
-from features import extract_features
+from .features import extract_features
 
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
     """
@@ -17,7 +17,7 @@ def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
             break
     return min(1.0, max(0.0, cumulative_prob))
 
-def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -> Tuple[float, str, List[str], Dict[str, Any]]:
+def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1, lambda_val: float = 2.0) -> Tuple[float, str, List[str], Dict[str, Any]]:
     features = extract_features(telemetry)
     reasons = []
     total_risk = 0.0
@@ -66,7 +66,7 @@ def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -
             reasons.append(f"Superhuman input frequency (avg typing interval: {features['key_interval_avg']:.1f} ms).")
 
     # 6. Poisson Frekans Analizi & Akıllı Biyometrik Füzyon
-    freq_anomaly = poisson_anomaly_score(recent_request_count, lambda_val=2.0)
+    freq_anomaly = poisson_anomaly_score(recent_request_count, lambda_val=lambda_val)
     if freq_anomaly >= 0.95:
         # Doğal insan fare hareketi veya klavye ritmi varsa:
         is_human_telemetry = (
@@ -97,3 +97,10 @@ def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -
     }
     
     return bot_score, classification, reasons, details
+
+class SynapseEngine:
+    def __init__(self, lambda_val: float = 2.0):
+        self.lambda_val = lambda_val
+
+    def analyze(self, telemetry: Dict[str, Any], recent_request_count: int = 1) -> Tuple[float, str, List[str], Dict[str, Any]]:
+        return analyze_behavior(telemetry, recent_request_count, self.lambda_val)

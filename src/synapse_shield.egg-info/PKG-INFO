@@ -1,3 +1,19 @@
+Metadata-Version: 2.4
+Name: synapse-shield
+Version: 0.1.0
+Summary: FastAPI Behavioral Bot Detection Engine & Middleware
+License: MIT
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn>=0.28.0
+Requires-Dist: python-multipart>=0.0.9
+Dynamic: license-file
+
 <div align="center">
 
 # 🛡️ SYNAPSE SHIELD

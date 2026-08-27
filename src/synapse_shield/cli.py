@@ -1,4 +1,6 @@
 import os
+import sys
+import argparse
 import json
 import sqlite3
 import uvicorn
@@ -7,12 +9,11 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from typing import Dict, Any, List
 
-from engine import analyze_behavior
+from .engine import analyze_behavior
+from . import live_attacker
 
-# Database Setup
 DB_FILE = "synapse_shield.db"
 
 def init_db():
@@ -34,11 +35,8 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
-
 app = FastAPI(title="Synapse Shield - Behavioral Bot Detection Engine")
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,7 +45,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Custom helper to query request frequencies in the last 10 seconds
 def get_recent_request_count(ip: str) -> int:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -58,10 +55,8 @@ def get_recent_request_count(ip: str) -> int:
     )
     count = cursor.fetchone()[0]
     conn.close()
-    # Add 1 to represent the current incoming request
     return count + 1
 
-# Save detection result to DB
 def save_log(ip: str, user_agent: str, bot_score: float, classification: str, reasons: List[str], features: Dict[str, Any], telemetry: Dict[str, Any]):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -85,7 +80,6 @@ def save_log(ip: str, user_agent: str, bot_score: float, classification: str, re
     conn.commit()
     conn.close()
 
-# API Endpoint: Score Telemetry
 @app.post("/api/score")
 async def score_telemetry(request: Request):
     try:
@@ -94,22 +88,13 @@ async def score_telemetry(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     ip = request.client.host if request.client else "127.0.0.1"
-    
-    # Check headers for client info
     user_agent = request.headers.get("user-agent", "Unknown")
-    
-    # Custom headers from proxy if applicable
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
         ip = forwarded_for.split(",")[0].strip()
 
-    # Get request count in the last 10 seconds
     recent_count = get_recent_request_count(ip)
-    
-    # Run scoring engine
     bot_score, classification, reasons, details = analyze_behavior(telemetry, recent_count)
-    
-    # Save parameters to DB
     save_log(ip, user_agent, bot_score, classification, reasons, details["features"], telemetry)
 
     return {
@@ -120,14 +105,11 @@ async def score_telemetry(request: Request):
         "details": details
     }
 
-# API Endpoint: Retrieve logs and dashboard metrics
 @app.get("/api/logs")
 async def get_logs(limit: int = 50):
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    # Fetch recent logs
     cursor.execute(
         "SELECT id, timestamp, ip, user_agent, bot_score, classification, reasons, features FROM logs ORDER BY id DESC LIMIT ?",
         (limit,)
@@ -147,7 +129,6 @@ async def get_logs(limit: int = 50):
             "features": json.loads(r["features"])
         })
         
-    # Get global statistics
     cursor.execute("SELECT COUNT(*) FROM logs")
     total_requests = cursor.fetchone()[0]
     
@@ -172,7 +153,6 @@ async def get_logs(limit: int = 50):
         "logs": recent_logs
     }
 
-# API Endpoint: Reset Logs Database
 @app.post("/api/clear")
 async def clear_logs():
     conn = sqlite3.connect(DB_FILE)
@@ -182,9 +162,8 @@ async def clear_logs():
     conn.close()
     return {"status": "success", "message": "Database logs successfully cleared"}
 
-# Serve Frontend Pages
-# Setup client-side folders if they exist
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(PACKAGE_DIR, "static")
 
 @app.get("/")
 def read_root():
@@ -200,9 +179,29 @@ def read_sdk():
         return FileResponse(sdk_path, media_type="application/javascript")
     return HTMLResponse("<h2>synapse-sdk.js file missing.</h2>", status_code=404)
 
-# Mount remaining static files if any
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+def main():
+    parser = argparse.ArgumentParser(description="Synapse Shield CLI Tool")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Run parser
+    run_parser = subparsers.add_parser("run", help="Start the FastAPI behavioral scoring backend dashboard")
+    run_parser.add_argument("--host", default="0.0.0.0", help="Binding host address")
+    run_parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
+
+    # Test parser
+    test_parser = subparsers.add_parser("test", help="Run the automated bot attack simulation suite")
+    test_parser.add_argument("--target", default="http://127.0.0.1:8000/api/score", help="Dashboard scoring API endpoint")
+
+    args = parser.parse_args()
+
+    if args.command == "run":
+        init_db()
+        uvicorn.run(app, host=args.host, port=args.port)
+    elif args.command == "test":
+        live_attacker.main(target_url=args.target)
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    main()
