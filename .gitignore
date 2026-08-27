@@ -1,0 +1,21 @@
+# Python & Derleme Önbellekleri
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Sanal Ortam
+.venv/
+venv/
+ENV/
+
+# Yerel Veritabanı ve Loglar
+*.db
+synapse_shield.db
+*.log
+
+# Geçici Araçlar
+extract_zip.py
+.DS_Store
