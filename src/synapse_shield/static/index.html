@@ -462,7 +462,12 @@
 
     async function fetchLogs() {
         try {
-            const res = await fetch('/api/logs');
+            let headers = {};
+            try {
+                const adminTok = localStorage.getItem('synapse_admin_token');
+                if (adminTok) headers['Authorization'] = 'Bearer ' + adminTok;
+            } catch (e) {}
+            const res = await fetch('/api/logs', { headers });
             if (!res.ok) return;
             const data = await res.json();
 
