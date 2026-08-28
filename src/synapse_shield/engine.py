@@ -56,6 +56,20 @@ def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -
                 total_risk += 45.0
                 reasons.append(f"Fitts's Law violation: Zero terminal deceleration before click ({features['terminal_decel_ratio']:.2f}).")
 
+        # C2. Sentetik Pürüzsüz Eğri (Bézier / Spline Botları)
+        if (
+            features["mouse_points"] > 8
+            and features["total_distance"] > 50
+            and 0.40 < features["straightness"] < 0.985
+            and features["avg_jerk"] < 2.5e-4
+            and features["acceleration_var"] < 2.8e-5
+        ):
+            total_risk += 55.0
+            reasons.append(
+                f"Synthetic smooth-curve trajectory: sub-human jerk ({features['avg_jerk']:.6f}) "
+                f"on a curved path (Bézier/spline bot signature)."
+            )
+
         # D. İnsanüstü Hız
         if features["max_velocity"] > 15.0:
             total_risk += 40.0
