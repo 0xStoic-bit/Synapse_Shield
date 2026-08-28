@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.2.0"
+version = "0.2.1"
 description = "Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (<0.5ms SLA)"
 readme = "README.md"
 requires-python = ">=3.10"
