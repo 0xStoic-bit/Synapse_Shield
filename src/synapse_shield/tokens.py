@@ -3,6 +3,7 @@ Synapse Shield - Cryptographic Token & Replay Attack Defense
 Handles HMAC-SHA256 challenge generation, expiration, and single-use nonce tracking.
 """
 
+import os
 import hmac
 import hashlib
 import time
@@ -12,7 +13,7 @@ import base64
 from typing import Tuple, Dict, Any
 
 # Güvenlik Anahtarı (Production'da .env'den okunabilir)
-SECRET_KEY = b"synapse_shield_secret_key_2026_x99f"
+SECRET_KEY = os.environ.get("SYNAPSE_SECRET_KEY", secrets.token_hex(32)).encode()
 
 # Tek kullanımlık Nonce önbelleği (Nonce -> Expiry Timestamp)
 USED_NONCES: Dict[str, int] = {}

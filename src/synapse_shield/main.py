@@ -1,4 +1,5 @@
 import os
+import tempfile
 import json
 import sqlite3
 import uvicorn
@@ -12,7 +13,7 @@ from typing import Dict, Any, List
 from .engine import analyze_behavior
 from .tokens import generate_challenge, verify_and_consume_token
 
-DB_FILE = "synapse_shield.db"
+DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -76,6 +77,15 @@ def save_log(ip: str, user_agent: str, bot_score: float, classification: str, re
         """,
         (now, ip, user_agent, bot_score, classification, json.dumps(reasons), json.dumps(features), json.dumps(telemetry))
     )
+    # Otomatik temizlik: sadece son 500 logu tut
+    cursor.execute("""
+        DELETE FROM logs 
+        WHERE id NOT IN (
+            SELECT id FROM logs 
+            ORDER BY id DESC 
+            LIMIT 500
+        )
+    """)
     conn.commit()
     conn.close()
 
