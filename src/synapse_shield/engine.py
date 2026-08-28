@@ -99,3 +99,27 @@ def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -
     }
     
     return bot_score, classification, reasons, details
+
+
+class SynapseEngine:
+    """
+    High-level Object-Oriented Interface for Synapse Shield.
+    Usage:
+        engine = SynapseEngine()
+        result = engine.evaluate(telemetry)
+        if not result["success"]:
+            # Block request (Bot detected)
+    """
+    def __init__(self, sitekey: str = "synapse-default"):
+        self.sitekey = sitekey
+
+    def evaluate(self, telemetry: Dict[str, Any], recent_request_count: int = 1) -> Dict[str, Any]:
+        bot_score, classification, reasons, details = analyze_behavior(telemetry, recent_request_count)
+        return {
+            "success": classification == "Human" and bot_score < 50.0,
+            "decision": "ALLOW" if classification == "Human" else "BLOCK",
+            "bot_score": bot_score,
+            "classification": classification,
+            "reasons": reasons,
+            "details": details
+        }
