@@ -57,14 +57,17 @@ By evaluating natural human neuromuscular micro-tremors (Jerk: $da/dt$), cursor 
        ▼
 [ REAL-TIME DECISION ENGINE ]
        │
-       ├────────────────────┬────────────────────┐
-       ▼                    ▼                    ▼
-  [ RISK < 50% ]    [ 50–70% RISK ]      [ RISK ≥ 70% ]
-   Clean Human      Suspicious           Automated Bot
-       │                    │                    │
-       ▼                    ▼                    ▼
-  [ ALLOW 200 ]     [ CHALLENGE ]        [ BLOCK 403 ]
+       ├──────────────────────────────┐
+       ▼                              ▼
+  [ RISK < max_risk_score ]    [ RISK ≥ max_risk_score ]
+   Human                        Bot
+       │                              │
+       ▼                              ▼
+  [ ALLOW 200 ]                 [ BLOCK 403 ]
 ```
+
+The decision is binary against a single configurable threshold (`max_risk_score`,
+default **50**). There is no separate mid-band "challenge" step.
 
 ---
 
@@ -74,7 +77,7 @@ By evaluating natural human neuromuscular micro-tremors (Jerk: $da/dt$), cursor 
 
 ```bash
 pip install synapse-shield
-synapse-shield run --host 0.0.0.0 --port 8000
+synapse-shield run --host 0.0.0.0 --port 8000     # add --reload for development
 ```
 
 Visit http://127.0.0.1:8000 to launch the Security Lab dashboard.
@@ -82,14 +85,27 @@ Visit http://127.0.0.1:8000 to launch the Security Lab dashboard.
 ### Option 2: Docker Compose
 
 ```bash
-docker compose up -d
+SYNAPSE_SHIELD_SECRET_KEY=$(openssl rand -hex 32) docker compose up -d --build
 ```
 
 ### Run Red Team Simulation
 
 ```bash
-synapse-shield test
+synapse-shield test        # exits non-zero if any attack vector gets through
 ```
+
+### Configuration (environment variables)
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `SYNAPSE_SHIELD_SECRET_KEY` | *(ephemeral random)* | HMAC signing key for challenge tokens. **Required in production** — without it tokens do not survive a restart or work across multiple workers. |
+| `SYNAPSE_SHIELD_ADMIN_TOKEN` | *(unset → open)* | When set, `/api/logs` and `/api/clear` require `Authorization: Bearer <token>` (or `X-Admin-Token`). |
+| `SYNAPSE_SHIELD_CORS_ORIGINS` | `*` | Comma-separated allowed origins. `*` disables credentialed CORS. |
+| `SYNAPSE_SHIELD_DB` | `synapse_shield.db` | SQLite audit-log path. |
+
+> **Multi-worker note:** replay protection uses a per-process nonce store. For
+> `uvicorn --workers N` (N > 1) or multi-host deployments, inject a shared
+> backend via `synapse_shield.set_nonce_store(...)`.
 
 ---
 
@@ -133,7 +149,8 @@ async def login(request: Request):
 | Scenario               | Attack Signature                      | Detection Mechanism             | Decision  | Risk Score |
 | :--------------------- | :------------------------------------ | :------------------------------ | :-------- | :--------- |
 | **Natural Human**      | Organic curves with micro-tremors     | Jerk & deceleration verified    | **ALLOW** | <10%       |
-| **Linear Bot**         | Straight-line cursor                  | Straightness = 1.000, zero jerk | **BLOCK** | 98.5%      |
+| **Linear Bot**         | Straight-line cursor                  | Straightness = 1.000, zero jerk | **BLOCK** | 100%       |
+| **Bézier / Spline Bot**| Smooth curved path, no tremor         | Sub-human jerk on a curved path | **BLOCK** | ~90%       |
 | **Replay Attacker**    | Reused valid token                    | Nonce already consumed          | **BLOCK** | 100%       |
 | **Fitts Violator**     | No terminal deceleration before click | terminal_decel_ratio > 0.85     | **BLOCK** | 80%        |
 | **Poisson Flooder**    | 8 requests in <500ms                  | Poisson anomaly P > 95%         | **BLOCK** | 85%        |
@@ -168,14 +185,16 @@ Synapse_Shield/
 ├── README.md
 ├── LICENSE
 ├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
 ├── tests/
 │   └── test_suite.py       # All-in-one test suite module
 └── src/
     └── synapse_shield/
-        ├── __init__.py       # Public API: shield_protect, SynapseEngine, analyze_behavior
+        ├── __init__.py       # Public API: shield_protect, SynapseEngine, analyze_behavior, set_nonce_store
         ├── engine.py         # Decision engine
         ├── features.py       # 19D kinematic feature extractor
-        ├── middleware.py     # @shield_protect FastAPI decorator
+        ├── middleware.py     # @shield_protect FastAPI decorator (verifies signed tokens)
         ├── cli.py            # CLI: synapse-shield run / test
         ├── tokens.py         # HMAC-SHA256 challenge & replay attack defense
         ├── live_attacker.py  # 7-vector red team simulator
@@ -185,6 +204,19 @@ Synapse_Shield/
 ```
 
 ---
+
+## 🔐 Security Model & Limitations
+
+- **Telemetry is client-supplied.** Every kinematic signal originates in the
+  browser. A determined adversary who reproduces the SDK can synthesize
+  human-plausible jerk, deceleration and typing dynamics. Treat Synapse Shield
+  as **defense-in-depth / friction reduction**, not a sole authentication gate.
+- **Challenge tokens** provide signature, expiry and single-use replay
+  protection — but only when `SYNAPSE_SHIELD_SECRET_KEY` is set and the nonce
+  store is shared across all workers (see Configuration).
+- `@shield_protect` requires a signed token by default (`require_token=True`).
+- The bundled SQLite audit log and rate counter are single-node; use an
+  external store for horizontally scaled deployments.
 
 ## ⚠️ Privacy & Data Notice
 
