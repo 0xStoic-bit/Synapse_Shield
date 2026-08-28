@@ -11,6 +11,12 @@ import random
 import json
 import base64
 
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 # src klasörünü Python yoluna ekle
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
@@ -114,5 +120,7 @@ def run_all_tests():
         print(f"  {C.BOLD}{C.RED}⚠️ BAZI TESTLER BAŞARISIZ: {passed_tests}/{total_tests}{C.END}")
     print(f"{C.BOLD}{C.CYAN}══════════════════════════════════════════════════════════════{C.END}\n")
 
+    return passed_tests == total_tests
+
 if __name__ == "__main__":
-    run_all_tests()
+    sys.exit(0 if run_all_tests() else 1)
