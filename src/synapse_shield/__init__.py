@@ -1,4 +1,18 @@
-from .middleware import shield_protect
-from .engine import SynapseEngine, analyze_behavior
+"""
+Synapse Shield - Behavioral Biometrics & Bot Mitigation Engine
+"""
 
-__all__ = ["shield_protect", "SynapseEngine", "analyze_behavior"]
+from .engine import analyze_behavior, poisson_anomaly_score
+from .features import extract_features
+from .middleware import shield_protect
+from .tokens import generate_challenge, verify_and_consume_token
+
+__version__ = "0.2.0"
+__all__ = [
+    "analyze_behavior",
+    "poisson_anomaly_score",
+    "extract_features",
+    "shield_protect",
+    "generate_challenge",
+    "verify_and_consume_token"
+]

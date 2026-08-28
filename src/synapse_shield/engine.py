@@ -41,17 +41,16 @@ def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -
             total_risk += 75.0
             reasons.append(f"Euclidean straight-line trajectory detected (straightness: {features['straightness']:.4f}).")
             
-        # B. Robotik Hız & İvme Varyansı
-        if features["total_distance"] > 30 and features["velocity_var"] < 0.0001:
+        # B. Robotik Hız & İvme Varyansı (Eşikler hassaslaştırıldı)
+        if features["total_distance"] > 30 and features["velocity_var"] < 1e-5:
             total_risk += 65.0
             reasons.append("Near-zero velocity variance observed in mouse path.")
             
-        if features["total_distance"] > 30 and features["acceleration_var"] < 0.0001:
+        if features["total_distance"] > 30 and features["acceleration_var"] < 1e-6:
             total_risk += 65.0
             reasons.append("Near-zero acceleration variance observed in mouse path.")
 
-        # C. FITTS KANUNU KONTROLÜ (Hedefe Yaklaşırken Yavaşlamayan Botlar)
-        # İnsan bir hedefe/tıklamaya yaklaşırken hızını en az %60 düşürür (terminal_decel_ratio < 0.40)
+        # C. FITTS KANUNU (Tıklamadan Önce Yavaşlamayan Botlar)
         if features["click_count"] > 0 and features["total_distance"] > 50:
             if features["terminal_decel_ratio"] > 0.85:
                 total_risk += 45.0
@@ -100,10 +99,3 @@ def analyze_behavior(telemetry: Dict[str, Any], recent_request_count: int = 1) -
     }
     
     return bot_score, classification, reasons, details
-
-class SynapseEngine:
-    def __init__(self, lambda_val: float = 2.0):
-        self.lambda_val = lambda_val
-
-    def analyze(self, telemetry: Dict[str, Any], recent_request_count: int = 1) -> Tuple[float, str, List[str], Dict[str, Any]]:
-        return analyze_behavior(telemetry, recent_request_count)
