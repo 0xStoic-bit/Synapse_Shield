@@ -1,0 +1,18 @@
+services:
+  synapse-shield:
+    build: .
+    image: synapse-shield:latest
+    container_name: synapse-shield
+    ports:
+      - "8000:8000"
+    environment:
+      SYNAPSE_SHIELD_SECRET_KEY: "${SYNAPSE_SHIELD_SECRET_KEY:-please-change-me}"
+      SYNAPSE_SHIELD_ADMIN_TOKEN: "${SYNAPSE_SHIELD_ADMIN_TOKEN:-}"
+      SYNAPSE_SHIELD_CORS_ORIGINS: "${SYNAPSE_SHIELD_CORS_ORIGINS:-*}"
+      SYNAPSE_SHIELD_DB: "/data/synapse_shield.db"
+    volumes:
+      - synapse-data:/data
+    restart: unless-stopped
+
+volumes:
+  synapse-data:
