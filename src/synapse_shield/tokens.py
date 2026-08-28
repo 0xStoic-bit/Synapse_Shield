@@ -9,15 +9,53 @@ import time
 import secrets
 import json
 import base64
+import os
+import threading
 from typing import Tuple, Dict, Any
 
-# Güvenlik Anahtarı (Production'da .env'den okunabilir)
-SECRET_KEY = b"synapse_shield_secret_key_2026_x99f"
+# Güvenlik Anahtarı (SYNAPSE_SHIELD_SECRET_KEY ortam değişkeninden okunur)
+_ENV_SECRET = os.environ.get("SYNAPSE_SHIELD_SECRET_KEY") or os.environ.get("SYNAPSE_SECRET_KEY")
+SECRET_KEY_IS_EPHEMERAL = not bool(_ENV_SECRET)
+SECRET_KEY = _ENV_SECRET.encode("utf-8") if _ENV_SECRET else secrets.token_bytes(32)
 
-# Tek kullanımlık Nonce önbelleği (Nonce -> Expiry Timestamp)
-USED_NONCES: Dict[str, int] = {}
+TOKEN_TTL_SEC = 60
+_NONCE_RETENTION_SEC = 120
 
-def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
+
+class InMemoryNonceStore:
+    """Tek kullanımlık Nonce önbelleği (Nonce -> Expiry Timestamp). Süreç-içi ve thread-safe."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._used: Dict[str, int] = {}
+
+    def _purge_locked(self, now: int) -> None:
+        for key in [k for k, exp in self._used.items() if exp < now]:
+            del self._used[key]
+
+    def seen(self, nonce: str) -> bool:
+        now = int(time.time())
+        with self._lock:
+            self._purge_locked(now)
+            return nonce in self._used
+
+    def add(self, nonce: str, ttl: int = _NONCE_RETENTION_SEC) -> None:
+        with self._lock:
+            self._used[nonce] = int(time.time()) + ttl
+
+
+_nonce_store: Any = InMemoryNonceStore()
+USED_NONCES: Dict[str, int] = _nonce_store._used
+
+
+def set_nonce_store(store: Any) -> None:
+    """Nonce deposunu değiştir; `seen(nonce)` ve `add(nonce, ttl)` sağlamalıdır."""
+    global _nonce_store, USED_NONCES
+    _nonce_store = store
+    USED_NONCES = getattr(store, "_used", {})
+
+
+def generate_challenge(expires_in_sec: int = TOKEN_TTL_SEC) -> Dict[str, Any]:
     """
     İstemciye HMAC-SHA256 ile imzalanmış tek kullanımlık bir challenge üretir.
     Format: nonce.timestamp.signature
@@ -30,6 +68,7 @@ def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
         "challenge": challenge,
         "expires_in": expires_in_sec
     }
+
 
 def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]:
     """
@@ -44,7 +83,7 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
 
     challenge = payload.get("challenge", "")
     telemetry = payload.get("telemetry", {})
-    
+
     parts = challenge.split(".")
     if len(parts) != 3:
         return False, "Bozuk challenge yapısı", {}
@@ -62,20 +101,15 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
 
     now = int(time.time())
     # 2. Zaman Aşımı Kontrolü (60 saniye)
-    if now - ts > 60:
-        return False, f"Token zaman aşımına uğradı ({now - ts}sn > 60sn)", {}
+    if now - ts > TOKEN_TTL_SEC:
+        return False, f"Token zaman aşımına uğradı ({now - ts}sn > {TOKEN_TTL_SEC}sn)", {}
     if ts - now > 5:
         return False, "Gelecek zaman damgası (Saat manipülasyonu)", {}
 
-    # 3. Süresi Dolan Nonce'ları Temizle
-    expired_nonces = [k for k, exp in USED_NONCES.items() if exp < now]
-    for k in expired_nonces:
-        del USED_NONCES[k]
-
-    # 4. Replay Attack (Yeniden Oynatma) Kontrolü
-    if nonce in USED_NONCES:
+    # 3. Replay Attack (Yeniden Oynatma) Kontrolü
+    if _nonce_store.seen(nonce):
         return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
 
-    # Nonce'ı 120 saniyeliğine 'kullanıldı' olarak işaretle
-    USED_NONCES[nonce] = now + 120
+    # 4. Nonce'ı 'kullanıldı' olarak işaretle
+    _nonce_store.add(nonce, _NONCE_RETENTION_SEC)
     return True, "Geçerli", telemetry
