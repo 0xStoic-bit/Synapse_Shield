@@ -7,6 +7,8 @@ name = "synapse-shield"
 version = "0.2.1"
 description = "Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (<0.5ms SLA)"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
     { name = "Mustafa Gungor", email = "mustafagungor181881@gmail.com" }
