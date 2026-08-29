@@ -3,6 +3,7 @@ import tempfile
 import json
 import sqlite3
 import uvicorn
+import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
@@ -31,7 +32,16 @@ def init_db():
             telemetry TEXT
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS banned_ips (
+            ip TEXT PRIMARY KEY,
+            banned_until TEXT,
+            reason TEXT
+        )
+    """)
     cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.execute("PRAGMA wal_autocheckpoint=1000;")
     conn.commit()
     conn.close()
 
@@ -66,6 +76,36 @@ def get_recent_request_count(ip: str) -> int:
     conn.close()
     return count + 1
 
+def is_ip_banned(ip: str) -> bool:
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT banned_until FROM banned_ips WHERE ip = ?", (ip,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        banned_until = datetime.fromisoformat(row[0])
+        if datetime.utcnow() < banned_until:
+            return True
+        else:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
+            conn.commit()
+            conn.close()
+    return False
+
+def ban_ip(ip: str, minutes: int, reason: str):
+    banned_until = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "REPLACE INTO banned_ips (ip, banned_until, reason) VALUES (?, ?, ?)",
+        (ip, banned_until, reason)
+    )
+    conn.commit()
+    conn.close()
+
+
 def save_log(ip: str, user_agent: str, bot_score: float, classification: str, reasons: List[str], features: Dict[str, Any], telemetry: Dict[str, Any]):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -77,13 +117,13 @@ def save_log(ip: str, user_agent: str, bot_score: float, classification: str, re
         """,
         (now, ip, user_agent, bot_score, classification, json.dumps(reasons), json.dumps(features), json.dumps(telemetry))
     )
-    # Otomatik temizlik: sadece son 500 logu tut
+    # Otomatik temizlik: sadece son 5000 logu tut
     cursor.execute("""
         DELETE FROM logs 
         WHERE id NOT IN (
             SELECT id FROM logs 
             ORDER BY id DESC 
-            LIMIT 500
+            LIMIT 5000
         )
     """)
     conn.commit()
@@ -102,6 +142,10 @@ async def score_telemetry(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     ip = get_client_ip(request)
+    
+    if is_ip_banned(ip):
+        raise HTTPException(status_code=403, detail="IP address temporarily banned due to suspicious activity.")
+
     user_agent = request.headers.get("user-agent", "Unknown")
 
     # 1. Kriptografik Token Varsa Doğrula
@@ -122,9 +166,24 @@ async def score_telemetry(request: Request):
         telemetry = body.get("telemetry", body)
 
     recent_count = get_recent_request_count(ip)
-    bot_score, classification, reasons, details = analyze_behavior(telemetry, recent_count)
+    if recent_count > 100:
+        ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
+        raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
+    
+    bot_score, classification, reasons, details = await asyncio.to_thread(analyze_behavior, telemetry, recent_count)
+    
     save_log(ip, user_agent, bot_score, classification, reasons, details.get("features", {}), telemetry)
-
+    
+    # Dinamik Ceza Havuzu: 4 ardışık bot aktivitesinden sonra IP'yi 60 saniye boyunca (1 dakika) engelle
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT classification FROM logs WHERE ip = ? ORDER BY id DESC LIMIT 4", (ip,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if len(rows) == 4 and all(r[0] == "Bot" for r in rows):
+        ban_ip(ip, 1, "4 consecutive malicious bot requests detected (Dynamic Throttling)")
+        
     return {
         "status": "success",
         "bot_score": bot_score,
@@ -201,6 +260,10 @@ def read_sdk():
 
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run("synapse_shield.main:app", host="0.0.0.0", port=8000, reload=True)
