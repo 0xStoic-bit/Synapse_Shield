@@ -4,40 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.2.1"
-description = "Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (<0.5ms SLA)"
+version = "0.2.2"
+authors = [
+  { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
+]
+description = "Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE"]
 requires-python = ">=3.10"
-authors = [
-    { name = "Mustafa Gungor", email = "mustafagungor181881@gmail.com" }
-]
 keywords = [
-    "cybersecurity",
-    "bot-detection",
-    "turnstile-alternative",
-    "behavioral-biometrics",
-    "kinematics",
-    "fastapi",
-    "zero-pii",
-    "anti-bot"
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Topic :: Security",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12"
+  "cybersecurity", "bot-detection", "turnstile-alternative",
+  "behavioral-biometrics", "kinematics", "fastapi", "zero-pii"
 ]
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
     "numpy>=1.26.0",
-    "scikit-learn>=1.4.0"
+    "scikit-learn>=1.4.0",
 ]
 
 [project.scripts]
@@ -50,6 +33,4 @@ where = ["src"]
 "synapse_shield" = ["static/*"]
 
 [project.urls]
-"Homepage" = "https://github.com/0xStoic-bit/Synapse_Shield"
-"Bug Tracker" = "https://github.com/0xStoic-bit/Synapse_Shield/issues"
-"Documentation" = "https://github.com/0xStoic-bit/Synapse_Shield#readme"
+Homepage = "https://github.com/0xStoic-bit/Synapse_Shield"
