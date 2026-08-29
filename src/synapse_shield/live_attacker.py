@@ -1,5 +1,5 @@
 """
-Synapse Shield - Red Team Automated Bot Attack Suite v0.3.0
+Synapse Shield - Red Team Automated Bot Attack Suite v0.3.1
 Simulates 7 real-world bot attack campaigns including Replay Attacks.
 """
 
@@ -76,7 +76,7 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
 
 def main():
     print(f"\n{C.BOLD}{C.YELLOW}╔═════════════════════════════════════════════════════════════╗{C.END}")
-    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.3.0 — RED TEAM BOT SALDIRI SÜİTİ     ║{C.END}")
+    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.3.1 — RED TEAM BOT SALDIRI SÜİTİ     ║{C.END}")
     print(f"{C.BOLD}{C.YELLOW}╚═════════════════════════════════════════════════════════════╝{C.END}\n")
 
     # 1. Selenium

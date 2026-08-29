@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.3.0 - Cryptographic Behavioral Telemetry Collector
+ * Synapse Shield SDK v0.3.1 - Cryptographic Behavioral Telemetry Collector
  */
 
 (function (window) {
