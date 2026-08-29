@@ -23,8 +23,14 @@ def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
     İstemciye HMAC-SHA256 ile imzalanmış tek kullanımlık bir challenge üretir.
     Format: nonce.timestamp.signature
     """
+    # Süresi dolan nonceları temizleyerek memory leak'i önle
+    now = int(time.time())
+    expired_nonces = [k for k, exp in USED_NONCES.items() if exp < now]
+    for k in expired_nonces:
+        del USED_NONCES[k]
+
     nonce = secrets.token_hex(16)
-    ts = int(time.time())
+    ts = now
     signature = hmac.new(SECRET_KEY, f"{nonce}:{ts}".encode(), hashlib.sha256).hexdigest()
     challenge = f"{nonce}.{ts}.{signature}"
     return {

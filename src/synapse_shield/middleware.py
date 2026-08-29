@@ -4,6 +4,7 @@ Allows developers to protect any route with a single decorator: @shield_protect
 """
 
 from functools import wraps
+import asyncio
 from fastapi import Request, HTTPException
 from .engine import analyze_behavior
 
@@ -41,7 +42,7 @@ def shield_protect(max_risk_score: float = 50.0):
             if not telemetry:
                 raise HTTPException(status_code=403, detail="[Synapse Shield] Missing behavioral telemetry payload.")
 
-            bot_score, classification, reasons, _ = analyze_behavior(telemetry)
+            bot_score, classification, reasons, _ = await asyncio.to_thread(analyze_behavior, telemetry)
 
             if bot_score >= max_risk_score:
                 raise HTTPException(
