@@ -1,5 +1,5 @@
 """
-Synapse Shield - Red Team Automated Bot Attack Suite v0.2.0
+Synapse Shield - Red Team Automated Bot Attack Suite v0.3.0
 Simulates 7 real-world bot attack campaigns including Replay Attacks.
 """
 
@@ -58,7 +58,12 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
     
     is_blocked = (classification == "Bot" or score >= 50.0)
     success = is_blocked if expected_blocked else not is_blocked
-    status_text = f"{C.GREEN}✅ KALKAN BAŞARILI (Engellendi){C.END}" if success else f"{C.RED}❌ BAŞARISIZ{C.END}"
+    if success:
+        action = "Engellendi" if is_blocked else "Geçiş İzni Verildi"
+        status_text = f"{C.GREEN}✅ KALKAN BAŞARILI ({action}){C.END}"
+    else:
+        action = "Engellendi - Geçiş Verilmeliydi" if is_blocked else "Geçiş Verildi - Engellenmeliydi"
+        status_text = f"{C.RED}❌ BAŞARISIZ ({action}){C.END}"
 
     print(f"\n{C.BOLD}{C.CYAN}┌─────────────────────────────────────────────────────────────{C.END}")
     print(f"{C.BOLD}{C.CYAN}│ SALDIRI #{attack_num}: {title}{C.END}")
@@ -71,7 +76,7 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
 
 def main():
     print(f"\n{C.BOLD}{C.YELLOW}╔═════════════════════════════════════════════════════════════╗{C.END}")
-    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.2.0 — RED TEAM BOT SALDIRI SÜİTİ     ║{C.END}")
+    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.3.0 — RED TEAM BOT SALDIRI SÜİTİ     ║{C.END}")
     print(f"{C.BOLD}{C.YELLOW}╚═════════════════════════════════════════════════════════════╝{C.END}\n")
 
     # 1. Selenium
