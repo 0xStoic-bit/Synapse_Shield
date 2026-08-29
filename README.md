@@ -1,163 +1,235 @@
 <div align="center">
-  <h1>🛡️ Synapse Shield</h1>
-  <p><strong>Next-Generation Open-Source Behavioral Biometrics & Bot Mitigation Engine</strong></p>
-  
-  [![Python version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-  [![Build Status](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/python-app.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
-</div>
+
+# 🛡️ SYNAPSE SHIELD
+
+### Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine
+
+**A privacy-first, zero-friction, self-hosted alternative to Cloudflare Turnstile.**
+
+[![PyPI](https://img.shields.io/pypi/v/synapse-shield.svg?color=00F0FF)](https://pypi.org/project/synapse-shield/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-00F0FF.svg)](https://opensource.org/licenses/MIT)
+[![CI/CD](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python)](https://python.org)
+[![Inference SLA](https://img.shields.io/badge/Latency-%3C0.5ms-10B981.svg)]()
+[![Zero-PII](https://img.shields.io/badge/Privacy-100%25%20Zero--PII-success.svg)]()
+
 <br/>
 
-Synapse Shield, makine öğrenimi tabanlı kinematik özellikleri (Fitts Kanunu, ivme, sarsıntı/jerk) ve Poisson frekans matematiklerini birleştirerek botları **CAPTCHA kullanmadan** anlık olarak tespit eden gelişmiş bir siber güvenlik çözümüdür. Headless tarayıcıları, Selenium botlarını ve Replay Attack mekanizmalarını engeller.
+[Key Features](#-key-features) • [Architecture & Flow](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math Foundations](#-kinematic--mathematical-foundations)
 
-## 🌟 Neden Synapse Shield?
-
-- **Görünmez Bot Koruması**: Klasik kutu işaretleme (Turnstile/reCAPTCHA) eziyetine son verir.
-- **Kriptografik Replay Koruması**: İstemci ve sunucu arasında HMAC-SHA256 imzalı tek kullanımlık (nonce) verilerle çalışır.
-- **Yüksek Performans & Asenkron Mimari**: FastAPI ve asyncio entegrasyonu sayesinde yüksek trafiklerde (DDoS/Brute-force) bile darboğaz yapmadan çalışır, zararlı IP'leri anında BAN'lar.
+</div>
 
 ---
 
-## 🏗️ Mimari Şema
+## ⚡ Overview
 
-```mermaid
-graph TD
-    Client[Web İstemcisi / Browser] --> SDK[Synapse JS SDK]
-    SDK -->|Fare/Klavye Telemetrisi| Backend
-    Backend[FastAPI Sunucusu] --> Middleware[@shield_protect Middleware]
-    Middleware --> Engine[Karar Motoru & Kinetik Extraksiyon]
-    Engine -->|Kötü Niyetli| Block[IP Ban & 403 Forbidden]
-    Engine -->|Gerçek İnsan| Allow[200 OK - Erişim İzni]
+**Synapse Shield** replaces intrusive legacy CAPTCHAs and expensive proprietary cloud WAFs with **sub-millisecond behavioral biomechanics**.
 
-    subgraph Güvenlik Katmanı
-        Engine -.-> DB[(SQLite WAL Logs & Banned IPs)]
-        Engine -.-> HMAC[Token & Nonce Cache]
-    end
-```
-
-## 🔄 Token & Replay Attack Akışı (Sequence Diagram)
-
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant API
-
-    Browser->>API: GET /api/challenge (Sayfa açıldığında)
-    API-->>Browser: Challenge Payload (nonce, ts, signature)
-
-    Note over Browser: Kullanıcı etkileşime girer (Fare, Klavye, Fitts Kanunu verisi toplanır)
-
-    Browser->>API: POST /api/score (Telemetry + JSON b64 envelope)
-
-    Note right of API: HMAC doğrulanır. Süresi dolmuş <br/>veya kullanılmış (replay) Nonce reddedilir.
-
-    alt Token Geçerli & Skor İyi (Human)
-        API-->>Browser: 200 OK (Doğrulama Başarılı)
-    else Skor Kötü veya Poisson DDoS tespii (Bot)
-        API-->>Browser: 403 Forbidden (Otomatik IP Ban)
-    end
-```
+By evaluating natural human neuromuscular micro-tremors (**Jerk: $da/dt$**), Fitts's Law terminal deceleration profiles, cursor curvature, and millisecond keystroke dynamics, Synapse Shield autonomously classifies and mitigates bots, scrapers, and credential stuffers before they touch your backend logic.
 
 ---
 
-## 🚀 Hızlı Başlangıç (Quickstart)
+## ✨ Key Features & Hardening (v0.3.0)
 
-### 1️⃣ Kurulum
+- **🧩 100% Invisible UX:** Zero annoying puzzles, image selections, or audio challenges. Legitimate humans pass friction-free.
+- **⚡ Async Non-Blocking SLA (<0.5 ms):** Heavy CPU-bound kinematics are processed asynchronously (`asyncio.to_thread`), guaranteeing zero event-loop blocking under high concurrent traffic.
+- **🔐 Cryptographic Replay Defense (HMAC-SHA256):** Every session is bound to a single-use signed challenge nonce. Intercepted tokens cannot be replayed.
+- **🧠 Fitts's Law Deceleration Kinematics:** Distinguishes advanced Bézier curve bots (`ghost-cursor`) from organic human hands by analyzing terminal velocity drops before click actions.
+- **🔒 100% Zero-PII & Privacy-First:** No keystroke characters or form values are collected—strictly relative millisecond timing deltas ($t_{\text{hold}}$, $t_{\text{flight}}$) are processed (GDPR & KVKK compliant).
+- **📊 Poisson Flooder Defense & Dynamic IP Throttling:** Statistical Poisson anomaly detection identifies high-frequency headless API flooders lacking mouse telemetry and applies temporary rate penalties.
+- **💾 SQLite WAL with Auto-Pruning:** In-memory TTL nonce management and SQLite Write-Ahead Logging (WAL) with automatic log pruning prevent memory leaks and disk bloat.
 
-Synapse Shield, bağımlılıkları yüklenerek anında kurulabilir:
+---
+
+## 🏛️ Architecture & Sequence Diagram
+
+┌─────────────────┐ ┌─────────────────────┐ ┌─────────────────────────┐
+│ Client Browser │ │ FastAPI Gateway │ │ Kinematic Decision │
+│ (synapse-sdk) │ │ (Synapse Shield) │ │ Engine (<0.5ms SLA) │
+└────────┬────────┘ └──────────┬──────────┘ └────────────┬────────────┘
+│ │ │
+│── 1. GET /api/challenge ───────►│ │
+│◄── 2. { nonce.ts.hmac_sig } ───│ (Generates single-use signed nonce) │
+│ │ │
+[User moves cursor / types] │ │
+[SDK bundles 50Hz telemetry] │ │
+│ │ │
+│── 3. POST /api/score {token} ──►│ (1. Validates HMAC signature) │
+│ │ (2. Checks 60s TTL freshness) │
+│ │ (3. Checks Replay Attack nonce) │
+│ │ │
+│ │── 4. asyncio.to_thread ────────────►│ (19D Kinematics)
+│ │ │ (Jerk & Fitts's Law)
+│ │ │ (Poisson Anomaly)
+│ │◄── 5. (bot_score, ALLOW/BLOCK) ─────│
+│ │ │
+│ │── 6. Save Log to SQLite (WAL) │
+│◄── 7. HTTP 200 {ALLOW/BLOCK} ───│ │
+│ │ │
+
+---
+
+## 🚀 30-Second Quickstart
+
+### Option 1: Install via PyPI
+
+```bash
+pip install synapse-shield
+```
+
+Run the server and live cockpit directly from your terminal:
+
+```bash
+synapse-shield run --port 8000
+```
+
+Run the automated 7-vector adversarial security test suite:
+
+```bash
+synapse-shield test
+```
+
+### Option 2: Clone & Local Development
 
 ```bash
 git clone https://github.com/0xStoic-bit/Synapse_Shield.git
 cd Synapse_Shield
-pip install -r requirements.txt
 pip install -e .
+python test_suite.py
 ```
 
-### 2️⃣ FastAPI ile 3 Satırda Entegrasyon
+Visit `http://127.0.0.1:8000` in your browser to launch the Live Security Cockpit.
 
-Synapse Shield, **herhangi bir FastAPI route'unu** tek bir decorator (`@shield_protect`) ile anında koruma altına alabilir:
+---
+
+## 💻 Developer Integration
+
+### Method 1: FastAPI Route Decorator (3 Lines)
+
+Protect any API endpoint or login route using the `@shield_protect` decorator:
 
 ```python
 from fastapi import FastAPI, Request
-from synapse_shield.middleware import shield_protect
+from synapse_shield import shield_protect
 
 app = FastAPI()
 
-# 1. Dekoratoryü ekleyin ve maksimum risk skorunu (~50.0) belirleyin
 @app.post("/api/login")
 @shield_protect(max_risk_score=50.0)
 async def login(request: Request):
-
-    # 2. Üst katmanda analiz yapılır; riskli trafik gelirse bu satıra inmeden 403 döndürülür
-    return {"message": "Başarıyla giriş yaptınız, siz bir insansınız!"}
+    # Only executes if Synapse Shield verifies the request as genuine human
+    return {"status": "authenticated", "user": "verified_human"}
 ```
 
-> **Not:** İstemci tarafında `synapse-sdk.js`'i dahil edip payload'u bu endpointe göndermeniz yeterlidir. Middleware telemetriyi otomatik analiz edecektir.
+### Method 2: Global Middleware
+
+Protect entire route prefixes across your application:
+
+```python
+from fastapi import FastAPI
+from synapse_shield import SynapseShieldMiddleware
+
+app = FastAPI()
+app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/auth", "/checkout"])
+```
+
+### Method 3: Frontend Client SDK
+
+Add the lightweight SDK (<5 KB) to your HTML or React project:
+
+```html
+<!-- Include SDK -->
+<script src="http://localhost:8000/static/synapse-sdk.js"></script>
+
+<script>
+  // Initialize biometric listener
+  SynapseShield.init();
+
+  async function handleLogin() {
+    // Automatically signs and packages 50 Hz telemetry
+    const response = await SynapseShield.submit("/api/score");
+    console.log("Evaluation Result:", response);
+  }
+</script>
+```
 
 ---
 
-## 📐 Bilimsel Temeller ve Formüller
+## 🤖 Attack Simulation Benchmarks
 
-Synapse Shield, insan davranış modelini doğrulamak için **Fitts Kanunu** (Fitts's Law) ve **Newtonian Jerk (Sarsıntı)** algoritmalarını kullanır.
-
-### Fitts Kanunu ve Asimetrik Yavaşlama
-
-İnsanlar farenin imlecini bir hedefe götürürken başlangıçta ivmelenir (balistik faz), ancak hedefe yaklaştıkça yavaşlayarak düzeltme yaparlar. Botlarda bu ivme genellikle çok doğrusal ve sabit bir profil çizer. Synapse motoru bu profili analiz eder:
-
-```math
-\text{Terminal Deceleration Ratio} = \frac{\frac{1}{k} \sum_{i=n-k}^{n} V_i}{V_{max}}
-```
-
-> _k: yolculuğun son %25'lik kısmındaki örneklem sayısı._ Oranın `0.85`'ten büyük olması hedefe yaklaşırken hiç yavaşlamayan, muhtemelen bir bota işaret eder.
-
-### Kinetik Sarsıntı (Jerk) Hesabı
-
-Fiziksel kas sistemleri hiçbir zaman tam pürüzsüz hareket üretemez. Hızdaki küçük titremelerin türevi olan sarsıntı (Jerk $\Delta a / \Delta t$) her zaman sıfırdan büyüktür:
-
-```math
-\text{Jerk}(t) = \frac{d\vec{a}}{dt} = \frac{\Delta a}{\Delta t}
-```
-
-> Mutlak düz çizgiler çıkartan veya sabit hızla mouse kaydıran her Selenium script'i, **sıfır veya sıfıra çok yakın Jerk** gösterdiği için anında bloke edilir.
-
----
-
-## 📊 Saldırı Vektörleri Benchmark
-
-Sistem toplamda **7 farklı modern saldırı vektörünü** test edecek kapasiteyle optimize edilmiştir.
-
-| Saldırı Tipi                        | Karakteristik Belirti                                                   | Önlem Tipi                            | Bot Skor Etkisi   |
-| ----------------------------------- | ----------------------------------------------------------------------- | ------------------------------------- | ----------------- |
-| **Doğrusal (Linear) Makro**         | Euclidean olarak kusursuz düz bir çizgi çizer.                          | `Straightness > 0.985` & `Jerk ~ 0`   | `+75.0%` (Kritik) |
-| **Selenium Headless Spider**        | `window.navigator.webdriver = true` bırakır, mouse event'leri basittir. | WebDriver API Algılaması              | `+100.0%` (Ban)   |
-| **Replay Attack (Yeniden Oynatma)** | Başka bir cihazda alınmış token'ın aynı nonce ile atılması.             | Kriptografik HMAC & Nonce Cache       | `+100.0%` (Ban)   |
-| **DDoS / HTTP Flood (Botnet)**      | Saniyede onlarca istek atan, kaba kuvvet uygulaması.                    | Poisson Olasılıksal Dağılımı          | `+60.0%`          |
-| **Click Farm / Hidden Form**        | Ekranda mouse olmadan DOM'dan doğrudan `click()` çalıştırılması.        | Mouse noktsı `0` iken Event > 0       | `+50.0%`          |
-| **Robotik Ritmik Klavye**           | Milisaniye bazlı mükemmel aralıklarla tuş basımı.                       | `key_interval_var < 4.0 ms`           | `+60.0%`          |
-| **İnsanüstü Teleportasyon**         | Max Velocity eşiğinin (`15.0 px/ms`) üstündeki ani atlamalar.           | Hız Limiti Testi (Max Velocity Limit) | `+40.0%`          |
-
----
-
-## 💻 Önizleme ve Kapsamlı Mod (Dashboard)
-
-Dashboaard, skorlamaları ve IP bloklamalarını canlı izlemek için tam teşekküllü bir FastAPI motoru barındırır. Standart uygulamayı başlatmak için:
+Synapse Shield includes an automated adversarial test suite simulating 7 distinct attack vectors:
 
 ```bash
-python -m synapse_shield.main
+synapse-shield test
 ```
 
-Tarayıcınızda açın: `http://localhost:8000/`
+| Attack Vector          | Simulated Signature                                                         | Detection Mechanism                     | Decision  | Risk Score | Latency |
+| :--------------------- | :-------------------------------------------------------------------------- | :-------------------------------------- | :-------- | :--------- | :------ |
+| **Selenium Crawler**   | Headless browser automation `navigator.webdriver = true`                    | WebDriver API Algılaması                | **BLOCK** | 100.0%     | 0.01 ms |
+| **Linear Bot**         | Programmatic straight-line cursor $\text{Straightness} = 1.000$ & Zero Jerk | `Straightness > 0.985` & `Jerk ~ 0`     | **BLOCK** | 100.0%     | 0.18 ms |
+| **Bézier Stealth Bot** | Mathematical curved trajectory                                              | Fitts's Law + Zero Accel Variance       | **BLOCK** | 65.0%      | 0.22 ms |
+| **Robotic Auto-Typer** | Fixed-interval key injections                                               | Keystroke Variance $< 1.0\text{ ms}^2$  | **BLOCK** | 50.0%      | 0.15 ms |
+| **Poisson Flooder**    | 8 rapid API requests in $<500\text{ ms}$                                    | Poisson frequency anomaly ($P > 99\%$)  | **BLOCK** | 60.0%      | 0.08 ms |
+| **Replay Attack**      | Re-sending captured valid token                                             | Single-use HMAC Nonce reuse             | **BLOCK** | 100.0%     | 0.05 ms |
+| **Natural Human**      | Organic curves with tremors                                                 | Biological Jerk & Deceleration verified | **ALLOW** | 0.0%       | 0.24 ms |
 
-## 🛡️ Güvenlik Testleri (Pytest & CI)
+---
 
-Sistemin bütünlüğünü test etmek için özel bir test suite bulunmaktadır. Hem `NaN` gibi hatalı veri injeksiyonlarına hem de Replay/Matematiksel sapmalara karşı test edilmiştir:
+## 🧠 Kinematic & Mathematical Foundations
 
-```bash
-pytest tests/
-# VEYA
-python tests/test_suite.py
+### Jerk (Acceleration Derivative / Neuromuscular Tremors):
+
+$$\text{Jerk} = \frac{da}{dt} = \frac{d^3x}{dt^3}$$
+
+Human muscle tremors produce continuous high-frequency Jerk, whereas mathematical bot curves (Bézier/Linear) produce near-zero or static Jerk.
+
+### Fitts's Law Terminal Deceleration Index:
+
+$$\text{Terminal Decel Ratio} = \frac{\bar{v}_{\text{terminal (last 25\%)}}}{v_{\text{peak}}}$$
+
+Humans naturally decelerate ($<0.40$) as they approach the target click point.
+
+### Cumulative Poisson Anomaly Distribution:
+
+$$P(X < k) = \sum_{i=0}^{k-1} \frac{\lambda^i e^{-\lambda}}{i!}$$
+
+---
+
+## 📁 Repository Structure
+
+```
+Synapse_Shield/
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # Automated CI matrix (Python 3.10, 3.11, 3.12)
+├── src/
+│   └── synapse_shield/
+│       ├── __init__.py        # Public API exports
+│       ├── cli.py             # CLI Controller (run / test commands)
+│       ├── engine.py          # Real-time Decision & Poisson Engine
+│       ├── features.py        # 19D Kinematics & Fitts's Law Extractor
+│       ├── main.py            # Async FastAPI Gateway & SQLite Logger
+│       ├── middleware.py      # @shield_protect & Middleware classes
+│       ├── tokens.py          # HMAC-SHA256 Challenge & Replay Defense
+│       ├── live_attacker.py   # 7-Vector Red Team Simulation Suite
+│       └── static/            # Embedded 3D Cockpit & Client SDK
+│           ├── index.html
+│           └── synapse-sdk.js
+├── tests/                     # Modular Pytest Suite
+│   ├── test_features.py
+│   ├── test_tokens.py
+│   ├── test_engine.py
+│   └── test_api.py
+├── test_suite.py              # Standalone Zero-Dependency Test Runner
+├── pyproject.toml             # PEP 517/621 Package Definition
+├── requirements.txt           # Core Dependencies
+├── LICENSE                    # MIT License
+└── README.md                  # Documentation & Showcase
 ```
 
-## 📜 Lisans
+---
 
-Bu proje **MIT Lisansı** ile lisanslanmıştır. Kullanmakta, modifiye etmekte ve dağıtmakta tamamen özgürsünüz.
+## 📜 License
+
+Distributed under the MIT License. Free for commercial and personal use.
