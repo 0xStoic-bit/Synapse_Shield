@@ -1,0 +1,25 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.10, pytest-9.0.3, pluggy-1.6.0
+rootdir: C:\Users\musta\Desktop\Synapse_Shield
+configfile: pyproject.toml
+plugins: anyio-4.12.1
+collected 13 items / 1 error
+
+=================================== ERRORS ====================================
+_____________________ ERROR collecting tests/test_api.py ______________________
+tests\test_api.py:5: in <module>
+    client = TestClient(app)
+..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\testclient.py:429: in __init__
+    super().__init__(
+E   TypeError: Client.__init__() got an unexpected keyword argument 'app'
+============================== warnings summary ===============================
+..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\formparsers.py:12
+  C:\Users\musta\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+ERROR tests/test_api.py - TypeError: Client.__init__() got an unexpected keyw...
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+========================= 1 warning, 1 error in 1.03s =========================
+
