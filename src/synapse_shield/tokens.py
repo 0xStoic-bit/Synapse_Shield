@@ -10,10 +10,56 @@ import time
 import secrets
 import json
 import base64
+import warnings
+import logging
+from pathlib import Path
 from typing import Tuple, Dict, Any
 
-# Güvenlik Anahtarı (Production'da .env'den okunabilir)
-SECRET_KEY = os.environ.get("SYNAPSE_SECRET_KEY", secrets.token_hex(32)).encode()
+logger = logging.getLogger("synapse_shield")
+
+
+def _load_or_generate_secret_key() -> bytes:
+    """
+    Kalıcı SECRET_KEY yükleme stratejisi: ENV > dosya > yeni oluştur + uyar.
+    Production ortamında SYNAPSE_SECRET_KEY env variable'ı zorunlu olarak ayarlanmalıdır.
+    """
+    # 1. Öncelik: Ortam değişkeni
+    env_key = os.environ.get("SYNAPSE_SECRET_KEY")
+    if env_key:
+        return env_key.encode()
+
+    # 2. Öncelik: Kalıcı dosya fallback
+    key_dir = Path.home() / ".synapse_shield"
+    key_file = key_dir / "secret.key"
+    if key_file.exists():
+        logger.info("SECRET_KEY dosyadan okunuyor: %s", key_file)
+        return key_file.read_bytes()
+
+    # 3. Yeni key oluştur ve dosyaya yaz
+    new_key = secrets.token_hex(32)
+    try:
+        key_dir.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(new_key)
+        # Windows'da chmod 0o600 desteklenmeyebilir, hata yutulur
+        try:
+            key_file.chmod(0o600)
+        except OSError:
+            pass
+        logger.info("Yeni SECRET_KEY oluşturuldu ve kaydedildi: %s", key_file)
+    except OSError as e:
+        logger.warning("SECRET_KEY dosyaya yazılamadı (%s). Geçici key kullanılıyor.", e)
+
+    warnings.warn(
+        "SYNAPSE_SECRET_KEY env variable tanımlı değil! "
+        f"Geçici key üretildi ve '{key_file}' dosyasına yazıldı. "
+        "Production ortamında SYNAPSE_SECRET_KEY env variable'ı zorunlu olarak ayarlanmalıdır.",
+        UserWarning,
+        stacklevel=2,
+    )
+    return new_key.encode()
+
+
+SECRET_KEY = _load_or_generate_secret_key()
 
 # Tek kullanımlık Nonce önbelleği (Nonce -> Expiry Timestamp)
 USED_NONCES: Dict[str, int] = {}
@@ -31,7 +77,7 @@ def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
 
     nonce = secrets.token_hex(16)
     ts = now
-    signature = hmac.new(SECRET_KEY, f"{nonce}:{ts}".encode(), hashlib.sha256).hexdigest()
+    signature = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     challenge = f"{nonce}.{ts}.{signature}"
     return {
         "challenge": challenge,
@@ -63,7 +109,7 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
         return False, "Geçersiz zaman damgası", {}
 
     # 1. Kriptografik HMAC İmzasını Doğrula
-    expected_sig = hmac.new(SECRET_KEY, f"{nonce}:{ts}".encode(), hashlib.sha256).hexdigest()
+    expected_sig = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected_sig):
         return False, "Sahte challenge imzası (Forged Signature)", {}
 

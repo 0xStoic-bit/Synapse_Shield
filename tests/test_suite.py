@@ -24,7 +24,7 @@ class C:
 
 def run_all_tests():
     print(f"\n{C.BOLD}{C.CYAN}╔══════════════════════════════════════════════════════════════╗{C.END}")
-    print(f"{C.BOLD}{C.CYAN}║     🛡️  SYNAPSE SHIELD — HER ŞEYİ TEST EDEN SÜİT (v0.3.1)    ║{C.END}")
+    print(f"{C.BOLD}{C.CYAN}║     🛡️  SYNAPSE SHIELD — HER ŞEYİ TEST EDEN SÜİT (v0.4.0)    ║{C.END}")
     print(f"{C.BOLD}{C.CYAN}╚══════════════════════════════════════════════════════════════╝{C.END}\n")
 
     total_tests = 0

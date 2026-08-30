@@ -25,7 +25,10 @@ def main():
         print(f"🛡️  Starting Synapse Shield on http://{host}:{port} ...")
         uvicorn.run("synapse_shield.main:app", host=host, port=port, reload=True)
     elif args.command == "test":
-        from .live_attacker import main as run_attack_suite
+        try:
+            from .live_attacker import main as run_attack_suite
+        except ImportError:
+            from live_attacker import main as run_attack_suite
         run_attack_suite()
 
 if __name__ == "__main__":
