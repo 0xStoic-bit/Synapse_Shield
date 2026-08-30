@@ -6,9 +6,11 @@ __pycache__/
 dist/
 build/
 
-# Sanal Ortam
-.venv/
-venv/
+# Sanal Ortamlar
+.venv*
+venv*
+.env*
+env/
 ENV/
 
 # Yerel Veritabanı ve Loglar
