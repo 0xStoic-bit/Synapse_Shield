@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.3.1 - Cryptographic Behavioral Telemetry Collector
+ * Synapse Shield SDK v0.4.0 - Cryptographic Behavioral Telemetry Collector
  */
 
 (function (window) {
@@ -40,6 +40,18 @@
       window.addEventListener("keyup", () => {
         this.keystrokes.push({ type: "up", t: Date.now() });
         if (this.keystrokes.length > 50) this.keystrokes.shift();
+      });
+
+      window.addEventListener("scroll", () => {
+        const now = Date.now();
+        if (now - this.lastScrollTime >= this.scrollThrottleMs) {
+          this.scrolls.push({
+            y: window.scrollY || document.documentElement.scrollTop,
+            t: now,
+          });
+          this.lastScrollTime = now;
+          if (this.scrolls.length > 200) this.scrolls.shift();
+        }
       });
 
       // Sunucudan tek kullanımlık challenge al

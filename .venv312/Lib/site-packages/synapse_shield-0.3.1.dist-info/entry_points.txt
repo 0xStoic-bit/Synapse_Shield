@@ -1,0 +1,2 @@
+[console_scripts]
+synapse-shield = synapse_shield.cli:main

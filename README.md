@@ -30,7 +30,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Hardening (v0.3.0)
+## ✨ Key Features & Hardening (v0.4.0)
 
 | Feature                                    | Description                                                                                                                                   |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -156,6 +156,15 @@ Add the lightweight SDK (**<5 KB**) to your HTML or React project:
   }
 </script>
 ```
+
+### Environment Variables & Security Configuration
+
+| Environment Variable | Default | Description |
+| -------------------- | ------- | ----------- |
+| `SYNAPSE_SECRET_KEY` | `~/.synapse_shield/secret.key` | Cryptographic key for HMAC challenge signing. **Must be set in production.** |
+| `SYNAPSE_CORS_ORIGINS` | Disabled (`[]`) | Comma-separated list of allowed CORS origins (e.g., `https://myapp.com,https://api.myapp.com`). |
+| `SYNAPSE_DEV_MODE` | `0` | Set to `1` to automatically allow common local dev origins (`localhost:3000`, `localhost:5173`, etc.). |
+| `SYNAPSE_DB_PATH` | System Temp Path | Path to SQLite database file. |
 
 ---
 
