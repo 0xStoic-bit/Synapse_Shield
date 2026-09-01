@@ -16,7 +16,7 @@
 
 <br/>
 
-[Key Features](#-key-features--hardening-v040) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations)
+[Key Features](#-key-features--hardening-v050) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations)
 
 </div>
 
@@ -30,23 +30,27 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Hardening (v0.4.0)
+## ✨ Key Features & Hardening (v0.5.0)
 
-| Feature                                    | Description                                                                                                                                   |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🧩 **100% Invisible UX**                   | Zero annoying puzzles, image selections, or audio challenges. Legitimate humans pass friction-free.                                           |
-| ⚡ **Async Non-Blocking SLA (<0.5 ms)**    | Heavy CPU-bound kinematics processed via `asyncio.to_thread`, guaranteeing zero event-loop blocking under high concurrency.                   |
-| 🔐 **Cryptographic Replay Defense**        | Every session is bound to a single-use **HMAC-SHA256** signed nonce. Intercepted tokens cannot be replayed.                                   |
+| Feature | Description |
+| :--- | :--- |
+| 🧩 **100% Invisible UX** | Zero annoying puzzles, image selections, or audio challenges. Legitimate humans pass friction-free. |
+| ⚡ **Async Non-Blocking SLA (<0.5 ms)** | Heavy CPU-bound kinematics processed via `asyncio.to_thread`, guaranteeing zero event-loop blocking under high concurrency. |
+| 🔐 **Cryptographic Replay Defense** | Every session is bound to a single-use **HMAC-SHA256** signed nonce. Intercepted tokens cannot be replayed. |
 | 🧠 **Fitts's Law Deceleration Kinematics** | Distinguishes advanced Bézier curve bots (`ghost-cursor`) from organic human hands by analyzing terminal velocity drops before click actions. |
-| 🔒 **100% Zero-PII & Privacy-First**       | No keystroke characters or form values collected — strictly relative millisecond timing deltas processed (GDPR & KVKK compliant).             |
-| 📊 **Poisson Flooder Defense**             | Statistical Poisson anomaly detection identifies high-frequency headless API flooders and applies dynamic IP rate penalties.                  |
-| 💾 **SQLite WAL with Auto-Pruning**        | In-memory TTL nonce management + Write-Ahead Logging with automatic log pruning prevents memory leaks and disk bloat.                         |
+| ⚛️ **React & Next.js Drop-in Support** | Native `"use client"` compatible `<SynapseProtect />` component and `useSynapseShield` hook with event throttling. |
+| 🐍 **Multi-Framework Adapters** | Native middlewares and decorators for **Django** (`SynapseShieldMiddleware`) and **Flask** (`@shield_protect_flask`). |
+| ♿ **Accessibility Mode** | Graceful risk scaling (`accessibility_mode=True`) prevents false positives for motor-impaired and assistive device users. |
+| 📈 **Enterprise Prometheus Metrics** | Built-in `/metrics` endpoint supporting multi-process Gunicorn/Uvicorn aggregation via `PROMETHEUS_MULTIPROC_DIR`. |
+| 🔒 **100% Zero-PII & Privacy-First** | No keystroke characters or form values collected — strictly relative millisecond timing deltas processed (GDPR & KVKK compliant). |
+| 📊 **Poisson Flooder Defense** | Statistical Poisson anomaly detection identifies high-frequency headless API flooders and applies dynamic IP rate penalties. |
+| 💾 **SQLite WAL with Auto-Pruning** | In-memory TTL nonce management + Write-Ahead Logging with automatic log pruning prevents memory leaks and disk bloat. |
 
 ---
 
 ## 🏛️ Architecture & Sequence Diagram
 
-```
+```text
 ┌─────────────────┐             ┌─────────────────────┐             ┌─────────────────────────┐
 │  Client Browser │             │  FastAPI Gateway    │             │  Kinematic Decision     │
 │  (synapse-sdk)  │             │  (Synapse Shield)   │             │  Engine (<0.5ms SLA)    │
@@ -102,7 +106,7 @@ pip install -e .
 python test_suite.py
 ```
 
-Visit [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser to launch the **Live Security Cockpit**.
+Visit [http://127.0.0.1:8000](http://127.0.0.1:8000/) in your browser to launch the **Live Security Cockpit**.
 
 ---
 
@@ -127,9 +131,10 @@ async def login(request: Request):
 
 ### 2. Django & Flask Integration
 
-Native support for Django and Flask synchronous environments.
+Native support for Django and Flask environments.
 
 **Django (`settings.py`)**:
+
 ```python
 MIDDLEWARE = [
     # ...
@@ -141,6 +146,7 @@ SYNAPSE_SHIELD_ACCESSIBILITY = False
 ```
 
 **Flask**:
+
 ```python
 from flask import Flask
 from synapse_shield.flask import shield_protect_flask
@@ -181,7 +187,7 @@ export default function LoginForm() {
 ### 4. Prometheus Metrics
 
 Enterprise observability out of the box. Automatically exposes latency and block rates.
-To enable multi-process support (e.g., Gunicorn workers), simply set the environment variable before starting your server:
+To enable multi-process support (e.g., Gunicorn workers), set the environment variable:
 
 ```bash
 export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
@@ -189,7 +195,7 @@ export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 
 ### 5. Vanilla JS / HTML SDK
 
-Add the lightweight SDK (**<5 KB**) to your vanilla project:
+Add the lightweight SDK (`<5 KB`) to your vanilla project:
 
 ```html
 <script src="http://localhost:8000/static/synapse-sdk.js"></script>
@@ -201,15 +207,6 @@ Add the lightweight SDK (**<5 KB**) to your vanilla project:
   }
 </script>
 ```
-
-### Environment Variables & Security Configuration
-
-| Environment Variable | Default | Description |
-| -------------------- | ------- | ----------- |
-| `SYNAPSE_SECRET_KEY` | `~/.synapse_shield/secret.key` | Cryptographic key for HMAC challenge signing. **Must be set in production.** |
-| `SYNAPSE_CORS_ORIGINS` | Disabled (`[]`) | Comma-separated list of allowed CORS origins. |
-| `SYNAPSE_DEV_MODE` | `0` | Set to `1` to automatically allow common local dev origins. |
-| `SYNAPSE_DB_PATH` | System Temp Path | Path to SQLite database file. |
 
 ---
 
@@ -239,25 +236,23 @@ synapse-shield test
 
 $$\text{Jerk} = \frac{da}{dt} = \frac{d^3x}{dt^3}$$
 
-Human muscle tremors produce continuous high-frequency Jerk. Mathematical bot curves (Bézier/Linear) produce near-zero or static Jerk — this is the primary differentiation signal.
+Human muscle tremors produce continuous high-frequency Jerk. Mathematical bot curves (Bézier/Linear) produce near-zero or static Jerk.
 
 ### 2. Fitts's Law Terminal Deceleration Index
 
 $$\text{Terminal Decel Ratio} = \frac{\bar{v}_{\text{terminal (last 25\%)}}}{v_{\text{peak}}}$$
 
-Humans naturally decelerate ($< 0.40$) as they approach the target click point. Bots maintain constant or linearly decreasing velocity.
+Humans naturally decelerate ($< 0.40$) as they approach the target click point.
 
 ### 3. Cumulative Poisson Anomaly Distribution
 
 $$P(X < k) = \sum_{i=0}^{k-1} \frac{\lambda^i e^{-\lambda}}{i!}$$
 
-Request bursts that exceed the expected Poisson rate with $P > 99\%$ confidence are flagged and rate-penalized.
-
 ---
 
 ## 📁 Repository Structure
 
-```
+```text
 Synapse_Shield/
 ├── .github/
 │   └── workflows/
@@ -270,11 +265,21 @@ Synapse_Shield/
 │       ├── features.py        # 19D Kinematics & Fitts's Law Extractor
 │       ├── main.py            # Async FastAPI Gateway & SQLite Logger
 │       ├── middleware.py      # @shield_protect & Middleware classes
+│       ├── django.py          # Django Middleware Adapter
+│       ├── flask.py           # Flask Route Decorator
+│       ├── metrics.py         # Prometheus Multi-Process Exporter
 │       ├── tokens.py          # HMAC-SHA256 Challenge & Replay Defense
 │       ├── live_attacker.py   # 7-Vector Red Team Simulation Suite
 │       └── static/            # Embedded 3D Cockpit & Client SDK
 │           ├── index.html
 │           └── synapse-sdk.js
+├── synapse-shield-react/      # React / Next.js SDK Package
+│   ├── src/
+│   │   ├── SynapseProtect.tsx # "use client" Drop-in Component
+│   │   ├── useSynapseShield.ts# React Hook with event throttling
+│   │   └── index.ts
+│   ├── package.json
+│   └── tsconfig.json
 ├── tests/                     # Modular Pytest Suite
 │   ├── test_features.py
 │   ├── test_tokens.py
@@ -291,4 +296,4 @@ Synapse_Shield/
 
 ## 📜 License
 
-Distributed under the [MIT License](LICENSE). Free for commercial and personal use.
+Distributed under the [MIT License](https://opensource.org/licenses/MIT). Free for commercial and personal use.
