@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.4.0"
+version = "0.5.0"
 authors = [
   { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
 ]
@@ -21,6 +21,10 @@ dependencies = [
     "uvicorn>=0.29.0",
     "numpy>=1.26.0",
 ]
+
+[project.optional-dependencies]
+frameworks = ["django>=3.2", "flask>=2.0"]
+metrics = ["prometheus-client>=0.19.0"]
 
 [project.scripts]
 synapse-shield = "synapse_shield.cli:main"

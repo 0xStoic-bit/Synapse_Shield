@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'tests')))
 
-from test_suite import run_all_tests
+import pytest
 
 if __name__ == "__main__":
-    run_all_tests()
+    sys.exit(pytest.main(["tests"]))
