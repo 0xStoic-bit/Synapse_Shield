@@ -11,17 +11,20 @@ import json
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+import time
 try:
     from .engine import analyze_behavior
+    from .metrics import METRICS_ENABLED, synapse_requests_total, synapse_inference_latency_seconds
 except ImportError:
     from engine import analyze_behavior
+    METRICS_ENABLED = False
 
-def shield_protect(max_risk_score: float = 50.0):
+def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = False):
     """
     Decorator to protect any FastAPI endpoint with Synapse Shield behavioral biometrics.
     Usage:
         @app.post("/login")
-        @shield_protect(max_risk_score=50.0)
+        @shield_protect(max_risk_score=50.0, accessibility_mode=False)
         async def login(request: Request):
             ...
     """
@@ -50,9 +53,18 @@ def shield_protect(max_risk_score: float = 50.0):
             if not telemetry:
                 raise HTTPException(status_code=403, detail="[Synapse Shield] Missing behavioral telemetry payload.")
 
-            bot_score, classification, reasons, _ = await asyncio.to_thread(analyze_behavior, telemetry)
+            start_time = time.perf_counter()
+            bot_score, classification, reasons, _ = await asyncio.to_thread(
+                analyze_behavior, telemetry, 1, False, accessibility_mode
+            )
+            latency = time.perf_counter() - start_time
+            
+            if METRICS_ENABLED:
+                synapse_inference_latency_seconds.observe(latency)
 
             if bot_score >= max_risk_score:
+                if METRICS_ENABLED:
+                    synapse_requests_total.labels(status="block", classification=classification).inc()
                 raise HTTPException(
                     status_code=403, 
                     detail={
@@ -63,6 +75,8 @@ def shield_protect(max_risk_score: float = 50.0):
                     }
                 )
 
+            if METRICS_ENABLED:
+                synapse_requests_total.labels(status="allow", classification=classification).inc()
             return await func(*args, **kwargs)
         return wrapper
     return decorator
@@ -87,10 +101,11 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
     request'lerde bu pattern uygun değildir.
     """
 
-    def __init__(self, app, protected_paths: list = None, max_risk_score: float = 50.0):
+    def __init__(self, app, protected_paths: list = None, max_risk_score: float = 50.0, accessibility_mode: bool = False):
         super().__init__(app)
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score
+        self.accessibility_mode = accessibility_mode
 
     async def dispatch(self, request, call_next):
         # Sadece korunan path'leri kontrol et
@@ -112,11 +127,18 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
                 content={"error": "[Synapse Shield] Missing or invalid behavioral telemetry payload."}
             )
 
+        start_time = time.perf_counter()
         bot_score, classification, reasons, _ = await asyncio.to_thread(
-            analyze_behavior, telemetry
+            analyze_behavior, telemetry, 1, False, self.accessibility_mode
         )
+        latency = time.perf_counter() - start_time
+        
+        if METRICS_ENABLED:
+            synapse_inference_latency_seconds.observe(latency)
 
         if bot_score >= self.max_risk_score:
+            if METRICS_ENABLED:
+                synapse_requests_total.labels(status="block", classification=classification).inc()
             return JSONResponse(
                 status_code=403,
                 content={
@@ -127,4 +149,6 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
                 }
             )
 
+        if METRICS_ENABLED:
+            synapse_requests_total.labels(status="allow", classification=classification).inc()
         return await call_next(request)

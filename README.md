@@ -108,51 +108,96 @@ Visit [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser to launch t
 
 ## 💻 Developer Integration
 
-### Method 1: FastAPI Route Decorator (3 Lines)
+### 1. FastAPI Integration
 
-Protect any API endpoint or login route using the `@shield_protect` decorator:
+Protect any API endpoint using the `@shield_protect` decorator or global middleware:
 
 ```python
 from fastapi import FastAPI, Request
-from synapse_shield import shield_protect
+from synapse_shield import shield_protect, SynapseShieldMiddleware
 
 app = FastAPI()
+app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/auth"])
 
 @app.post("/api/login")
-@shield_protect(max_risk_score=50.0)
+@shield_protect(max_risk_score=50.0, accessibility_mode=False)
 async def login(request: Request):
-    # Only executes if Synapse Shield verifies the request as genuine human
-    return {"status": "authenticated", "user": "verified_human"}
+    return {"status": "authenticated"}
 ```
 
-### Method 2: Global Middleware
+### 2. Django & Flask Integration
 
-Protect entire route prefixes across your application:
+Native support for Django and Flask synchronous environments.
 
+**Django (`settings.py`)**:
 ```python
-from fastapi import FastAPI
-from synapse_shield import SynapseShieldMiddleware
-
-app = FastAPI()
-app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/auth", "/checkout"])
+MIDDLEWARE = [
+    # ...
+    'synapse_shield.django.SynapseShieldMiddleware',
+]
+SYNAPSE_SHIELD_PROTECTED_PATHS = ['/api/login']
+SYNAPSE_SHIELD_MAX_RISK = 50.0
+SYNAPSE_SHIELD_ACCESSIBILITY = False
 ```
 
-### Method 3: Frontend Client SDK
+**Flask**:
+```python
+from flask import Flask
+from synapse_shield.flask import shield_protect_flask
 
-Add the lightweight SDK (**<5 KB**) to your HTML or React project:
+app = Flask(__name__)
+
+@app.route("/login", methods=["POST"])
+@shield_protect_flask(max_risk_score=50.0)
+def login():
+    return {"status": "authenticated"}
+```
+
+### 3. React / Next.js Integration
+
+We provide a drop-in `"use client"` compatible React package.
+
+```tsx
+import { useSynapseShield, SynapseProtect } from 'synapse-shield-react';
+
+export default function LoginForm() {
+  const { getProtectedPayload } = useSynapseShield();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const payload = getProtectedPayload();
+    // Send payload.token to your backend
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <SynapseProtect />
+      <button type="submit">Login</button>
+    </form>
+  );
+}
+```
+
+### 4. Prometheus Metrics
+
+Enterprise observability out of the box. Automatically exposes latency and block rates.
+To enable multi-process support (e.g., Gunicorn workers), simply set the environment variable before starting your server:
+
+```bash
+export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
+```
+
+### 5. Vanilla JS / HTML SDK
+
+Add the lightweight SDK (**<5 KB**) to your vanilla project:
 
 ```html
-<!-- Include SDK -->
 <script src="http://localhost:8000/static/synapse-sdk.js"></script>
-
 <script>
-  // Initialize biometric listener
   SynapseShield.init();
-
   async function handleLogin() {
-    // Automatically signs and packages 50 Hz telemetry
-    const response = await SynapseShield.submit("/api/score");
-    console.log("Evaluation Result:", response);
+    const payload = SynapseShield.getPayload();
+    // Submit payload
   }
 </script>
 ```
@@ -162,8 +207,8 @@ Add the lightweight SDK (**<5 KB**) to your HTML or React project:
 | Environment Variable | Default | Description |
 | -------------------- | ------- | ----------- |
 | `SYNAPSE_SECRET_KEY` | `~/.synapse_shield/secret.key` | Cryptographic key for HMAC challenge signing. **Must be set in production.** |
-| `SYNAPSE_CORS_ORIGINS` | Disabled (`[]`) | Comma-separated list of allowed CORS origins (e.g., `https://myapp.com,https://api.myapp.com`). |
-| `SYNAPSE_DEV_MODE` | `0` | Set to `1` to automatically allow common local dev origins (`localhost:3000`, `localhost:5173`, etc.). |
+| `SYNAPSE_CORS_ORIGINS` | Disabled (`[]`) | Comma-separated list of allowed CORS origins. |
+| `SYNAPSE_DEV_MODE` | `0` | Set to `1` to automatically allow common local dev origins. |
 | `SYNAPSE_DB_PATH` | System Temp Path | Path to SQLite database file. |
 
 ---
