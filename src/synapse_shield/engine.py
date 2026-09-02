@@ -43,6 +43,11 @@ def analyze_behavior(
         total_risk += 35.0
         reasons.append("Invalid or headless screen dimensions detected.")
         
+    # 2.5 Tarayıcı Eklenti Kontrolü (Mobil Yanlış Pozitif Korumalı)
+    if not features["touch_supported"] and features["screen_width"] >= 1024 and features["plugins_length"] == 0:
+        total_risk += 50.0
+        reasons.append("Missing browser plugins in desktop environment (Possible headless/stealth bot).")
+        
     # 3. Faresiz Form Etkileşimi
     if (features["click_count"] > 0 or features["key_count"] > 0) and features["mouse_points"] == 0:
         total_risk += 50.0

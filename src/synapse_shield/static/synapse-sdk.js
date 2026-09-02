@@ -89,20 +89,22 @@
           screen_width: window.innerWidth || window.screen.width,
           screen_height: window.innerHeight || window.screen.height,
           touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
+          plugins_length: navigator.plugins ? navigator.plugins.length : 0,
+          languages: navigator.languages ? navigator.languages.join(",") : navigator.language,
         },
       };
 
       // Challenge ile birleştirip Base64 Token üretir
-      if (this.currentChallenge) {
-        const envelope = {
-          challenge: this.currentChallenge,
-          telemetry: telemetry,
-          created_at: Date.now(),
-        };
-        return { token: btoa(JSON.stringify(envelope)) };
+      if (!this.currentChallenge) {
+        throw new Error("Synapse Shield: Missing challenge token. Cannot submit telemetry securely.");
       }
-
-      return { telemetry: telemetry };
+      
+      const envelope = {
+        challenge: this.currentChallenge,
+        telemetry: telemetry,
+        created_at: Date.now(),
+      };
+      return { token: btoa(JSON.stringify(envelope)) };
     },
 
     async submit(url = "/api/score") {

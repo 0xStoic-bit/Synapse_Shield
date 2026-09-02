@@ -26,6 +26,9 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         "scroll_count": 0,
         "terminal_decel_ratio": 1.0,
         "velocity_skewness": 0.0,
+        "plugins_length": 1,
+        "touch_supported": False,
+        "screen_width": 1024.0,
     }
 
     if not isinstance(telemetry, dict):
@@ -38,10 +41,17 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         try:
             screen_width = float(browser.get("screen_width", 0))
             screen_height = float(browser.get("screen_height", 0))
+            features["screen_width"] = screen_width
             if screen_width <= 0 or screen_height <= 0 or math.isnan(screen_width) or math.isnan(screen_height):
                 features["screen_valid"] = False
         except (ValueError, TypeError):
             features["screen_valid"] = False
+            
+        features["touch_supported"] = bool(browser.get("touch_supported", False))
+        try:
+            features["plugins_length"] = int(browser.get("plugins_length", 1))
+        except:
+            features["plugins_length"] = 1
 
     # 2. Sayaçlar
     scrolls = telemetry.get("scrolls", [])

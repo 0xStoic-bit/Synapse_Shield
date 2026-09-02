@@ -11,14 +11,13 @@ import json
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from synapse_shield.engine import analyze_behavior
 import time
+from synapse_shield.tokens import verify_and_consume_token
 try:
-    from .engine import analyze_behavior
-    from .metrics import METRICS_ENABLED, synapse_requests_total, synapse_inference_latency_seconds
+    from synapse_shield.metrics import METRICS_ENABLED, synapse_requests_total, synapse_inference_latency_seconds
 except ImportError:
-    from engine import analyze_behavior
     METRICS_ENABLED = False
-
 def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = False):
     """
     Decorator to protect any FastAPI endpoint with Synapse Shield behavioral biometrics.
@@ -42,16 +41,21 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
             if not request:
                 raise HTTPException(status_code=500, detail="Request object not found in endpoint signature")
 
-            # Extract telemetry from header or body
-            telemetry = None
             try:
                 body = await request.json()
-                telemetry = body.get("telemetry") or body
             except Exception:
-                pass
+                raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-            if not telemetry:
-                raise HTTPException(status_code=403, detail="[Synapse Shield] Missing behavioral telemetry payload.")
+            token = body.get("token")
+            if not token:
+                raise HTTPException(status_code=403, detail="[Synapse Shield] Missing token.")
+
+            is_valid, reason, telemetry = verify_and_consume_token(token)
+            if not is_valid:
+                raise HTTPException(status_code=403, detail=f"[Synapse Shield] Token Error: {reason}")
+
+            # İzolasyon (Decoupling) -> Telemetry'yi state'e koy
+            request.state.telemetry = telemetry
 
             start_time = time.perf_counter()
             bot_score, classification, reasons, _ = await asyncio.to_thread(
@@ -116,16 +120,30 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         if request.method not in ("POST", "PUT", "PATCH"):
             return await call_next(request)
 
-        # Body'yi oku — Starlette dahili olarak cache'ler
         try:
             body_bytes = await request.body()
             body = json.loads(body_bytes)
-            telemetry = body.get("telemetry") or body
         except Exception:
             return JSONResponse(
-                status_code=403,
-                content={"error": "[Synapse Shield] Missing or invalid behavioral telemetry payload."}
+                status_code=400,
+                content={"error": "[Synapse Shield] Invalid JSON payload."}
             )
+
+        token = body.get("token")
+        if not token:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "[Synapse Shield] Missing token."}
+            )
+
+        is_valid, reason, telemetry = verify_and_consume_token(token)
+        if not is_valid:
+            return JSONResponse(
+                status_code=403,
+                content={"error": f"[Synapse Shield] Token Error: {reason}"}
+            )
+
+        request.state.telemetry = telemetry
 
         start_time = time.perf_counter()
         bot_score, classification, reasons, _ = await asyncio.to_thread(

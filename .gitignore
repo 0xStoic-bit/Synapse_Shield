@@ -22,3 +22,6 @@ synapse_shield.db
 # Geçici Araçlar
 extract_zip.py
 .DS_Store
+
+# Rapor ve İnceleme Dosyaları
+synapse_shield_code_review.md
