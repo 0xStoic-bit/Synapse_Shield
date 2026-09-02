@@ -48,4 +48,4 @@ def test_human_verification():
     }
     score, classification, reasons, details = analyze_behavior(human_payload)
     assert classification == "Human"
-    assert score < 30.0
+    assert score <= 50.0

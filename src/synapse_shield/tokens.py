@@ -12,10 +12,14 @@ import json
 import base64
 import warnings
 import logging
+import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, Any
 
 logger = logging.getLogger("synapse_shield")
+
+DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 
 
 def _load_or_generate_secret_key() -> bytes:
@@ -61,19 +65,25 @@ def _load_or_generate_secret_key() -> bytes:
 
 SECRET_KEY = _load_or_generate_secret_key()
 
-# Tek kullanımlık Nonce önbelleği (Nonce -> Expiry Timestamp)
-USED_NONCES: Dict[str, int] = {}
+def _cleanup_expired_nonces():
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5.0)
+        now = int(time.time())
+        conn.execute("DELETE FROM used_nonces WHERE expires_at < ?", (now,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Nonce cleanup failed: {e}")
 
 def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
     """
     İstemciye HMAC-SHA256 ile imzalanmış tek kullanımlık bir challenge üretir.
     Format: nonce.timestamp.signature
     """
-    # Süresi dolan nonceları temizleyerek memory leak'i önle
+    # Süresi dolan nonceları temizleyerek db şişmesini önle
+    _cleanup_expired_nonces()
+    
     now = int(time.time())
-    expired_nonces = [k for k, exp in USED_NONCES.items() if exp < now]
-    for k in expired_nonces:
-        del USED_NONCES[k]
 
     nonce = secrets.token_hex(16)
     ts = now
@@ -114,21 +124,33 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
         return False, "Sahte challenge imzası (Forged Signature)", {}
 
     now = int(time.time())
-    # 2. Zaman Aşımı Kontrolü (60 saniye)
+    # 2. Zaman Aşımı ve Manipülasyon Kontrolü
     if now - ts > 60:
         return False, f"Token zaman aşımına uğradı ({now - ts}sn > 60sn)", {}
     if ts - now > 5:
         return False, "Gelecek zaman damgası (Saat manipülasyonu)", {}
+    if now - ts < 1.5:
+        return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={now - ts:.2f}s", {}
 
     # 3. Süresi Dolan Nonce'ları Temizle
-    expired_nonces = [k for k, exp in USED_NONCES.items() if exp < now]
-    for k in expired_nonces:
-        del USED_NONCES[k]
+    _cleanup_expired_nonces()
 
     # 4. Replay Attack (Yeniden Oynatma) Kontrolü
-    if nonce in USED_NONCES:
+    # Atomik SQLite INSERT ile Race Condition önlenir
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5.0)
+        # Nonce'ı 120 saniyeliğine 'kullanıldı' olarak işaretle
+        conn.execute("INSERT INTO used_nonces (nonce, expires_at) VALUES (?, ?)", (nonce, now + 120))
+        conn.commit()
+    except sqlite3.IntegrityError:
         return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
+    except Exception as e:
+        logger.error(f"Database error during token verify: {e}")
+        return False, "Sunucu veritabanı hatası", {}
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
 
-    # Nonce'ı 120 saniyeliğine 'kullanıldı' olarak işaretle
-    USED_NONCES[nonce] = now + 120
     return True, "Geçerli", telemetry

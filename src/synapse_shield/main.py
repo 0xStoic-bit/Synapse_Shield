@@ -13,12 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from typing import Dict, Any, List
 
-try:
-    from .engine import analyze_behavior
-    from .tokens import generate_challenge, verify_and_consume_token
-except ImportError:
-    from engine import analyze_behavior
-    from tokens import generate_challenge, verify_and_consume_token
+from synapse_shield.engine import analyze_behavior
+from synapse_shield import tokens
+from synapse_shield.middleware import shield_protect, SynapseShieldMiddleware
+from synapse_shield.tokens import verify_and_consume_token, generate_challenge
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 
@@ -74,6 +72,12 @@ def init_db():
             ip TEXT PRIMARY KEY,
             banned_until TEXT,
             reason TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS used_nonces (
+            nonce TEXT PRIMARY KEY,
+            expires_at INTEGER
         )
     """)
     conn.commit()
@@ -188,34 +192,34 @@ async def get_challenge():
 
 @app.post("/api/score")
 async def score_telemetry(request: Request):
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
     ip = get_client_ip(request)
     
     if is_ip_banned(ip):
         raise HTTPException(status_code=403, detail="IP address temporarily banned due to suspicious activity.")
 
     user_agent = request.headers.get("user-agent", "Unknown")
+    
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    token = body.get("token")
+    if not token:
+        raise HTTPException(status_code=403, detail="[Synapse Shield] Missing token.")
 
     # 1. Kriptografik Token Varsa Doğrula
-    if "token" in body:
-        is_valid, reason, telemetry = verify_and_consume_token(body["token"])
-        if not is_valid:
-            # Replay Attack veya sahte token durumu
-            save_log(ip, user_agent, 100.0, "Bot", [reason], {}, {})
-            return {
-                "status": "blocked",
-                "bot_score": 100.0,
-                "classification": "Bot",
-                "reasons": [reason],
-                "details": {}
-            }
-    else:
-        # Geriye dönük uyumluluk: doğrudan telemetri gönderildiyse
-        telemetry = body.get("telemetry", body)
+    is_valid, reason, telemetry = verify_and_consume_token(token)
+    if not is_valid:
+        # Replay Attack veya sahte token durumu
+        save_log(ip, user_agent, 100.0, "Bot", [reason], {}, {})
+        return {
+            "status": "blocked",
+            "bot_score": 100.0,
+            "classification": "Bot",
+            "reasons": [reason],
+            "details": {}
+        }
 
     recent_count = get_recent_request_count(ip)
     if recent_count > 100:
