@@ -17,11 +17,11 @@ def test_challenge_endpoint():
     assert "expires_in" in data
 
 def test_score_endpoint_invalid_json():
-    response = client.post("/api/score", data="invalid json")
+    response = client.post("/api/score", data="invalid json", headers={"X-Forwarded-For": "10.0.0.1"})
     assert response.status_code == 400
 
 def test_score_without_token():
-    response = client.post("/api/score", json={"telemetry": {}})
+    response = client.post("/api/score", json={"telemetry": {}}, headers={"X-Forwarded-For": "10.0.0.2"})
     # Token zorunlu olduğu için 403 Forbidden bekliyoruz
     assert response.status_code == 403
 
@@ -60,7 +60,7 @@ def test_score_with_valid_token():
     
     token = base64.b64encode(json.dumps(envelope).encode('utf-8')).decode('utf-8')
     
-    response = client.post("/api/score", json={"token": token})
+    response = client.post("/api/score", json={"token": token}, headers={"X-Forwarded-For": "10.0.0.3"})
     
     # Eger bot score < 50 ise status "success" doner, yoksa "success" donup bot skoru 50+ verir, ya da token hatasi varsa "blocked" döner
     assert response.status_code == 200
