@@ -29,7 +29,5 @@ jobs:
           pip install pytest httpx
 
       - name: Test with pytest
-        env:
-          SYNAPSE_DB_PATH: ":memory:"
         run: |
           pytest tests -v
