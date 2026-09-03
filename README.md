@@ -30,10 +30,13 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Hardening (v0.5.0)
+## ✨ Key Features & Security Architecture (v0.6.3)
 
 | Feature | Description |
 | :--- | :--- |
+| 🤖 **Pure-NumPy 1D-CNN Micro-Brain** | The Sequence Tokenizer fuses kinematics and keystroke stats into an 8D and 5D tensor architecture, fully processed by a 15KB NumPy-based 1D-CNN (Zero-PyTorch). |
+| 🛡️ **Max Gating (Fusion Engine)** | Dynamically unifies Heuristic/Mathematical rules with the 1D-CNN AI confidence score. If either engine flags the telemetry as a Bot, the request is unconditionally blocked. |
+| 🔗 **Zero-Dependency Multimodal Tokenizer** | Fuses 5D Mouse Sequence `[dx, dy, dt, velocity, jerk]` with 8D Static Keystroke/Scroll Vector via Late Fusion. |
 | 🧩 **100% Invisible UX** | Zero annoying puzzles, image selections, or audio challenges. Legitimate humans pass friction-free. |
 | ⚡ **Async Non-Blocking SLA (<0.5 ms)** | Heavy CPU-bound kinematics processed via `asyncio.to_thread`, guaranteeing zero event-loop blocking under high concurrency. |
 | 🔐 **Cryptographic Replay Defense** | Every session is bound to a single-use **HMAC-SHA256** signed nonce. Intercepted tokens cannot be replayed. |
@@ -44,7 +47,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 | 📈 **Enterprise Prometheus Metrics** | Built-in `/metrics` endpoint supporting multi-process Gunicorn/Uvicorn aggregation via `PROMETHEUS_MULTIPROC_DIR`. |
 | 🔒 **100% Zero-PII & Privacy-First** | No keystroke characters or form values collected — strictly relative millisecond timing deltas processed (GDPR & KVKK compliant). |
 | 📊 **Poisson Flooder Defense** | Statistical Poisson anomaly detection identifies high-frequency headless API flooders and applies dynamic IP rate penalties. |
-| 💾 **SQLite WAL with Auto-Pruning** | In-memory TTL nonce management + Write-Ahead Logging with automatic log pruning prevents memory leaks and disk bloat. |
+| 💾 **SQLite WAL with Auto-Pruning** | In-memory TTL nonce management + Write-Ahead Logging (WAL) with 10s timeouts prevents database locks during async BackgroundTasks. |
 
 ---
 
@@ -262,7 +265,9 @@ Synapse_Shield/
 │       ├── __init__.py        # Public API exports
 │       ├── cli.py             # CLI Controller (run / test commands)
 │       ├── engine.py          # Real-time Decision & Poisson Engine
-│       ├── features.py        # 19D Kinematics & Fitts's Law Extractor
+│       ├── features.py        # 19D Kinematics, Fitts's Law & Multimodal Tokenizer
+│       ├── models.py          # Zero-Dependency NumPy 1D-CNN Inference Engine
+│       ├── weights.npz        # 4KB Serialized Neural Network Weights
 │       ├── main.py            # Async FastAPI Gateway & SQLite Logger
 │       ├── middleware.py      # @shield_protect & Middleware classes
 │       ├── django.py          # Django Middleware Adapter

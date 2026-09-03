@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.5.0"
+version = "0.6.3"
 authors = [
   { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
 ]
@@ -33,7 +33,7 @@ synapse-shield = "synapse_shield.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"synapse_shield" = ["static/*"]
+"synapse_shield" = ["static/*", "weights.npz"]
 
 [project.urls]
 Homepage = "https://github.com/0xStoic-bit/Synapse_Shield"

@@ -132,6 +132,21 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
     if now - ts < 1.5:
         return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={now - ts:.2f}s", {}
 
+    # 2.5 Time Travel Kontrolü (DeepSeek Advanced Bypass Koruması)
+    # Eğer bot 1.6 saniye bekleyip, içine 3 saniyelik telemetri sığdırmaya çalışırsa yakalanır!
+    elapsed_time = now - ts
+    try:
+        events = telemetry.get("mouse_movements", []) + telemetry.get("keystrokes", []) + telemetry.get("clicks", []) + telemetry.get("scrolls", [])
+        if events:
+            timestamps = [e.get("t", 0) for e in events if isinstance(e, dict) and "t" in e]
+            if timestamps:
+                telemetry_duration_sec = (max(timestamps) - min(timestamps)) / 1000.0
+                # Telemetrideki olayların süresi, dünyadaki geçen süreden büyük olamaz (0.5s network gecikme payı)
+                if telemetry_duration_sec > elapsed_time + 0.5:
+                    return False, f"Zaman yolculuğu tespit edildi (Time Travel Bot): Telemetri {telemetry_duration_sec:.1f}s sürüyor ancak token {elapsed_time:.1f}s önce alındı!", {}
+    except Exception as e:
+        logger.warning(f"Telemetry time travel check failed: {e}")
+
     # 3. Süresi Dolan Nonce'ları Temizle
     _cleanup_expired_nonces()
 
