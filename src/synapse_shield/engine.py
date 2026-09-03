@@ -4,7 +4,18 @@ Synapse Shield - Core Behavioral Decision Engine v0.4.1 (Anti-Bezier Hardened)
 
 import math
 from typing import Dict, Any, List, Tuple
-from .features import extract_features
+from .features import extract_features, MultimodalTokenizer
+from .models import SynapseHybridModel
+
+# --- GLOBAL WARMUP ---
+# FastAPI (Uvicorn) worker başına sadece 1 kez yüklenir, RAM'de kalır.
+try:
+    _tokenizer = MultimodalTokenizer(max_mouse_steps=60)
+    _ai_model = SynapseHybridModel()
+except Exception as e:
+    _tokenizer = None
+    _ai_model = None
+    print(f"[Synapse Shield] AI Model load failed: {e}")
 
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
     if k <= 1:
@@ -44,7 +55,7 @@ def analyze_behavior(
         reasons.append("Invalid or headless screen dimensions detected.")
         
     # 2.5 Tarayıcı Eklenti Kontrolü (Mobil Yanlış Pozitif Korumalı)
-    if not features["touch_supported"] and features["screen_width"] >= 1024 and features["plugins_length"] == 0:
+    if not features.get("touch_supported", False) and features.get("screen_width", 0) >= 1024 and features.get("plugins_length", 1) == 0:
         total_risk += 50.0
         reasons.append("Missing browser plugins in desktop environment (Possible headless/stealth bot).")
         
@@ -124,18 +135,39 @@ def analyze_behavior(
             total_risk += 60.0 * freq_anomaly
             reasons.append(f"Poisson request frequency anomaly (rate: {recent_request_count} req/10s, risk confidence: {freq_anomaly*100:.1f}%).")
 
-    bot_score = min(100.0, max(0.0, total_risk))
-    classification = "Bot" if bot_score >= 50.0 else "Human"
+    heuristic_score = min(100.0, max(0.0, total_risk))
     
-    if bot_score < 10.0:
-        reasons.append("Natural behavioral telemetry flags verified.")
-        
+    # 7. Yapay Zeka (1D-CNN) Puanlaması
+    ai_score = 0.0
+    if _ai_model and _tokenizer:
+        try:
+            fused = _tokenizer.fuse(telemetry)
+            ai_prob = _ai_model.predict(fused["mouse_tensor"], fused["static_vector"])
+            ai_score = ai_prob * 100.0
+        except Exception as e:
+            ai_score = 0.0
+            reasons.append(f"AI Model Error: {str(e)}")
+            
+    # 8. Max Gating (Karar Birleştirme)
+    final_bot_score = max(heuristic_score, ai_score)
+    
+    classification = "Bot" if final_bot_score >= 50.0 else "Human"
+    
+    if final_bot_score >= 50.0:
+        if ai_score >= 50.0:
+            reasons.append(f"1D-CNN AI Engine Confidence: {ai_score:.1f}% Bot.")
+    else:
+        if final_bot_score < 10.0:
+            reasons.append("Natural behavioral telemetry flags verified by AI & Heuristics.")
+            
     details = {
         "features": features,
         "recent_request_count": recent_request_count,
         "poisson_anomaly_score": freq_anomaly,
+        "heuristic_score": heuristic_score,
+        "ai_score": ai_score,
         "is_ip_penalized": is_ip_penalized,
         "accessibility_mode": accessibility_mode
     }
     
-    return bot_score, classification, reasons, details
+    return final_bot_score, classification, reasons, details

@@ -151,3 +151,147 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
                         features["avg_jerk"] = sum(map(abs, jerks)) / len(jerks)
 
     return features
+
+
+class MultimodalTokenizer:
+    """
+    v0.6.1 - Temporal Sequence Tokenizer (Late Fusion)
+    Fare, Klavye ve Scroll olaylarını 1D-CNN (v0.6.2) modeline uygun 
+    Tensörlere çevirir.
+    """
+    def __init__(self, max_mouse_steps=60):
+        self.max_mouse_steps = max_mouse_steps
+
+    def tokenize_mouse(self, telemetry: dict) -> list:
+        """
+        Döner: list of lists (shape: 60x5) [dx, dy, dt, velocity, jerk]
+        Veri eksikse: Zero Padding
+        Veri fazlaysa: Truncation (Sondan kesilir)
+        """
+        mouse_movements = telemetry.get("mouse_movements", [])
+        if not isinstance(mouse_movements, list):
+            mouse_movements = []
+
+        valid_moves = []
+        for m in mouse_movements:
+            if isinstance(m, dict) and "x" in m and "y" in m and "t" in m:
+                try:
+                    x = float(m["x"])
+                    y = float(m["y"])
+                    t = float(m["t"])
+                    valid_moves.append({"x": x, "y": y, "t": t})
+                except (ValueError, TypeError):
+                    pass
+        
+        valid_moves = sorted(valid_moves, key=lambda m: m["t"])
+        
+        if len(valid_moves) > self.max_mouse_steps + 2:
+            valid_moves = valid_moves[-(self.max_mouse_steps + 2):]
+
+        tensor = []
+        if len(valid_moves) >= 3:
+            distances, dts, velocities, accelerations = [], [], [], []
+            for i in range(1, len(valid_moves)):
+                dx = valid_moves[i]["x"] - valid_moves[i-1]["x"]
+                dy = valid_moves[i]["y"] - valid_moves[i-1]["y"]
+                dt = max(0.1, valid_moves[i]["t"] - valid_moves[i-1]["t"])
+                dist = math.sqrt(dx**2 + dy**2)
+                vel = dist / dt
+                distances.append((dx, dy, dt, vel))
+                dts.append(dt)
+                velocities.append(vel)
+            
+            for i in range(1, len(velocities)):
+                acc = (velocities[i] - velocities[i-1]) / dts[i]
+                accelerations.append(acc)
+
+            jerks = []
+            for i in range(1, len(accelerations)):
+                jerk = (accelerations[i] - accelerations[i-1]) / dts[i+1]
+                jerks.append(jerk)
+                
+            for i in range(len(jerks)):
+                dx, dy, dt, vel = distances[i+2]
+                tensor.append([dx, dy, dt, vel, jerks[i]])
+        
+        if len(tensor) > self.max_mouse_steps:
+            tensor = tensor[-self.max_mouse_steps:]
+            
+        while len(tensor) < self.max_mouse_steps:
+            tensor.append([0.0, 0.0, 0.0, 0.0, 0.0])
+            
+        return tensor
+
+    def tokenize_static(self, telemetry: dict) -> list:
+        """
+        Döner: list (shape: 8)
+        [key_count, avg_interval, interval_var, hold_time_avg, hold_time_var, scroll_count, avg_scroll_speed, scroll_accel_var]
+        """
+        keystrokes = telemetry.get("keystrokes", [])
+        if not isinstance(keystrokes, list):
+            keystrokes = []
+            
+        valid_keys = [k for k in keystrokes if isinstance(k, dict) and "t" in k and "type" in k]
+        sorted_keys = sorted(valid_keys, key=lambda k: k["t"])
+        
+        key_count = len([k for k in sorted_keys if k["type"] == "down"])
+        
+        downs = [k for k in sorted_keys if k["type"] == "down"]
+        ups = [k for k in sorted_keys if k["type"] == "up"]
+        
+        intervals = []
+        for i in range(1, len(downs)):
+            intervals.append(max(0.0, downs[i]["t"] - downs[i-1]["t"]))
+            
+        avg_interval = sum(intervals) / len(intervals) if intervals else 0.0
+        interval_var = sum((x - avg_interval)**2 for x in intervals) / len(intervals) if intervals else 0.0
+        
+        hold_times = []
+        for down in downs:
+            possible_ups = [u for u in ups if u["t"] >= down["t"]]
+            if possible_ups:
+                hold_times.append(possible_ups[0]["t"] - down["t"])
+                ups.remove(possible_ups[0])
+                
+        hold_time_avg = sum(hold_times) / len(hold_times) if hold_times else 0.0
+        hold_time_var = sum((x - hold_time_avg)**2 for x in hold_times) / len(hold_times) if hold_times else 0.0
+        
+        scrolls = telemetry.get("scrolls", [])
+        if not isinstance(scrolls, list):
+            scrolls = []
+            
+        valid_scrolls = [s for s in scrolls if isinstance(s, dict) and "t" in s and "y" in s]
+        valid_scrolls = sorted(valid_scrolls, key=lambda s: s["t"])
+        
+        scroll_count = len(valid_scrolls)
+        scroll_speeds = []
+        for i in range(1, len(valid_scrolls)):
+            dy = abs(valid_scrolls[i]["y"] - valid_scrolls[i-1]["y"])
+            dt = max(0.1, valid_scrolls[i]["t"] - valid_scrolls[i-1]["t"])
+            scroll_speeds.append(dy / dt)
+            
+        avg_scroll_speed = sum(scroll_speeds) / len(scroll_speeds) if scroll_speeds else 0.0
+        
+        scroll_accels = []
+        for i in range(1, len(scroll_speeds)):
+            dt = max(0.1, valid_scrolls[i+1]["t"] - valid_scrolls[i]["t"])
+            scroll_accels.append((scroll_speeds[i] - scroll_speeds[i-1]) / dt)
+            
+        scroll_accel_var = sum((a - (sum(scroll_accels)/len(scroll_accels)))**2 for a in scroll_accels) / len(scroll_accels) if scroll_accels else 0.0
+        
+        return [
+            float(key_count),
+            float(avg_interval),
+            float(interval_var),
+            float(hold_time_avg),
+            float(hold_time_var),
+            float(scroll_count),
+            float(avg_scroll_speed),
+            float(scroll_accel_var)
+        ]
+
+    def fuse(self, telemetry: dict) -> dict:
+        return {
+            "mouse_tensor": self.tokenize_mouse(telemetry),
+            "static_vector": self.tokenize_static(telemetry)
+        }

@@ -2,6 +2,7 @@ import os
 import tempfile
 import json
 import sqlite3
+# pyrefly: ignore [missing-import]
 import uvicorn
 import asyncio
 import threading
@@ -31,7 +32,7 @@ def get_connection() -> sqlite3.Connection:
     """Thread-local SQLite bağlantısı döndürür. Her thread kendi connection'ını kullanır."""
     conn = getattr(_thread_local, "connection", None)
     if conn is None:
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=10.0)
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA wal_autocheckpoint=1000;")
