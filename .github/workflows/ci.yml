@@ -30,6 +30,6 @@ jobs:
 
       - name: Test with pytest
         env:
-          SYNAPSE_DB_FILE: ":memory:"
+          SYNAPSE_DB_PATH: ":memory:"
         run: |
           pytest tests -v

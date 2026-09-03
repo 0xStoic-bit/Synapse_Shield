@@ -293,8 +293,9 @@ async def clear_logs():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM logs")
+    cursor.execute("DELETE FROM banned_ips")
     conn.commit()
-    return {"status": "success", "message": "Database logs cleared"}
+    return {"status": "success", "message": "Database logs and bans cleared"}
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
