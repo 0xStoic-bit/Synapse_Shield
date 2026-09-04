@@ -91,6 +91,22 @@
           touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
           plugins_length: navigator.plugins ? navigator.plugins.length : 0,
           languages: navigator.languages ? navigator.languages.join(",") : navigator.language,
+          is_plugin_array_fake: Array.isArray(navigator.plugins),
+          has_webdriver_own_prop: navigator.hasOwnProperty("webdriver"),
+          is_webgl_hooked: (function() {
+            try {
+              const nativeToString = Function.prototype.toString;
+              const fnStr = nativeToString.call(WebGLRenderingContext.prototype.getParameter);
+              return !fnStr.includes("[native code]");
+            } catch(e) { return false; }
+          })(),
+          is_canvas_hooked: (function() {
+            try {
+              const nativeToString = Function.prototype.toString;
+              const fnStr = nativeToString.call(HTMLCanvasElement.prototype.toDataURL);
+              return !fnStr.includes("[native code]");
+            } catch(e) { return false; }
+          })(),
         },
       };
 

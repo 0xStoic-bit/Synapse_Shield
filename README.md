@@ -30,10 +30,12 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.6.3)
+## ✨ Key Features & Security Architecture (v0.6.4)
 
 | Feature | Description |
 | :--- | :--- |
+| 🕵️ **Anti-Stealth & Tamper Proofing** | Dynamically detects headless browser fingerprints (`navigator.webdriver`), fake plugin arrays, and native `toString` overwrites in WebGL/Canvas APIs. |
+| 🗄️ **Continuous Learning Collector** | Integrated drop-in `store.html` telemetry collector endpoint (`/api/collect_dataset`) for future 1D-CNN Fine-Tuning with raw human datasets. |
 | 🤖 **Pure-NumPy 1D-CNN Micro-Brain** | The Sequence Tokenizer fuses kinematics and keystroke stats into an 8D and 5D tensor architecture, fully processed by a 15KB NumPy-based 1D-CNN (Zero-PyTorch). |
 | 🛡️ **Max Gating (Fusion Engine)** | Dynamically unifies Heuristic/Mathematical rules with the 1D-CNN AI confidence score. If either engine flags the telemetry as a Bot, the request is unconditionally blocked. |
 | 🔗 **Zero-Dependency Multimodal Tokenizer** | Fuses 5D Mouse Sequence `[dx, dy, dt, velocity, jerk]` with 8D Static Keystroke/Scroll Vector via Late Fusion. |

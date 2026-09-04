@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synapse Premium Store - Checkout</title>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(circle at top right, #1e1b4b, var(--bg-dark));
+            font-family: 'Inter', -apple-system, sans-serif;
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow-x: hidden;
+        }
+
+        .background-blobs {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .blob {
+            position: absolute;
+            filter: blur(80px);
+            opacity: 0.5;
+            border-radius: 50%;
+            animation: float 10s infinite ease-in-out alternate;
+        }
+
+        .blob-1 { top: -10%; left: -10%; width: 400px; height: 400px; background: #4f46e5; }
+        .blob-2 { bottom: -10%; right: -10%; width: 500px; height: 500px; background: #0ea5e9; animation-delay: -5s; }
+
+        @keyframes float {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(50px, 50px) scale(1.1); }
+        }
+
+        .checkout-container {
+            width: 100%;
+            max-width: 900px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            padding: 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            margin: 2rem;
+        }
+
+        .product-preview {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+            padding: 2rem;
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .product-image-placeholder {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+            margin-bottom: 2rem;
+        }
+
+        h2 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .price {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 1rem;
+        }
+
+        .features {
+            list-style: none;
+            padding: 0;
+            color: var(--text-muted);
+            line-height: 1.8;
+        }
+
+        .checkout-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        input {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--glass-border);
+            padding: 1rem;
+            border-radius: 12px;
+            color: white;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        button {
+            background: linear-gradient(135deg, var(--primary), #8b5cf6);
+            color: white;
+            border: none;
+            padding: 1.2rem;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            margin-top: 1rem;
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 25px rgba(59, 130, 246, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .collector-badge {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        @keyframes ping {
+            75%, 100% { transform: scale(2); opacity: 0; }
+        }
+
+        @media (max-width: 768px) {
+            .checkout-container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="checkout-container">
+        <!-- Sol Panel: Ürün Detayı -->
+        <div class="product-preview">
+            <div>
+                <div class="product-image-placeholder">🛡️</div>
+                <h2>Synapse Shield Pro</h2>
+                <p style="color: var(--text-muted); margin-top: 0;">Advanced Kinematic AI Protection</p>
+                
+                <div class="price">$199.00</div>
+                
+                <ul class="features">
+                    <li>✓ 1D-CNN Telemetry Analysis</li>
+                    <li>✓ Minimum Jerk Deflection</li>
+                    <li>✓ Real-time Browser Integrity</li>
+                    <li>✓ Dynamic IP Penalization</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Sağ Panel: Checkout Formu -->
+        <form class="checkout-form" id="checkout-form">
+            <h2 style="margin-bottom: 1rem;">Payment Details</h2>
+            
+            <div class="form-group">
+                <label for="name">Full Name</label>
+                <input type="text" id="name" required placeholder="John Doe" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" required placeholder="john@example.com" autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label for="card">Card Number (Mock)</label>
+                <input type="text" id="card" required placeholder="4111 1111 1111 1111" autocomplete="off">
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="exp">Expiry</label>
+                    <input type="text" id="exp" required placeholder="12/26" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="cvc">CVC</label>
+                    <input type="text" id="cvc" required placeholder="123" autocomplete="off">
+                </div>
+            </div>
+
+            <button type="submit" id="submit-btn">Complete Purchase</button>
+        </form>
+    </div>
+
+    <div class="collector-badge">
+        <div class="pulse"></div>
+        Telemetry Collector Active
+    </div>
+
+    <!-- SYNAPSE SHIELD DATA COLLECTOR SCRIPT -->
+    <script>
+        const telemetry = {
+            mouse_movements: [],
+            keystrokes: [],
+            clicks: [],
+            scrolls: [],
+            browser: {
+                screen_width: window.innerWidth,
+                screen_height: window.innerHeight,
+                user_agent: navigator.userAgent
+            }
+        };
+
+        const keydownTimes = {};
+
+        // 1. Fare Hareketleri (Her tetiklenmede alır, saniyede ~60-120 kez)
+        document.addEventListener('mousemove', (e) => {
+            telemetry.mouse_movements.push({ x: e.clientX, y: e.clientY, t: Date.now() });
+        });
+
+        // 2. Tıklamalar
+        document.addEventListener('mousedown', (e) => {
+            telemetry.clicks.push({ x: e.clientX, y: e.clientY, t: Date.now() });
+        });
+
+        // 3. Scroll
+        document.addEventListener('scroll', () => {
+            telemetry.scrolls.push({ deltaY: window.scrollY, t: Date.now() });
+        });
+
+        // 4. Klavye Dinamikleri (Dwell Time = keyup - keydown süresi)
+        document.addEventListener('keydown', (e) => {
+            if (!keydownTimes[e.code]) {
+                keydownTimes[e.code] = Date.now();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (keydownTimes[e.code]) {
+                const dwell_time = Date.now() - keydownTimes[e.code];
+                // Gizlilik: Hangi tuşa basıldığını kaydetmiyoruz (HIDDEN), sadece ne kadar basılı tutulduğunu alıyoruz
+                telemetry.keystrokes.push({ key: "HIDDEN", duration_ms: dwell_time, t: Date.now() });
+                delete keydownTimes[e.code];
+            }
+        });
+
+        // Form Submit olduğunda veriyi arka plana yolla
+        document.getElementById('checkout-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const btn = document.getElementById('submit-btn');
+            const originalText = btn.innerText;
+            btn.innerText = "Processing...";
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/collect_dataset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(telemetry)
+                });
+
+                if (response.ok) {
+                    alert('🎉 Success! Telemetry data has been securely saved to synapse_dataset.db for AI training.');
+                    // Reset telemetry buffer
+                    telemetry.mouse_movements = [];
+                    telemetry.keystrokes = [];
+                    telemetry.clicks = [];
+                    telemetry.scrolls = [];
+                    document.getElementById('checkout-form').reset();
+                } else {
+                    alert('Error saving data. Please check server logs.');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Connection error. Is the server running?');
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -85,6 +85,35 @@ def init_db():
 
 init_db()
 
+DATASET_DB_FILE = os.environ.get("SYNAPSE_DATASET_PATH", os.path.join(tempfile.gettempdir(), "synapse_dataset.db"))
+_dataset_thread_local = threading.local()
+
+def get_dataset_connection() -> sqlite3.Connection:
+    conn = getattr(_dataset_thread_local, "connection", None)
+    if conn is None:
+        conn = sqlite3.connect(DATASET_DB_FILE, check_same_thread=False, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        _dataset_thread_local.connection = conn
+    return conn
+
+def init_dataset_db():
+    conn = get_dataset_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS raw_telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            mouse_movements TEXT,
+            keystrokes TEXT,
+            clicks TEXT,
+            scrolls TEXT,
+            browser TEXT
+        )
+    """)
+    conn.commit()
+
+init_dataset_db()
+
 app = FastAPI(title="Synapse Shield - Behavioral Bot Detection Engine")
 
 
@@ -297,6 +326,32 @@ async def clear_logs():
     conn.commit()
     return {"status": "success", "message": "Database logs and bans cleared"}
 
+@app.post("/api/collect_dataset")
+async def collect_dataset(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        
+    mouse_movements = json.dumps(body.get("mouse_movements", []))
+    keystrokes = json.dumps(body.get("keystrokes", []))
+    clicks = json.dumps(body.get("clicks", []))
+    scrolls = json.dumps(body.get("scrolls", []))
+    browser = json.dumps(body.get("browser", {}))
+    
+    conn = get_dataset_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow().isoformat()
+    cursor.execute(
+        """
+        INSERT INTO raw_telemetry (timestamp, mouse_movements, keystrokes, clicks, scrolls, browser)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (now, mouse_movements, keystrokes, clicks, scrolls, browser)
+    )
+    conn.commit()
+    return {"status": "success", "message": "Telemetry collected for dataset."}
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 @app.get("/")
@@ -305,6 +360,13 @@ def read_root():
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return HTMLResponse("<h2>Synapse Shield Cockpit: index.html missing.</h2>")
+
+@app.get("/store")
+def read_store():
+    store_path = os.path.join(STATIC_DIR, "store.html")
+    if os.path.exists(store_path):
+        return FileResponse(store_path)
+    return HTMLResponse("<h2>Synapse Shield Store: store.html missing.</h2>")
 
 @app.get("/static/synapse-sdk.js")
 def read_sdk():

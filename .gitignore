@@ -14,15 +14,34 @@ venv*
 env/
 ENV/
 
-# Yerel Veritabanı ve Loglar
+# Yerel Veritabanı ve Veri Setleri
 *.db
+*.sqlite
+*.sqlite3
 synapse_shield.db
-*.log
+synapse_dataset.db
+*.json
+!package.json
+!tsconfig.json
+!stealth_test_results*.json
 
-# Geçici Araçlar
+# Loglar ve Geçici Araçlar
+*.log
 extract_zip.py
 .DS_Store
+scratch/
 
-# Rapor ve İnceleme Dosyaları
-synapse_shield_code_review.md
+# Rapor, Planlama ve Ajan Dosyaları (IDE Artifacts)
+*_report.md
 *roadmap*.md
+implementation_plan.md
+walkthrough.md
+task.md
+test_reports.md
+synapse_shield_code_review.md
+
+# API Keys and Secrets
+.env
+secret*.txt
+*.pem
+credentials.json
