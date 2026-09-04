@@ -23,7 +23,11 @@ synapse_dataset.db
 *.json
 !package.json
 !tsconfig.json
-!stealth_test_results*.json
+
+# Test Çıktıları ve Ekran Görüntüleri
+*.png
+*.jpg
+*.jpeg
 
 # Loglar ve Geçici Araçlar
 *.log
@@ -32,6 +36,7 @@ extract_zip.py
 scratch/
 
 # Rapor, Planlama ve Ajan Dosyaları (IDE Artifacts)
+.agents/
 *_report.md
 *roadmap*.md
 implementation_plan.md
