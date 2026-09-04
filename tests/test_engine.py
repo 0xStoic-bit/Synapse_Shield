@@ -29,7 +29,6 @@ def test_robotic_keyboard():
     score, classification, reasons, details = analyze_behavior(telemetry)
     assert classification == "Bot"
 
-@pytest.mark.skip(reason="AI integration currently flags synthetic human verification tests as Bot due to basic dataset training. Needs model fine-tuning.")
 def test_human_verification():
     human_movements = []
     t_h = 1000
@@ -50,3 +49,32 @@ def test_human_verification():
     score, classification, reasons, details = analyze_behavior(human_payload)
     assert classification == "Human"
     assert score <= 50.0
+
+def test_anti_stealth_hard_block():
+    payload = {
+        "mouse_movements": [],
+        "browser": {
+            "webdriver": False,
+            "is_plugin_array_fake": True,
+            "has_webdriver_own_prop": False
+        }
+    }
+    score, classification, reasons, details = analyze_behavior(payload)
+    assert classification == "Bot"
+    assert score >= 100.0
+    assert any("Stealth browser tamper detected" in r for r in reasons)
+
+def test_anti_stealth_privacy_extension():
+    # Privacy extension (CanvasBlocker) ama temiz insan telemetrisi
+    payload = {
+        "mouse_movements": [{"x": 10 + i, "y": 20 + i, "t": 1000 + i*30} for i in range(20)],
+        "browser": {
+            "webdriver": False,
+            "is_plugin_array_fake": False,
+            "is_webgl_hooked": True
+        }
+    }
+    score, classification, reasons, details = analyze_behavior(payload)
+    # Temiz telemetri olmadığı için heuristics bunu bot yapabilir, ama 40 puan eklendiğini teyit edelim.
+    assert score >= 40.0
+    assert any("Browser fingerprinting hook detected" in r for r in reasons)

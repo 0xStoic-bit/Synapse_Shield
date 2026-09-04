@@ -49,6 +49,16 @@ def analyze_behavior(
         total_risk += 100.0
         reasons.append("Automation tool interface (navigator.webdriver) detected.")
         
+    # 1.5 Anti-Stealth & Prototype Tamper Detection
+    browser_data = telemetry.get("browser", {})
+    if browser_data.get("is_plugin_array_fake") or browser_data.get("has_webdriver_own_prop"):
+        total_risk += 100.0
+        reasons.append("Stealth browser tamper detected: Mocked plugins or webdriver prototype override (100% Bot).")
+        
+    if browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked"):
+        total_risk += 40.0
+        reasons.append("Browser fingerprinting hook detected: WebGL/Canvas prototype overridden (Possible bot or privacy extension).")
+        
     # 2. Ekran Boyutları (Headless)
     if not features["screen_valid"]:
         total_risk += 35.0

@@ -10,32 +10,47 @@ def generate_synthetic_data(num_samples=10000):
     X_static = []
     y = []
     for i in range(num_samples):
-        is_bot = i % 2 == 0
-        if is_bot:
-            # Bot Data: pürüzsüz hız, sıfır veya tekdüze jerk, 0.0 varyanslı static
-            mouse = np.random.normal(loc=1.0, scale=0.1, size=(5, 60)) # (dx, dy, dt, v, jerk)
+        # 3 sınıf: 0 (Human), 1 (Standard Bot), 2 (Adversarial Bypass Bot)
+        data_type = np.random.choice([0, 1, 2], p=[0.4, 0.3, 0.3])
+        
+        if data_type == 1:
+            # Standart Bot Data: pürüzsüz hız, sıfır veya tekdüze jerk, 0.0 varyanslı static
+            mouse = np.random.normal(loc=1.0, scale=0.1, size=(5, 60))
             mouse[4, :] = np.random.normal(0, 0.01, size=(60,)) # jerk=0
             static = np.array([
-                np.random.randint(5, 10), # key_count
-                100.0, # avg_interval
-                0.0,   # interval_var
-                40.0,  # hold_time_avg
-                0.0,   # hold_time_var (BOT FLAG)
-                1.0,   # scroll_count
-                0.5,   # avg_scroll_speed
-                0.0    # scroll_accel_var (BOT FLAG)
+                np.random.randint(5, 10),
+                100.0, 0.0, 40.0, 0.0, 1.0, 0.5, 0.0
             ])
             label = 1.0
+            
+        elif data_type == 2:
+            # Adversarial Bot (Bypass Botu): Sahte yüksek jerk ve sahte klavye varyansı
+            # İnsana çok benzer ama varyansı matematiksel olarak sınırlıdır (örneğin log-normal).
+            mouse = np.random.normal(loc=1.0, scale=0.4, size=(5, 60))
+            # Sentetik titreme (belli bir Gaussian noise ile, ama insan gibi kaotik değil)
+            mouse[4, :] = np.random.normal(8, 2.0, size=(60,)) 
+            static = np.array([
+                np.random.randint(5, 12),
+                150.0 + np.random.normal(0, 5), # İnsan kadar dağınık değil, düzenli dağılım
+                300.0 + np.random.normal(0, 20),
+                60.0 + np.random.normal(0, 5),
+                100.0 + np.random.normal(0, 10), # hold_time_var sahte ama limitli
+                np.random.randint(1, 4),
+                0.5 + np.random.normal(0, 0.05),
+                5.0 + np.random.normal(0, 1)    
+            ])
+            label = 1.0 # BU DA BİR BOT! AI artık bunu tanıyacak.
+            
         else:
-            # Human Data: yüksek jerk (tremor), yüksek varyanslı klavye
+            # Human Data: Çok daha yüksek varyanslı, yüksek jerk (tremor), daha düzensiz (kaotik)
             mouse = np.random.normal(loc=1.0, scale=0.5, size=(5, 60))
-            mouse[4, :] = np.random.normal(10, 5.0, size=(60,)) # yüksek jerk
+            mouse[4, :] = np.random.normal(10, 5.0, size=(60,)) # yüksek, doğal jerk
             static = np.array([
                 np.random.randint(5, 15),
                 180.0 + np.random.normal(0, 20),
                 500.0 + np.random.normal(0, 100),
                 80.0 + np.random.normal(0, 10),
-                200.0 + np.random.normal(0, 50), # hold_time_var yüksek
+                200.0 + np.random.normal(0, 50), # hold_time_var çok düzensiz ve yüksek
                 np.random.randint(1, 5),
                 0.5 + np.random.normal(0, 0.1),
                 10.0 + np.random.normal(0, 2)    # scroll accel var yüksek
