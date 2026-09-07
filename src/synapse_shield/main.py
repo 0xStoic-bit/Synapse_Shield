@@ -7,17 +7,19 @@ import uvicorn
 import asyncio
 import threading
 import atexit
-from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, HTTPException
+from datetime import datetime, timedelta, timezone
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from collections import deque
 from typing import Dict, Any, List
 
 from synapse_shield.engine import analyze_behavior
 from synapse_shield import tokens
 from synapse_shield.middleware import shield_protect, SynapseShieldMiddleware
-from synapse_shield.tokens import verify_and_consume_token, generate_challenge
+from synapse_shield.tokens import verify_and_consume_token, generate_challenge, generate_pow_salt, verify_pow_salt
+import hashlib
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 
@@ -63,11 +65,18 @@ def init_db():
             user_agent TEXT,
             bot_score REAL,
             classification TEXT,
+            threat_type TEXT DEFAULT 'UNKNOWN',
             reasons TEXT,
             features TEXT,
             telemetry TEXT
         )
     """)
+    # Migration check: eğer logs tablosu önceden varsa ve threat_type kolonu yoksa ekle
+    cursor.execute("PRAGMA table_info(logs)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "threat_type" not in columns:
+        cursor.execute("ALTER TABLE logs ADD COLUMN threat_type TEXT DEFAULT 'UNKNOWN'")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS banned_ips (
             ip TEXT PRIMARY KEY,
@@ -163,7 +172,7 @@ def get_client_ip(request: Request) -> str:
 def get_recent_request_count(ip: str) -> int:
     conn = get_connection()
     cursor = conn.cursor()
-    ten_seconds_ago = (datetime.utcnow() - timedelta(seconds=10)).isoformat()
+    ten_seconds_ago = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
     cursor.execute("SELECT COUNT(*) FROM logs WHERE ip = ? AND timestamp > ?", (ip, ten_seconds_ago))
     count = cursor.fetchone()[0]
     return count + 1
@@ -175,15 +184,48 @@ def is_ip_banned(ip: str) -> bool:
     row = cursor.fetchone()
     if row:
         banned_until = datetime.fromisoformat(row[0])
-        if datetime.utcnow() < banned_until:
+        if datetime.now(timezone.utc) < banned_until.replace(tzinfo=timezone.utc):
             return True
         else:
             cursor.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
             conn.commit()
     return False
 
+_ip_history: Dict[str, deque] = {}
+_streak_lock = threading.Lock()
+
+def record_ip_decision(ip: str, is_bot: bool):
+    """
+    Sliding Window (Kayan Pencere) Tabanlı Dinamik IP Karantina Takibi:
+    Son 60 saniye içerisinde 4 veya daha fazla bot kararı tespit edilirse IP 1 dakika banlanır.
+    İnsan istekleri sayaç sıfırlamaz (Sadece süresi dolan bot kayıtları silinir).
+    """
+    with _streak_lock:
+        if ip not in _ip_history:
+            if len(_ip_history) > 10000:
+                _ip_history.clear()
+            _ip_history[ip] = deque()
+
+        now = datetime.now(timezone.utc)
+        
+        if is_bot:
+            _ip_history[ip].append(now)
+
+        # 60 saniyeden eski bot kayıtlarını pencereden çıkar
+        while _ip_history[ip] and (now - _ip_history[ip][0]).total_seconds() > 60:
+            _ip_history[ip].popleft()
+
+        bot_count = len(_ip_history[ip])
+        if bot_count >= 4:
+            ban_ip(
+                ip,
+                1,
+                f"High bot density in sliding time window ({bot_count} bot requests in last 60 seconds)"
+            )
+            _ip_history[ip].clear()
+
 def ban_ip(ip: str, minutes: int, reason: str):
-    banned_until = (datetime.utcnow() + timedelta(minutes=minutes)).isoformat()
+    banned_until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -193,16 +235,25 @@ def ban_ip(ip: str, minutes: int, reason: str):
     conn.commit()
 
 
-def save_log(ip: str, user_agent: str, bot_score: float, classification: str, reasons: List[str], features: Dict[str, Any], telemetry: Dict[str, Any]):
+def save_log(
+    ip: str, 
+    user_agent: str, 
+    bot_score: float, 
+    classification: str, 
+    threat_type: str, 
+    reasons: List[str], 
+    features: Dict[str, Any], 
+    telemetry: Dict[str, Any]
+):
     conn = get_connection()
     cursor = conn.cursor()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     cursor.execute(
         """
-        INSERT INTO logs (timestamp, ip, user_agent, bot_score, classification, reasons, features, telemetry)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO logs (timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features, telemetry)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (now, ip, user_agent, bot_score, classification, json.dumps(reasons), json.dumps(features), json.dumps(telemetry))
+        (now, ip, user_agent, bot_score, classification, threat_type, json.dumps(reasons), json.dumps(features), json.dumps(telemetry))
     )
     # Otomatik temizlik: sadece son 5000 logu tut
     cursor.execute("""
@@ -221,7 +272,7 @@ async def get_challenge():
     return generate_challenge()
 
 @app.post("/api/score")
-async def score_telemetry(request: Request):
+async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     ip = get_client_ip(request)
     
     if is_ip_banned(ip):
@@ -241,14 +292,17 @@ async def score_telemetry(request: Request):
     # 1. Kriptografik Token Varsa Doğrula
     is_valid, reason, telemetry = verify_and_consume_token(token)
     if not is_valid:
-        # Replay Attack veya sahte token durumu
-        save_log(ip, user_agent, 100.0, "Bot", [reason], {}, {})
+        # Replay Attack veya sahte token durumu: Ceza havuzuna ekle
+        record_ip_decision(ip, is_bot=True)
+        threat_type = "REPLAY_ATTACK"
+        background_tasks.add_task(save_log, ip, user_agent, 100.0, "Bot", threat_type, [reason], {}, {})
         return {
             "status": "blocked",
             "bot_score": 100.0,
             "classification": "Bot",
+            "threat_type": threat_type,
             "reasons": [reason],
-            "details": {}
+            "details": {"threat_type": threat_type}
         }
 
     recent_count = get_recent_request_count(ip)
@@ -256,23 +310,43 @@ async def score_telemetry(request: Request):
         ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
         raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
     
+    pow_nonce = body.get("pow_nonce")
+    pow_salt = body.get("pow_salt")
+
     bot_score, classification, reasons, details = await asyncio.to_thread(analyze_behavior, telemetry, recent_count)
+    threat_type = details.get("threat_type", "CLEAN_HUMAN" if classification == "Human" else "UNKNOWN_ANOMALY")
     
-    save_log(ip, user_agent, bot_score, classification, reasons, details.get("features", {}), telemetry)
+    # Proof of Work (Smart Challenge) for Gray Area
+    if 35.0 <= bot_score <= 65.0:
+        is_pow_valid = False
+        if pow_nonce and pow_salt:
+            if verify_pow_salt(pow_salt):
+                hash_res = hashlib.sha256((pow_salt + pow_nonce).encode()).hexdigest()
+                if hash_res.startswith("0000"):
+                    is_pow_valid = True
+                    
+        if is_pow_valid:
+            bot_score = max(0.0, bot_score - 20.0)
+            classification = "Human"
+            threat_type = "CLEAN_HUMAN"
+            reasons.append("Gray area PoW Challenge successfully solved (Risk reduced).")
+        else:
+            return {
+                "status": "challenge_required",
+                "pow_difficulty": 4,
+                "pow_salt": generate_pow_salt()
+            }
     
-    # Dinamik Ceza Havuzu: 4 ardışık bot aktivitesinden sonra IP'yi 60 saniye boyunca (1 dakika) engelle
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT classification FROM logs WHERE ip = ? ORDER BY id DESC LIMIT 4", (ip,))
-    rows = cursor.fetchall()
+    # Atomik ceza takibi
+    record_ip_decision(ip, is_bot=(classification == "Bot"))
     
-    if len(rows) == 4 and all(r[0] == "Bot" for r in rows):
-        ban_ip(ip, 1, "4 consecutive malicious bot requests detected (Dynamic Throttling)")
+    background_tasks.add_task(save_log, ip, user_agent, bot_score, classification, threat_type, reasons, details.get("features", {}), telemetry)
         
     return {
         "status": "success",
         "bot_score": bot_score,
         "classification": classification,
+        "threat_type": threat_type,
         "reasons": reasons,
         "details": details
     }
@@ -282,7 +356,7 @@ async def get_logs(limit: int = 50):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT id, timestamp, ip, user_agent, bot_score, classification, reasons, features FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+    cursor.execute("SELECT id, timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features FROM logs ORDER BY id DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
     
     recent_logs = []
@@ -294,6 +368,7 @@ async def get_logs(limit: int = 50):
             "user_agent": r["user_agent"],
             "bot_score": r["bot_score"],
             "classification": r["classification"],
+            "threat_type": r["threat_type"] if ("threat_type" in r.keys() and r["threat_type"]) else "UNKNOWN",
             "reasons": json.loads(r["reasons"]) if r["reasons"] else [],
             "features": json.loads(r["features"]) if r["features"] else {}
         })
@@ -307,6 +382,10 @@ async def get_logs(limit: int = 50):
     cursor.execute("SELECT AVG(bot_score) FROM logs WHERE classification = 'Human'")
     avg_human = cursor.fetchone()[0] or 0.0
     
+    # Tehdit Dağılım İstatistiği (Threat Distribution)
+    cursor.execute("SELECT threat_type, COUNT(*) FROM logs WHERE classification = 'Bot' GROUP BY threat_type")
+    threat_distribution = {row[0]: row[1] for row in cursor.fetchall()}
+    
     return {
         "total_requests": total_requests,
         "bot_requests": bot_requests,
@@ -314,11 +393,14 @@ async def get_logs(limit: int = 50):
         "bot_ratio": (bot_requests / total_requests * 100) if total_requests > 0 else 0.0,
         "avg_bot_score": round(avg_bot, 2),
         "avg_human_score": round(avg_human, 2),
+        "threat_distribution": threat_distribution,
         "logs": recent_logs
     }
 
 @app.post("/api/clear")
 async def clear_logs():
+    with _streak_lock:
+        _ip_history.clear()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM logs")
@@ -341,7 +423,7 @@ async def collect_dataset(request: Request):
     
     conn = get_dataset_connection()
     cursor = conn.cursor()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     cursor.execute(
         """
         INSERT INTO raw_telemetry (timestamp, mouse_movements, keystrokes, clicks, scrolls, browser)

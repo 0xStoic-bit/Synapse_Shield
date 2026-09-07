@@ -123,9 +123,43 @@
       return { token: btoa(JSON.stringify(envelope)) };
     },
 
-    async submit(url = "/api/score") {
+    async solvePoW(salt, difficulty) {
+      const encoder = new TextEncoder();
+      let nonce = 0;
+      const batchSize = 1000;
+      
+      while (true) {
+        const promises = [];
+        for (let i = 0; i < batchSize; i++) {
+          const currentNonce = nonce + i;
+          const str = salt + currentNonce;
+          promises.push(
+            crypto.subtle.digest('SHA-256', encoder.encode(str)).then(buffer => {
+              const hashArray = new Uint8Array(buffer);
+              // Difficulty 4 means 4 hex zeros, which is 2 bytes of 0x00
+              if (hashArray[0] === 0 && hashArray[1] === 0) {
+                 return currentNonce.toString();
+              }
+              return null;
+            })
+          );
+        }
+        const results = await Promise.all(promises);
+        const found = results.find(r => r !== null);
+        if (found) return found;
+        nonce += batchSize;
+      }
+    },
+
+    async submit(url = "/api/score", retryWithPoW = false, powData = null) {
       const payload = this.getPayload();
-      this.reset();
+      
+      if (powData) {
+        payload.pow_nonce = powData.nonce;
+        payload.pow_salt = powData.salt;
+      } else {
+        this.reset();
+      }
 
       try {
         const response = await fetch(url, {
@@ -134,14 +168,25 @@
           body: JSON.stringify(payload),
         });
         
+        const data = await response.json();
+        
+        // Handle Smart Challenge (PoW)
+        if (data.status === "challenge_required" && !retryWithPoW) {
+          console.log("[Synapse Shield] Gray area detected. Solving PoW challenge in background...");
+          const powNonce = await this.solvePoW(data.pow_salt, data.pow_difficulty);
+          console.log("[Synapse Shield] PoW solved. Retrying request...");
+          return await this.submit(url, true, { nonce: powNonce, salt: data.pow_salt });
+        }
+        
         // Bir sonraki istek için hemen yeni challenge al
         this.refreshChallenge();
-        return await response.json();
+        return data;
       } catch (error) {
         this.refreshChallenge();
         throw error;
       }
     },
+
   };
 
   window.SynapseShield = SynapseShield;

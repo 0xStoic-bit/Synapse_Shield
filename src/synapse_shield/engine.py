@@ -55,7 +55,10 @@ def analyze_behavior(
         total_risk += 100.0
         reasons.append("Stealth browser tamper detected: Mocked plugins or webdriver prototype override (100% Bot).")
         
-    if browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked"):
+    if browser_data.get("is_webgl_hooked") and browser_data.get("is_canvas_hooked"):
+        total_risk += 85.0
+        reasons.append("Simultaneous WebGL and Canvas prototype hooks detected (Definite Bot Automation).")
+    elif browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked"):
         total_risk += 40.0
         reasons.append("Browser fingerprinting hook detected: WebGL/Canvas prototype overridden (Possible bot or privacy extension).")
         
@@ -170,14 +173,94 @@ def analyze_behavior(
         if final_bot_score < 10.0:
             reasons.append("Natural behavioral telemetry flags verified by AI & Heuristics.")
             
+    # 9. Tehdit Atıf Hiyerarşisi (Threat Attribution Hierarchy)
+    threat_type = classify_threat(
+        features=features,
+        telemetry=telemetry,
+        recent_request_count=recent_request_count,
+        freq_anomaly=freq_anomaly,
+        ai_score=ai_score,
+        classification=classification
+    )
+
     details = {
         "features": features,
         "recent_request_count": recent_request_count,
         "poisson_anomaly_score": freq_anomaly,
         "heuristic_score": heuristic_score,
         "ai_score": ai_score,
+        "threat_type": threat_type,
         "is_ip_penalized": is_ip_penalized,
         "accessibility_mode": accessibility_mode
     }
     
     return final_bot_score, classification, reasons, details
+
+
+def classify_threat(
+    features: Dict[str, Any],
+    telemetry: Dict[str, Any],
+    recent_request_count: int,
+    freq_anomaly: float,
+    ai_score: float,
+    classification: str
+) -> str:
+    """
+    Deterministik Tehdit Atıf Hiyerarşisi:
+    REPLAY_ATTACK > STEALTH_AUTOMATION > MINIMUM_JERK_BOT > LINEAR_MACRO > POISSON_FLOOD > ROBOTIC_KEYSTROKE > UNKNOWN_ANOMALY / CLEAN_HUMAN
+    """
+    if classification == "Human":
+        return "CLEAN_HUMAN"
+
+    browser_data = telemetry.get("browser", {})
+    
+    # 1. STEALTH_AUTOMATION (Tarayıcı Seviyesi / Stealth Botlar)
+    is_stealth = (
+        features.get("webdriver", False)
+        or browser_data.get("is_plugin_array_fake", False)
+        or browser_data.get("has_webdriver_own_prop", False)
+        or browser_data.get("is_webgl_hooked", False)
+        or browser_data.get("is_canvas_hooked", False)
+        or (not features.get("screen_valid", True))
+        or (not features.get("touch_supported", False) and features.get("screen_width", 0) >= 1024 and features.get("plugins_length", 1) == 0)
+    )
+    if is_stealth:
+        return "STEALTH_AUTOMATION"
+
+    # 2. MINIMUM_JERK_BOT (Sentetik Biyolojik Eğri / Flash & Hogan / Bézier İvme / Fitts İhlali)
+    # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler
+    if features.get("mouse_points", 0) > 5 and features.get("total_distance", 0) > 30:
+        is_min_jerk = (
+            features.get("straightness", 0.0) <= 0.985
+            and (
+                features.get("avg_jerk", 1.0) < 0.00008
+                or features.get("acceleration_var", 1.0) < 1.5e-5
+                or (features.get("click_count", 0) > 0 and features.get("terminal_decel_ratio", 0.0) > 0.70)
+                or (features.get("mouse_points", 0) >= 10 and features.get("dt_var", 1.0) < 0.01)
+            )
+        )
+        if is_min_jerk:
+            return "MINIMUM_JERK_BOT"
+
+    # 3. LINEAR_MACRO (Doğrusal Hareket / Sıfır Hız Varyansı / Teleport Fare)
+    is_linear = (
+        (features.get("mouse_points", 0) > 5 and features.get("total_distance", 0) > 30 and (
+            features.get("straightness", 0.0) > 0.985 or features.get("velocity_var", 1.0) < 1e-5
+        ))
+        or ((features.get("click_count", 0) > 0 or features.get("key_count", 0) > 0) and features.get("mouse_points", 0) == 0)
+    )
+    if is_linear:
+        return "LINEAR_MACRO"
+
+    # 4. POISSON_FLOOD (Hacimsel Anomali / DoS)
+    if recent_request_count > 5 and freq_anomaly >= 0.95:
+        return "POISSON_FLOOD"
+
+    # 5. ROBOTIC_KEYSTROKE (Mekanik Klavye Girişi)
+    if features.get("key_count", 0) > 3:
+        if features.get("key_interval_var", 100.0) < 4.0 or features.get("key_interval_avg", 100.0) < 25.0:
+            return "ROBOTIC_KEYSTROKE"
+
+    # 6. Genel AI veya Kural Anomalisi
+    return "UNKNOWN_ANOMALY"
+
