@@ -34,8 +34,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 | Feature | Description |
 | :--- | :--- |
+| 🧩 **Proof-of-Work (Smart Challenge)** | Sub-second client-side SHA-256 cryptographic puzzle for gray-area sessions (35%–65% risk). Exhausts attacker botnet CPU while remaining invisible to legitimate users. |
+| 🪟 **Sliding Window IP Ban Shield** | Stateful 60-second sliding time-window (SSRT-2026-004 defense). Prevents streak-reset evasion attacks even when attackers inject synthetic human requests. |
+| 🔄 **NumPy-Only Active Learning** | Built-in `synapse-shield retrain` command enabling transfer learning on 1D-CNN FC layers in <3s directly from SQLite logs without PyTorch/TensorFlow. |
 | 🕵️ **Anti-Stealth & Tamper Proofing** | Dynamically detects headless browser fingerprints (`navigator.webdriver`), fake plugin arrays, and native `toString` overwrites in WebGL/Canvas APIs. |
-| 🗄️ **Continuous Learning Collector** | Integrated drop-in `store.html` telemetry collector endpoint (`/api/collect_dataset`) for future 1D-CNN Fine-Tuning with raw human datasets. |
+| 🗄️ **Continuous Learning Collector** | Integrated drop-in `store.html` telemetry collector endpoint (`/api/collect_dataset`) for continuous 1D-CNN Fine-Tuning with raw human datasets. |
 | 🤖 **Pure-NumPy 1D-CNN Micro-Brain** | The Sequence Tokenizer fuses kinematics and keystroke stats into an 8D and 5D tensor architecture, fully processed by a 15KB NumPy-based 1D-CNN (Zero-PyTorch). |
 | 🛡️ **Max Gating (Fusion Engine)** | Dynamically unifies Heuristic/Mathematical rules with the 1D-CNN AI confidence score. If either engine flags the telemetry as a Bot, the request is unconditionally blocked. |
 | 🔗 **Zero-Dependency Multimodal Tokenizer** | Fuses 5D Mouse Sequence `[dx, dy, dt, velocity, jerk]` with 8D Static Keystroke/Scroll Vector via Late Fusion. |
@@ -100,6 +103,12 @@ Run the automated 7-vector adversarial security test suite:
 
 ```bash
 synapse-shield test
+```
+
+Retrain the 1D-CNN AI model autonomously on local SQLite telemetry (Active Learning):
+
+```bash
+synapse-shield retrain --epochs 5 --lr 0.01
 ```
 
 ### Option 2: Clone & Local Development
@@ -276,6 +285,7 @@ Synapse_Shield/
 │       ├── flask.py           # Flask Route Decorator
 │       ├── metrics.py         # Prometheus Multi-Process Exporter
 │       ├── tokens.py          # HMAC-SHA256 Challenge & Replay Defense
+│       ├── train.py           # Zero-Dependency NumPy Active Learning Pipeline
 │       ├── live_attacker.py   # 7-Vector Red Team Simulation Suite
 │       └── static/            # Embedded 3D Cockpit & Client SDK
 │           ├── index.html
