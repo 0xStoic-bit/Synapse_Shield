@@ -83,10 +83,10 @@ def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
     # Süresi dolan nonceları temizleyerek db şişmesini önle
     _cleanup_expired_nonces()
     
-    now = int(time.time())
+    now_ms = int(time.time() * 1000)
 
     nonce = secrets.token_hex(16)
-    ts = now
+    ts = now_ms
     signature = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     challenge = f"{nonce}.{ts}.{signature}"
     return {
@@ -123,18 +123,21 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
     if not hmac.compare_digest(sig, expected_sig):
         return False, "Sahte challenge imzası (Forged Signature)", {}
 
-    now = int(time.time())
-    # 2. Zaman Aşımı ve Manipülasyon Kontrolü
-    if now - ts > 60:
-        return False, f"Token zaman aşımına uğradı ({now - ts}sn > 60sn)", {}
-    if ts - now > 5:
+    now_ms = int(time.time() * 1000)
+    elapsed_ms = now_ms - ts
+    elapsed_sec = elapsed_ms / 1000.0
+
+    # 2. Zaman Aşımı ve Manipülasyon Kontrolü (Milisaniye Hassasiyetinde)
+    if elapsed_sec > 60.0:
+        return False, f"Token zaman aşımına uğradı ({elapsed_sec:.1f}sn > 60sn)", {}
+    if ts - now_ms > 5000:
         return False, "Gelecek zaman damgası (Saat manipülasyonu)", {}
-    if now - ts < 1.5:
-        return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={now - ts:.2f}s", {}
+    if elapsed_ms < 1500:
+        return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={elapsed_sec:.2f}s", {}
 
     # 2.5 Time Travel Kontrolü (DeepSeek Advanced Bypass Koruması)
     # Eğer bot 1.6 saniye bekleyip, içine 3 saniyelik telemetri sığdırmaya çalışırsa yakalanır!
-    elapsed_time = now - ts
+    elapsed_time = elapsed_sec
     try:
         events = telemetry.get("mouse_movements", []) + telemetry.get("keystrokes", []) + telemetry.get("clicks", []) + telemetry.get("scrolls", [])
         if events:
@@ -152,10 +155,11 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
 
     # 4. Replay Attack (Yeniden Oynatma) Kontrolü
     # Atomik SQLite INSERT ile Race Condition önlenir
+    now_sec = int(time.time())
     try:
         conn = sqlite3.connect(DB_FILE, timeout=5.0)
         # Nonce'ı 120 saniyeliğine 'kullanıldı' olarak işaretle
-        conn.execute("INSERT INTO used_nonces (nonce, expires_at) VALUES (?, ?)", (nonce, now + 120))
+        conn.execute("INSERT INTO used_nonces (nonce, expires_at) VALUES (?, ?)", (nonce, now_sec + 120))
         conn.commit()
     except sqlite3.IntegrityError:
         return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
@@ -169,3 +173,39 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
             pass
 
     return True, "Geçerli", telemetry
+
+def generate_pow_salt() -> str:
+    """
+    PoW (Proof of Work) için HMAC imzalı salt üretir.
+    Format: salt_hex.timestamp.signature
+    """
+    salt_hex = secrets.token_hex(8)
+    ts = int(time.time() * 1000)
+    signature = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
+    return f"{salt_hex}.{ts}.{signature}"
+
+def verify_pow_salt(signed_salt: str) -> bool:
+    """
+    İstemciden gelen imzalı salt'ın geçerliliğini ve süresini kontrol eder (Son 60 saniye).
+    """
+    parts = signed_salt.split(".")
+    if len(parts) != 3:
+        return False
+    salt_hex, ts_str, sig = parts
+    
+    try:
+        ts = int(ts_str)
+    except ValueError:
+        return False
+        
+    expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return False
+        
+    now_ms = int(time.time() * 1000)
+    elapsed_sec = (now_ms - ts) / 1000.0
+    # 60 saniyeden eskiyse veya gelecek zamandaysa reddet
+    if elapsed_sec > 60.0 or elapsed_sec < -5.0:
+        return False
+        
+    return True

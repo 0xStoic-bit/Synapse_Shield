@@ -16,6 +16,9 @@ def main():
 
     # Run Tests Command
     subparsers.add_parser("test", help="Run the 7-vector Red Team bot attack simulator")
+    
+    # Active Learning Retrain Command
+    subparsers.add_parser("retrain", help="Fine-tune the 1D-CNN using local SQLite telemetry logs (Active Learning)")
 
     args = parser.parse_args()
 
@@ -30,6 +33,12 @@ def main():
         except ImportError:
             from live_attacker import main as run_attack_suite
         run_attack_suite()
+    elif args.command == "retrain":
+        try:
+            from .train import retrain_fc2
+        except ImportError:
+            from train import retrain_fc2
+        retrain_fc2()
 
 if __name__ == "__main__":
     main()

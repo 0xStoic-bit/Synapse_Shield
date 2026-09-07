@@ -17,7 +17,7 @@ def test_challenge_endpoint():
     assert "expires_in" in data
 
 def test_score_endpoint_invalid_json():
-    response = client.post("/api/score", data="invalid json", headers={"X-Forwarded-For": "10.0.0.1"})
+    response = client.post("/api/score", content="invalid json string", headers={"Content-Type": "application/json"})
     assert response.status_code == 400
 
 def test_score_without_token():
@@ -66,8 +66,8 @@ def test_score_with_valid_token():
     assert response.status_code == 200
     res_data = response.json()
     
-    # Beklenen durum, valid token olduğu için başarılı loglama. Bot score ne olursa olsun "success" (veya eger çok tehlikeliyse blocked ama 200 ile)
-    assert res_data["status"] in ("success", "blocked")
+    # Beklenen durum, valid token olduğu için başarılı loglama. Bot score ne olursa olsun "success" (veya eger çok tehlikeliyse blocked ama 200 ile, ya da challenge_required)
+    assert res_data["status"] in ("success", "blocked", "challenge_required")
 
 def test_logs_endpoint():
     response = client.get("/api/logs")

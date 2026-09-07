@@ -5,6 +5,15 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.whl
+*.tar.gz
+
+# Test & Coverage Önbellekleri
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # Sanal Ortamlar
 .venv312/
@@ -34,6 +43,15 @@ synapse_dataset.db
 extract_zip.py
 .DS_Store
 scratch/
+
+# Node & Frontend Önbellekleri
+node_modules/
+.next/
+out/
+
+# Editör & IDE Yapılandırmaları
+.vscode/
+.idea/
 
 # Rapor, Planlama ve Ajan Dosyaları (IDE Artifacts)
 .agents/

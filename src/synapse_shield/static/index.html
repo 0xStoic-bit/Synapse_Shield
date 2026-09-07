@@ -185,83 +185,111 @@
               class="absolute inset-0 pointer-events-none"
               id="particle-container"
             ></div>
-            <div
-              class="absolute bottom-4 left-4 bg-[#0a0d14]/80 backdrop-blur-md p-3.5 rounded-lg border border-[#3b494b] flex flex-col gap-2 shadow-[0_4px_20px_rgba(0,0,0,0.5)] pointer-events-none"
-            >
-              <div
-                class="text-[#4edea3] font-bold text-[10px] uppercase tracking-widest flex items-center gap-1.5 mb-0.5"
-              >
-                <span class="material-symbols-outlined text-[12px]">info</span>
-                Nasıl Kullanılır?
-              </div>
-              <div class="flex items-center gap-2.5">
-                <span
-                  class="flex items-center justify-center w-4 h-4 rounded bg-[#00f0ff]/20 text-[#00f0ff] text-[10px] font-bold border border-[#00f0ff]/30"
-                  >1</span
-                >
-                <span class="font-mono text-xs text-slate-300"
-                  >Fareyi kutu içinde gezdir</span
-                >
-              </div>
-              <div class="flex items-center gap-2.5">
-                <span
-                  class="flex items-center justify-center w-4 h-4 rounded bg-[#00f0ff]/20 text-[#00f0ff] text-[10px] font-bold border border-[#00f0ff]/30"
-                  >2</span
-                >
-                <span class="font-mono text-xs text-slate-300"
-                  >Doğrula butonuna bas</span
-                >
-              </div>
-              <div class="flex items-center gap-2.5">
-                <span
-                  class="flex items-center justify-center w-4 h-4 rounded bg-[#00f0ff]/20 text-[#00f0ff] text-[10px] font-bold border border-[#00f0ff]/30"
-                  >3</span
-                >
-                <span class="font-mono text-xs text-slate-300"
-                  >Canlı biyometrik skoru gör</span
-                >
+            <div id="simulated-cursor" class="absolute hidden pointer-events-none z-30 transform -translate-x-1 -translate-y-1">
+              <div class="relative">
+                <svg class="w-7 h-7 filter drop-shadow-[0_0_10px_rgba(255,0,85,0.9)]" viewBox="0 0 24 24" fill="none">
+                  <path id="sim-cursor-path" d="M5 3L19 12L12 14L9 21L5 3Z" fill="#ff0055" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+                </svg>
+                <span id="sim-bot-label" class="absolute left-7 top-0 font-mono text-[10px] font-bold bg-black/90 text-red-400 px-2 py-0.5 rounded border border-red-500/60 whitespace-nowrap shadow-xl">BOT ACTIVE</span>
               </div>
             </div>
+
+            <!-- Visual Emulation Status Banner -->
+            <div id="sim-status-banner" class="hidden absolute top-3 left-1/2 -translate-x-1/2 bg-black/85 backdrop-blur-md border border-[#3b494b] px-4 py-1.5 rounded-full font-mono text-xs z-20 flex items-center gap-2 shadow-2xl pointer-events-none">
+              <span id="sim-banner-dot" class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+              <span id="sim-banner-text" class="text-slate-200 font-bold">Simulating Attack...</span>
+            </div>
+
           </div>
 
           <!-- Multi-Vector Attack Simulator Hub -->
           <div
-            class="p-4 border-t border-[#3b494b]/50 bg-[#1c1f29]/50 flex flex-col gap-2.5"
+            class="p-4 border-t border-[#3b494b]/50 bg-[#1c1f29]/50 flex flex-col gap-4"
           >
-            <span
-              class="font-mono text-[11px] text-slate-400 uppercase tracking-wider font-bold"
-              >MULTI-VECTOR ATTACK SIMULATOR HUB</span
-            >
-            <div class="grid grid-cols-2 gap-2.5">
+            <!-- Nasıl Kullanılır (Moved from Canvas) -->
+            <div class="bg-[#0a0d14]/60 p-3 rounded-lg border border-[#3b494b]/60 flex flex-col gap-2">
+              <div class="text-[#4edea3] font-bold text-[10px] uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                <span class="material-symbols-outlined text-[14px]">info</span>
+                Nasıl Kullanılır?
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="flex items-start gap-2">
+                  <span class="flex items-center justify-center w-4 h-4 rounded bg-[#00f0ff]/20 text-[#00f0ff] text-[10px] font-bold border border-[#00f0ff]/30 shrink-0 mt-0.5">1</span>
+                  <span class="font-mono text-xs text-slate-300">Aşağıdaki bot saldırılarından birini seç</span>
+                </div>
+                <div class="flex items-start gap-2">
+                  <span class="flex items-center justify-center w-4 h-4 rounded bg-[#00f0ff]/20 text-[#00f0ff] text-[10px] font-bold border border-[#00f0ff]/30 shrink-0 mt-0.5">2</span>
+                  <span class="font-mono text-xs text-slate-300">Farenin tuvalde nasıl hareket ettiğini izle</span>
+                </div>
+                <div class="flex items-start gap-2">
+                  <span class="flex items-center justify-center w-4 h-4 rounded bg-[#00f0ff]/20 text-[#00f0ff] text-[10px] font-bold border border-[#00f0ff]/30 shrink-0 mt-0.5">3</span>
+                  <span class="font-mono text-xs text-slate-300">Sağdaki HUD'dan nasıl yakalandığını gör</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <span
+                class="font-mono text-[11px] text-slate-400 uppercase tracking-wider font-bold flex items-center gap-1.5"
+              >
+                <span class="material-symbols-outlined text-sm text-red-400">smart_toy</span>
+                CANLI BOT SALDIRI & SİMÜLASYON ARENASI
+              </span>
+              <span class="font-mono text-[10px] text-[#00f0ff]">Gerçek Zamanlı Yörünge İzleyici</span>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
               <button
-                onclick="simulateAttack('linear')"
-                class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red"
+                onclick="runVisualBotSimulation('linear')"
+                class="flex items-center justify-center gap-1.5 bg-red-500/10 text-red-400 border border-red-500/30 px-2.5 py-2.5 rounded font-mono text-[11px] font-bold hover:bg-red-500/20 transition-all glow-red active:scale-95"
               >
                 <span class="material-symbols-outlined text-sm">polyline</span>
-                LINEAR CURSOR BOT
+                LINEAR BOT
               </button>
               <button
-                onclick="simulateAttack('poisson')"
-                class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red"
+                onclick="runVisualBotSimulation('bezier')"
+                class="flex items-center justify-center gap-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2.5 py-2.5 rounded font-mono text-[11px] font-bold hover:bg-amber-500/20 transition-all active:scale-95"
+              >
+                <span class="material-symbols-outlined text-sm">gesture</span>
+                BÉZIER GHOST
+              </button>
+              <button
+                onclick="runVisualBotSimulation('stealth')"
+                class="flex items-center justify-center gap-1.5 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2.5 py-2.5 rounded font-mono text-[11px] font-bold hover:bg-purple-500/20 transition-all active:scale-95"
+              >
+                <span class="material-symbols-outlined text-sm">visibility_off</span>
+                STEALTH KIT
+              </button>
+              <button
+                onclick="runVisualBotSimulation('replay')"
+                class="flex items-center justify-center gap-1.5 bg-rose-500/10 text-rose-400 border border-rose-500/30 px-2.5 py-2.5 rounded font-mono text-[11px] font-bold hover:bg-rose-500/20 transition-all active:scale-95"
+              >
+                <span class="material-symbols-outlined text-sm">replay</span>
+                REPLAY ATTACK
+              </button>
+              <button
+                onclick="runVisualBotSimulation('human')"
+                class="flex items-center justify-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-2.5 rounded font-mono text-[11px] font-bold hover:bg-emerald-500/20 transition-all active:scale-95 glow-green"
+              >
+                <span class="material-symbols-outlined text-sm">fingerprint</span>
+                ORGANIC HUMAN
+              </button>
+              <button
+                onclick="runVisualBotSimulation('poisson')"
+                class="flex items-center justify-center gap-1.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 px-2.5 py-2.5 rounded font-mono text-[11px] font-bold hover:bg-yellow-500/20 transition-all active:scale-95"
               >
                 <span class="material-symbols-outlined text-sm">storm</span>
-                POISSON FLOODER (DDoS)
+                POISSON FLOOD
               </button>
+            </div>
+
+            <div class="flex items-center justify-between pt-2 border-t border-[#3b494b]/40">
+              <span class="font-mono text-[11px] text-slate-400">4 bot üst üste test edip banlandıysanız:</span>
               <button
-                onclick="simulateAttack('webdriver')"
-                class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red"
+                onclick="resetSecurityBans()"
+                class="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 px-3 py-1 rounded font-mono text-[11px] font-bold transition-all active:scale-95"
               >
-                <span class="material-symbols-outlined text-sm"
-                  >code_blocks</span
-                >
-                SELENIUM WEBDRIVER
-              </button>
-              <button
-                onclick="simulateAttack('autotyper')"
-                class="flex items-center justify-center gap-2 bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-2 rounded font-mono text-xs font-bold hover:bg-red-500/20 transition-all glow-red"
-              >
-                <span class="material-symbols-outlined text-sm">keyboard</span>
-                ROBOTIC AUTO-TYPER
+                <span class="material-symbols-outlined text-xs text-[#00f0ff]">restart_alt</span>
+                IP Ban &amp; Kayıtları Sıfırla
               </button>
             </div>
           </div>
@@ -498,6 +526,21 @@
         </div>
       </div>
 
+      <!-- Threat Attribution Radar Bar (v0.6.5) -->
+      <div id="threat-radar-bar" class="glass-panel p-3 rounded-lg flex flex-wrap items-center justify-between gap-2 font-mono text-xs border border-[#3b494b]/40">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm text-[#00f0ff]">radar</span>
+          <span class="text-slate-300 font-bold uppercase tracking-wider text-[11px]">ACTIVE THREAT RADAR:</span>
+        </div>
+        <div id="threat-pills" class="flex flex-wrap items-center gap-2 text-[10px]">
+          <span class="px-2 py-0.5 rounded border border-purple-500/40 bg-purple-500/10 text-purple-300 font-bold">STEALTH: <b id="cnt-stealth">0</b></span>
+          <span class="px-2 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 font-bold">MIN-JERK: <b id="cnt-jerk">0</b></span>
+          <span class="px-2 py-0.5 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 font-bold">LINEAR: <b id="cnt-linear">0</b></span>
+          <span class="px-2 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300 font-bold">REPLAY: <b id="cnt-replay">0</b></span>
+          <span class="px-2 py-0.5 rounded border border-yellow-500/40 bg-yellow-500/10 text-yellow-300 font-bold">POISSON: <b id="cnt-poisson">0</b></span>
+        </div>
+      </div>
+
       <!-- Developer Tabs & SQLite Feed -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6" id="logs-feed">
         <!-- Developer Quickstart -->
@@ -505,25 +548,45 @@
           class="lg:col-span-1 glass-panel rounded-xl overflow-hidden flex flex-col"
         >
           <div
-            class="p-3 border-b border-[#3b494b]/50 bg-[#1c1f29]/50 flex gap-4 font-mono text-xs"
+            class="p-3 border-b border-[#3b494b]/50 bg-[#1c1f29]/50 flex justify-between items-center font-mono text-xs"
           >
+            <div class="flex gap-4">
+              <button
+                id="tab-btn-html"
+                onclick="switchDevTab('html')"
+                class="text-[#00f0ff] border-b-2 border-[#00f0ff] pb-1 font-bold transition-all"
+              >
+                HTML
+              </button>
+              <button
+                id="tab-btn-react"
+                onclick="switchDevTab('react')"
+                class="text-slate-400 hover:text-white pb-1 font-medium transition-all"
+              >
+                REACT
+              </button>
+              <button
+                id="tab-btn-fastapi"
+                onclick="switchDevTab('fastapi')"
+                class="text-slate-400 hover:text-white pb-1 font-medium transition-all"
+              >
+                FASTAPI
+              </button>
+            </div>
             <button
-              class="text-[#00f0ff] border-b-2 border-[#00f0ff] pb-1 font-bold"
+              onclick="copyDevSnippet()"
+              id="copy-snippet-btn"
+              class="flex items-center gap-1 text-[11px] text-slate-400 hover:text-[#00f0ff] transition-colors"
+              title="Kodu Kopyala"
             >
-              HTML
+              <span class="material-symbols-outlined text-xs">content_copy</span>
+              <span id="copy-btn-text">Kopyala</span>
             </button>
-            <button class="text-slate-400 hover:text-white">REACT</button>
-            <button class="text-slate-400 hover:text-white">FASTAPI</button>
           </div>
           <div
-            class="p-4 bg-[#0f131c] flex-grow font-mono text-xs text-slate-300 overflow-auto"
+            class="p-4 bg-[#0f131c] flex-grow font-mono text-xs text-slate-300 overflow-auto max-h-56"
           >
-            <pre class="text-slate-300"><code>&lt;!-- Synapse Shield --&gt;
-&lt;script src="/static/synapse-sdk.js"&gt;&lt;/script&gt;
-&lt;script&gt;
-  SynapseShield.init();
-  const token = SynapseShield.getPayload();
-&lt;/script&gt;</code></pre>
+            <pre><code id="dev-code-block" class="text-slate-300 leading-relaxed"></code></pre>
           </div>
         </div>
 
@@ -554,7 +617,7 @@
                 >
                   <th class="p-2.5">TIMESTAMP</th>
                   <th class="p-2.5">CLIENT TYPE</th>
-                  <th class="p-2.5">DETECTED TRAJECTORY</th>
+                  <th class="p-2.5">THREAT ATTRIBUTION</th>
                   <th class="p-2.5">RISK SCORE %</th>
                   <th class="p-2.5 text-right">ACTION</th>
                 </tr>
@@ -573,13 +636,123 @@
     </main>
 
     <script>
-      // 1. SDK Başlat
+      // 1. SDK & Tabs Başlat
       window.addEventListener("DOMContentLoaded", () => {
         if (window.SynapseShield) window.SynapseShield.init();
         initTrailCanvas();
+        switchDevTab("html");
         fetchLogs();
         setInterval(fetchLogs, 1500);
       });
+
+      // Developer Quickstart Tab Snippets
+      const devSnippets = {
+        html: `<!-- 1. Include Synapse Shield SDK -->\n` +
+          `<` + `script src="/static/synapse-sdk.js"><` + `/script>\n\n` +
+          `<` + `script>\n` +
+          `  // 2. Initialize telemetry listener on page load\n` +
+          `  SynapseShield.init();\n\n` +
+          `  // 3. Attach HMAC token to your submission\n` +
+          `  async function handleLogin() {\n` +
+          `    const { token } = SynapseShield.getPayload();\n` +
+          `    await fetch("/api/score", {\n` +
+          `      method: "POST",\n` +
+          `      headers: { "Content-Type": "application/json" },\n` +
+          `      body: JSON.stringify({ token, user: "demo" })\n` +
+          `    });\n` +
+          `  }\n` +
+          `<` + `/script>`,
+
+        react: `import { useEffect } from "react";
+
+export default function ProtectedCheckout() {
+  useEffect(() => {
+    // 1. Initialize Synapse Shield on component mount
+    window.SynapseShield?.init();
+  }, []);
+
+  const handlePay = async (e) => {
+    e.preventDefault();
+    // 2. Extract tamper-proof biometric token
+    const { token } = window.SynapseShield.getPayload();
+
+    const res = await fetch("/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, amount: 99 })
+    });
+
+    if (res.ok) alert("Verified Human Transaction!");
+  };
+
+  return <button onClick={handlePay}>Pay Now</button>;
+}`,
+
+        fastapi: `from fastapi import FastAPI, Request
+from synapse_shield import shield_protect, SynapseShieldMiddleware
+
+app = FastAPI()
+
+# Yöntem 1: Hassas Endpoint Koruyucu Decorator
+@app.post("/api/checkout")
+@shield_protect(max_risk_score=50.0)
+async def checkout(request: Request):
+    # Doğrulanmış insan isteği; botlar otomatik HTTP 403 alır
+    return {"status": "success", "verified": True}
+
+# Yöntem 2: Global Middleware (Tüm yolları korur)
+app.add_middleware(
+    SynapseShieldMiddleware,
+    protected_paths=["/api/login", "/api/checkout"],
+    max_risk_score=50.0
+)`
+      };
+
+      let currentDevTab = "html";
+
+      function switchDevTab(tabKey) {
+        currentDevTab = tabKey;
+        const tabs = ["html", "react", "fastapi"];
+        tabs.forEach((t) => {
+          const btn = document.getElementById("tab-btn-" + t);
+          if (btn) {
+            if (t === tabKey) {
+              btn.className = "text-[#00f0ff] border-b-2 border-[#00f0ff] pb-1 font-bold transition-all";
+            } else {
+              btn.className = "text-slate-400 hover:text-white pb-1 font-medium transition-all";
+            }
+          }
+        });
+
+        const codeEl = document.getElementById("dev-code-block");
+        if (codeEl) {
+          codeEl.textContent = devSnippets[tabKey] || "";
+        }
+      }
+
+      function copyDevSnippet() {
+        const snippet = devSnippets[currentDevTab];
+        if (!snippet) return;
+        navigator.clipboard.writeText(snippet).then(() => {
+          const btnText = document.getElementById("copy-btn-text");
+          if (btnText) {
+            btnText.textContent = "Kopyalandı!";
+            btnText.className = "text-[#4edea3] font-bold";
+            setTimeout(() => {
+              btnText.textContent = "Kopyala";
+              btnText.className = "";
+            }, 1800);
+          }
+        }).catch(() => {
+          // Fallback if clipboard API not allowed
+          const textarea = document.createElement("textarea");
+          textarea.value = snippet;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        });
+      }
 
       // 2. Trail Canvas Çizimi
       let canvas,
@@ -641,97 +814,297 @@
         }
       }
 
-      // 4. Bot Simülasyonları
-      async function simulateAttack(type) {
-        let payload = {};
+      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.6.5)
+      let isSimulating = false;
+      let lastToken = null;
+
+      async function runVisualBotSimulation(type) {
+        if (isSimulating) return;
+        isSimulating = true;
+
+        const container = document.getElementById("interactive-canvas");
+        const w = container.clientWidth || 500;
+        const h = container.clientHeight || 250;
+
+        const cursorEl = document.getElementById("simulated-cursor");
+        const cursorPath = document.getElementById("sim-cursor-path");
+        const botLabel = document.getElementById("sim-bot-label");
+        const banner = document.getElementById("sim-status-banner");
+        const bannerDot = document.getElementById("sim-banner-dot");
+        const bannerText = document.getElementById("sim-banner-text");
+
+        cursorEl.classList.remove("hidden");
+        banner.classList.remove("hidden");
+
+        // 1. Kriptografik HMAC Challenge Al
+        bannerText.textContent = "Sunucudan kriptografik challenge alınıyor...";
+        let challenge = "";
+        try {
+          const chRes = await fetch("/api/challenge");
+          const chData = await chRes.json();
+          challenge = chData.challenge;
+        } catch (e) {
+          challenge = "mock.challenge.sig";
+        }
+
+        // 2. Saldırı Parametrelerini ve Yörüngeyi Hazırla
+        let color = "#ff0055";
+        let label = "BOT ACTIVE";
+        let trajectory = [];
+        let browserOverrides = {
+          webdriver: false,
+          is_plugin_array_fake: false,
+          has_webdriver_own_prop: false,
+          is_webgl_hooked: false,
+          is_canvas_hooked: false,
+        };
+
         const tStart = Date.now();
+        const durationMs = 1550;
 
         if (type === "linear") {
-          const movements = [];
-          for (let i = 0; i <= 20; i++) {
-            movements.push({
-              x: 50 + i * 25,
-              y: 50 + i * 15,
-              t: tStart + i * 20,
+          color = "#ff0055";
+          label = "LINEAR BOT (Straightness=1.0)";
+          bannerText.textContent = "Düz Çizgi Botu Yürütülüyor (Straightness: 1.000)...";
+          bannerDot.className = "w-2.5 h-2.5 rounded-full bg-red-500 animate-ping";
+          cursorPath.setAttribute("fill", "#ff0055");
+          botLabel.className = "absolute left-7 top-0 font-mono text-[10px] font-bold bg-red-950/90 text-red-300 px-2 py-0.5 rounded border border-red-500/60 whitespace-nowrap shadow-xl";
+
+          // Kusursuz düz çizgi
+          const steps = 40;
+          for (let i = 0; i <= steps; i++) {
+            const r = i / steps;
+            trajectory.push({
+              x: Math.round(30 + (w - 70) * r),
+              y: Math.round(30 + (h - 70) * r),
+              t: tStart + Math.round(durationMs * r),
             });
           }
-          payload = {
-            mouse_movements: movements,
-            clicks: [],
-            keystrokes: [],
-            scrolls: [],
-            browser: {
-              webdriver: false,
-              screen_width: 1920,
-              screen_height: 1080,
-            },
+        } else if (type === "bezier") {
+          color = "#f59e0b";
+          label = "BÉZIER GHOST (Zero Jerk Tremor)";
+          bannerText.textContent = "Bézier Ghost-Cursor Yürütülüyor (Pürüzsüz İvme)...";
+          bannerDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping";
+          cursorPath.setAttribute("fill", "#f59e0b");
+          botLabel.className = "absolute left-7 top-0 font-mono text-[10px] font-bold bg-amber-950/90 text-amber-300 px-2 py-0.5 rounded border border-amber-500/60 whitespace-nowrap shadow-xl";
+
+          // Matematiksel Kübik Bézier Eğrisi
+          const steps = 45;
+          const p0 = { x: 40, y: h - 40 };
+          const p1 = { x: w * 0.3, y: 25 };
+          const p2 = { x: w * 0.7, y: h * 0.85 };
+          const p3 = { x: w - 50, y: 45 };
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = Math.round((1-t)**3 * p0.x + 3*(1-t)**2 * t * p1.x + 3*(1-t) * t**2 * p2.x + t**3 * p3.x);
+            const y = Math.round((1-t)**3 * p0.y + 3*(1-t)**2 * t * p1.y + 3*(1-t) * t**2 * p2.y + t**3 * p3.y);
+            trajectory.push({ x, y, t: tStart + Math.round(durationMs * t) });
+          }
+        } else if (type === "stealth") {
+          color = "#a855f7";
+          label = "STEALTH EVASION (WebGL+Canvas Hooked)";
+          bannerText.textContent = "Anti-Stealth Prototip Kancası Test Ediliyor...";
+          bannerDot.className = "w-2.5 h-2.5 rounded-full bg-purple-500 animate-ping";
+          cursorPath.setAttribute("fill", "#a855f7");
+          botLabel.className = "absolute left-7 top-0 font-mono text-[10px] font-bold bg-purple-950/90 text-purple-300 px-2 py-0.5 rounded border border-purple-500/60 whitespace-nowrap shadow-xl";
+
+          browserOverrides = {
+            is_plugin_array_fake: true,
+            has_webdriver_own_prop: true,
+            is_webgl_hooked: true,
+            is_canvas_hooked: true,
           };
+          const steps = 45;
+          let curX = 40, curY = h * 0.6;
+          for (let i = 0; i <= steps; i++) {
+            curX += (w - 80) / steps;
+            curY += Math.sin(i * 0.3) * 6;
+            trajectory.push({ x: Math.round(curX), y: Math.round(curY), t: tStart + Math.round(durationMs * (i/steps)) });
+          }
+        } else if (type === "replay") {
+          color = "#f43f5e";
+          label = "REPLAY ATTACK (Duplicate Token)";
+          bannerText.textContent = "Replay Attack: Token Yeniden Kullanılıyor...";
+          bannerDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping";
+          cursorPath.setAttribute("fill", "#f43f5e");
+          botLabel.className = "absolute left-7 top-0 font-mono text-[10px] font-bold bg-rose-950/90 text-rose-300 px-2 py-0.5 rounded border border-rose-500/60 whitespace-nowrap shadow-xl";
+
+          const steps = 35;
+          for (let i = 0; i <= steps; i++) {
+            trajectory.push({
+              x: Math.round(50 + (w - 100) * (i / steps)),
+              y: Math.round(h * 0.5 + Math.sin(i * 0.4) * 20),
+              t: tStart + Math.round(durationMs * (i / steps)),
+            });
+          }
+        } else if (type === "human") {
+          color = "#10b981";
+          label = "ORGANIC HUMAN (Tremor + Deceleration)";
+          bannerText.textContent = "Organik İnsan Kinematiği Simüle Ediliyor...";
+          bannerDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping";
+          cursorPath.setAttribute("fill", "#10b981");
+          botLabel.className = "absolute left-7 top-0 font-mono text-[10px] font-bold bg-emerald-950/90 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/60 whitespace-nowrap shadow-xl";
+
+          const steps = 55;
+          const x0 = 60, y0 = h * 0.75;
+          const x1 = w - 70, y1 = 50;
+          let curT = tStart;
+          for (let i = 0; i <= steps; i++) {
+            const tau = i / steps;
+            const poly = 10 * (tau**3) - 15 * (tau**4) + 6 * (tau**5);
+            const arc = Math.sin(tau * Math.PI) * 45.0;
+            const tremorX = (Math.random() * 4 - 2) + 1.5 * Math.sin(2 * Math.PI * 10 * (curT - tStart) / 1000);
+            const tremorY = (Math.random() * 4 - 2) + 1.5 * Math.cos(2 * Math.PI * 9.5 * (curT - tStart) / 1000);
+            const wobble = tau > 0.75 ? Math.sin((tau - 0.75) * Math.PI * 4.0) * 5.0 : 0;
+
+            trajectory.push({
+              x: Math.round(x0 + (x1 - x0) * poly - arc * 0.3 + tremorX + wobble),
+              y: Math.round(y0 + (y1 - y0) * poly - arc + tremorY + wobble),
+              t: curT,
+            });
+            curT += Math.floor(Math.random() * 22) + 18; // 18-40ms natural event jitter
+          }
         } else if (type === "poisson") {
-          const flood = () =>
+          bannerText.textContent = "Poisson Burst Flooding (15 İstek)...";
+          bannerDot.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-ping";
+          for (let i = 0; i < 7; i++) {
             fetch("/api/score", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                mouse_movements: [],
-                clicks: [],
-                keystrokes: [],
-                scrolls: [],
-                browser: {},
-              }),
+              body: JSON.stringify({ token: "invalid.burst.token" }),
             });
-          for (let i = 0; i < 7; i++) flood();
-          const res = await flood();
-          updateHUD(await res.json());
+          }
+          await new Promise((r) => setTimeout(r, 400));
+          cursorEl.classList.add("hidden");
+          banner.classList.add("hidden");
+          isSimulating = false;
           fetchLogs();
           return;
-        } else if (type === "webdriver") {
-          payload = {
-            mouse_movements: [
-              { x: 10, y: 10, t: tStart },
-              { x: 20, y: 20, t: tStart + 50 },
-            ],
-            clicks: [],
-            keystrokes: [],
-            scrolls: [],
-            browser: { webdriver: true, screen_width: 800, screen_height: 600 },
+        }
+
+        botLabel.textContent = label;
+
+        // 3. Yörüngeyi Tuvalde Canlı Oynat (60 FPS)
+        points = [];
+        const stepDelay = Math.max(8, Math.round(durationMs / trajectory.length));
+
+        for (let i = 0; i < trajectory.length; i++) {
+          const pt = trajectory[i];
+          cursorEl.style.left = `${pt.x}px`;
+          cursorEl.style.top = `${pt.y}px`;
+          points.push({ x: pt.x, y: pt.y });
+
+          document.getElementById("coord-display").textContent =
+            `X: ${pt.x.toString().padStart(3, "0")} | Y: ${pt.y.toString().padStart(3, "0")} [${type.toUpperCase()}]`;
+
+          if (i % 3 === 0) {
+            const p = document.createElement("div");
+            p.className = "particle";
+            p.style.backgroundColor = color;
+            p.style.boxShadow = `0 0 8px ${color}`;
+            p.style.left = `${pt.x}px`;
+            p.style.top = `${pt.y}px`;
+            document.getElementById("particle-container").appendChild(p);
+            setTimeout(() => p.remove(), 400);
+          }
+
+          await new Promise((r) => setTimeout(r, stepDelay));
+        }
+
+        // Tıklama Şok Dalgası Animasyonu
+        bannerText.textContent = "Hedef Tıklandı! Kalkan Kararı Bekleniyor...";
+        const lastPt = trajectory[trajectory.length - 1];
+        const pulse = document.createElement("div");
+        pulse.className = "particle";
+        pulse.style.width = "24px";
+        pulse.style.height = "24px";
+        pulse.style.left = `${lastPt.x - 12}px`;
+        pulse.style.top = `${lastPt.y - 12}px`;
+        pulse.style.backgroundColor = color;
+        pulse.style.opacity = "0.9";
+        document.getElementById("particle-container").appendChild(pulse);
+        setTimeout(() => pulse.remove(), 600);
+
+        // 4. Dwell Time Kalkanı: Minimum 1.65 sn Bekleme Sağla
+        const elapsedSoFar = Date.now() - tStart;
+        if (elapsedSoFar < 1650) {
+          await new Promise((r) => setTimeout(r, 1650 - elapsedSoFar));
+        }
+
+        // 5. Token Paketle & Gönder
+        const browser = {
+          webdriver: browserOverrides.webdriver || false,
+          screen_width: window.innerWidth || 1920,
+          screen_height: window.innerHeight || 1080,
+          touch_supported: false,
+          plugins_length: 5,
+          languages: "tr-TR,tr,en-US",
+          chrome: true,
+          is_plugin_array_fake: browserOverrides.is_plugin_array_fake || false,
+          has_webdriver_own_prop: browserOverrides.has_webdriver_own_prop || false,
+          is_webgl_hooked: browserOverrides.is_webgl_hooked || false,
+          is_canvas_hooked: browserOverrides.is_canvas_hooked || false,
+        };
+
+        const telemetry = {
+          mouse_movements: trajectory,
+          clicks: [{ x: lastPt.x, y: lastPt.y, t: Date.now() }],
+          keystrokes: [],
+          scrolls: [],
+          browser: browser,
+        };
+
+        let tokenToSubmit = "";
+        if (type === "replay" && lastToken) {
+          tokenToSubmit = lastToken; // Re-use old token intentionally!
+        } else {
+          const envelope = {
+            challenge: challenge,
+            telemetry: telemetry,
+            created_at: Date.now(),
           };
-        } else if (type === "autotyper") {
-          const keys = [];
-          for (let i = 0; i < 15; i++)
-            keys.push(
-              { type: "down", t: tStart + i * 50 },
-              { type: "up", t: tStart + i * 50 + 25 },
-            );
-          payload = {
-            mouse_movements: [],
-            clicks: [],
-            keystrokes: keys,
-            scrolls: [],
-            browser: {
-              webdriver: false,
-              screen_width: 1920,
-              screen_height: 1080,
-            },
-          };
+          tokenToSubmit = btoa(JSON.stringify(envelope));
+          lastToken = tokenToSubmit;
         }
 
         try {
           const res = await fetch("/api/score", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ token: tokenToSubmit }),
           });
           const data = await res.json();
           updateHUD(data);
           fetchLogs();
         } catch (e) {
           console.error(e);
+        } finally {
+          setTimeout(() => {
+            cursorEl.classList.add("hidden");
+            banner.classList.add("hidden");
+            isSimulating = false;
+          }, 800);
         }
       }
 
       // 5. HUD Güncelleme
       function updateHUD(data) {
+        // Handle FastAPI HTTPExceptions gracefully (e.g. IP Ban)
+        if (data.detail && !data.classification) {
+          data = {
+            classification: "IP_BAN",
+            bot_score: 100,
+            reasons: [
+              data.detail,
+              "Ağ Katmanı Koruması: Kayan pencere analizi (Son 10 istekte 4+ bot) sebebiyle IP karantinaya alındı.",
+              "Kinematik/Biyometrik analiz çalıştırılmadan istek doğrudan engellendi (Sliding Window Defense)."
+            ],
+            details: { features: {} }
+          };
+        }
+
         const isHuman = data.classification === "Human";
+        const isIpBan = data.classification === "IP_BAN";
         const card = document.getElementById("decision-card");
         const icon = document.getElementById("decision-icon");
         const title = document.getElementById("decision-title");
@@ -746,8 +1119,18 @@
           icon.textContent = "verified_user";
           title.className = "font-bold text-lg text-[#4edea3] tracking-tight";
           title.textContent = "VERIFIED HUMAN (ALLOW)";
-          conf.textContent = `Confidence: ${(100 - data.bot_score).toFixed(1)}% | Risk: ${data.bot_score}%`;
+          conf.textContent = `Güven Skoru: %${(100 - (data.bot_score || 0)).toFixed(1)} İnsan | Risk: %${(data.bot_score || 0).toFixed(1)}`;
           speed.textContent = "0.22 ms P99";
+        } else if (isIpBan) {
+          card.className =
+            "flex items-center justify-between bg-[#382616] border border-amber-500/60 p-4 rounded-lg transition-all shadow-[0_0_15px_rgba(245,158,11,0.3)]";
+          icon.className =
+            "material-symbols-outlined text-amber-400 text-3xl font-bold";
+          icon.textContent = "lock_clock";
+          title.className = "font-bold text-lg text-amber-400 tracking-tight";
+          title.textContent = "AĞ KATMANI: IP BAN (HTTP 403)";
+          conf.textContent = "Sliding Window Koruması: Son 10 istekte 4+ bot aktivitesi tespit edildi";
+          speed.textContent = "0.04 ms P99";
         } else {
           card.className =
             "flex items-center justify-between bg-[#38161e] border border-[#ffb4ab]/60 p-4 rounded-lg glow-red transition-all";
@@ -756,7 +1139,7 @@
           icon.textContent = "block";
           title.className = "font-bold text-lg text-[#ffb4ab] tracking-tight";
           title.textContent = "BOT DETECTED (BLOCK 403)";
-          conf.textContent = `Bot Confidence: ${data.bot_score}% | Anomaly Flags Triggered`;
+          conf.textContent = `Bot Güveni: %${data.bot_score || 100} | Anomali Bayrakları Tetiklendi`;
           speed.textContent = "0.14 ms P99";
         }
 
@@ -783,7 +1166,8 @@
 
         const list = document.getElementById("diagnosis-list");
         list.innerHTML = "";
-        data.reasons.forEach((r) => {
+        const reasons = data.reasons || [];
+        reasons.forEach((r) => {
           const li = document.createElement("li");
           li.className = "flex items-start gap-2";
           const iconName = isHuman ? "check" : "close";
@@ -791,6 +1175,28 @@
           li.innerHTML = `<span class="material-symbols-outlined ${iconColor} text-sm font-bold">${iconName}</span> ${r}`;
           list.appendChild(li);
         });
+      }
+
+      async function resetSecurityBans() {
+        try {
+          const res = await fetch("/api/clear", { method: "POST" });
+          const data = await res.json();
+          fetchLogs();
+          const card = document.getElementById("decision-card");
+          const icon = document.getElementById("decision-icon");
+          const title = document.getElementById("decision-title");
+          const conf = document.getElementById("decision-confidence");
+          card.className = "flex items-center justify-between bg-[#1c2438] border border-[#00f0ff]/50 p-4 rounded-lg transition-all glow-cyan";
+          icon.className = "material-symbols-outlined text-[#00f0ff] text-3xl font-bold";
+          icon.textContent = "lock_open";
+          title.className = "font-bold text-lg text-[#00f0ff] tracking-tight";
+          title.textContent = "SİSTEM SIFIRLANDI (BAN KALKTI)";
+          conf.textContent = "Tüm IP cezaları ve bot logları temizlendi. Temiz test yapabilirsiniz.";
+          const list = document.getElementById("diagnosis-list");
+          list.innerHTML = `<li class="flex items-start gap-2 text-slate-300"><span class="material-symbols-outlined text-[#00f0ff] text-sm font-bold">check</span> IP Ban havuzu ve rate-limit sayaçları sıfırlandı.</li>`;
+        } catch (e) {
+          console.error(e);
+        }
       }
 
       function updateKeystrokeMeters() {
@@ -819,30 +1225,42 @@
           document.getElementById("stat-human-pass").textContent =
             `${humanPct}%`;
 
+          if (data.threat_distribution) {
+            if (document.getElementById("cnt-stealth")) document.getElementById("cnt-stealth").textContent = data.threat_distribution["STEALTH_AUTOMATION"] || 0;
+            if (document.getElementById("cnt-jerk")) document.getElementById("cnt-jerk").textContent = data.threat_distribution["MINIMUM_JERK_BOT"] || 0;
+            if (document.getElementById("cnt-linear")) document.getElementById("cnt-linear").textContent = data.threat_distribution["LINEAR_MACRO"] || 0;
+            if (document.getElementById("cnt-replay")) document.getElementById("cnt-replay").textContent = data.threat_distribution["REPLAY_ATTACK"] || 0;
+            if (document.getElementById("cnt-poisson")) document.getElementById("cnt-poisson").textContent = data.threat_distribution["POISSON_FLOOD"] || 0;
+          }
+
           const tbody = document.getElementById("log-table-body");
           if (data.logs.length === 0) return;
 
           let html = "";
-          data.logs.slice(0, 6).forEach((log) => {
+          data.logs.slice(0, 8).forEach((log) => {
             const isBot = log.classification === "Bot";
             const badgeColor = isBot
               ? "bg-red-500/10 text-red-400 border-red-500/30"
               : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
             const actionText = isBot ? "BLOCK" : "ALLOW";
-            const timeStr = log.timestamp.split("T")
-              ? log.timestamp.split("T").substring(0, 8)
-              : log.timestamp;
-            const traj = isBot
-              ? log.features.straightness > 0.98
-                ? "Perfect Linear"
-                : "Robotic / Auto"
-              : "Organic Curve";
+            const timeParts = log.timestamp ? log.timestamp.split("T") : [];
+            const timeStr = timeParts[1] ? timeParts[1].substring(0, 8) : (log.timestamp || "");
+
+            const threat = log.threat_type || (isBot ? "UNKNOWN_BOT" : "CLEAN_HUMAN");
+            let threatBadge = "bg-slate-500/20 text-slate-300 border-slate-500/40";
+            if (threat === "REPLAY_ATTACK") threatBadge = "bg-red-500/20 text-red-400 border-red-500/40";
+            else if (threat === "STEALTH_AUTOMATION") threatBadge = "bg-purple-500/20 text-purple-300 border-purple-500/40";
+            else if (threat === "MINIMUM_JERK_BOT") threatBadge = "bg-amber-500/20 text-amber-300 border-amber-500/40";
+            else if (threat === "LINEAR_MACRO") threatBadge = "bg-cyan-500/20 text-cyan-300 border-cyan-500/40";
+            else if (threat === "POISSON_FLOOD") threatBadge = "bg-yellow-500/20 text-yellow-300 border-yellow-500/40";
+            else if (threat === "ROBOTIC_KEYSTROKE") threatBadge = "bg-pink-500/20 text-pink-300 border-pink-500/40";
+            else if (threat === "CLEAN_HUMAN") threatBadge = "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
 
             html += `
                     <tr class="hover:bg-white/[0.02]">
                         <td class="p-2.5 text-slate-400">${timeStr}</td>
-                        <td class="p-2.5 text-slate-300 font-bold">${log.user_agent.split(" ")[0]}</td>
-                        <td class="p-2.5 text-slate-400">${traj}</td>
+                        <td class="p-2.5 text-slate-300 font-bold">${log.user_agent ? log.user_agent.split(" ")[0] : "Unknown"}</td>
+                        <td class="p-2.5"><span class="px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${threatBadge}">${threat}</span></td>
                         <td class="p-2.5 font-bold ${isBot ? "text-red-400" : "text-emerald-400"}">${Math.round(log.bot_score)}%</td>
                         <td class="p-2.5 text-right"><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${badgeColor}">${actionText}</span></td>
                     </tr>
