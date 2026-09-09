@@ -1,7 +1,8 @@
-import pytest
-import random
 import math
+import random
+
 from synapse_shield.engine import analyze_behavior, poisson_anomaly_score
+
 
 def test_poisson_anomaly():
     score_low = poisson_anomaly_score(k=2, lambda_val=2.0)
@@ -11,14 +12,14 @@ def test_poisson_anomaly():
 
 def test_selenium_headless_properties():
     telemetry = {"browser": {"webdriver": True, "screen_width": 800, "screen_height": 600}}
-    score, classification, reasons, details = analyze_behavior(telemetry)
+    _score, classification, reasons, _details = analyze_behavior(telemetry)
     assert classification == "Bot"
     assert "Automation tool interface" in str(reasons)
 
 def test_straight_line_bot():
     linear_movements = [{"x": 10 + i * 20, "y": 10 + i * 10, "t": 1000 + i * 20} for i in range(25)]
     telemetry = {"mouse_movements": linear_movements}
-    score, classification, reasons, details = analyze_behavior(telemetry)
+    score, classification, _reasons, _details = analyze_behavior(telemetry)
     assert classification == "Bot"
     assert score >= 50.0
 
@@ -26,7 +27,7 @@ def test_robotic_keyboard():
     # Çok düzenli (varyanssız) klavye vuruşları
     keystrokes = [{"t": 1000 + i * 100} for i in range(10)]
     telemetry = {"keystrokes": keystrokes}
-    score, classification, reasons, details = analyze_behavior(telemetry)
+    _score, classification, _reasons, _details = analyze_behavior(telemetry)
     assert classification == "Bot"
 
 def test_human_verification():
@@ -46,7 +47,7 @@ def test_human_verification():
             "screen_height": 1080
         }
     }
-    score, classification, reasons, details = analyze_behavior(human_payload)
+    score, classification, _reasons, _details = analyze_behavior(human_payload)
     assert classification == "Human"
     assert score <= 50.0
 
@@ -59,7 +60,7 @@ def test_anti_stealth_hard_block():
             "has_webdriver_own_prop": False
         }
     }
-    score, classification, reasons, details = analyze_behavior(payload)
+    score, classification, reasons, _details = analyze_behavior(payload)
     assert classification == "Bot"
     assert score >= 100.0
     assert any("Stealth browser tamper detected" in r for r in reasons)
@@ -74,7 +75,7 @@ def test_anti_stealth_privacy_extension():
             "is_webgl_hooked": True
         }
     }
-    score, classification, reasons, details = analyze_behavior(payload)
+    score, _classification, reasons, _details = analyze_behavior(payload)
     # Temiz telemetri olmadığı için heuristics bunu bot yapabilir, ama 40 puan eklendiğini teyit edelim.
     assert score >= 40.0
     assert any("Browser fingerprinting hook detected" in r for r in reasons)

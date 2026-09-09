@@ -3,7 +3,9 @@ Synapse Shield CLI Runner
 """
 
 import argparse
+
 import uvicorn
+
 
 def main():
     parser = argparse.ArgumentParser(description="Synapse Shield - CLI Controller")

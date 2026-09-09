@@ -3,8 +3,9 @@ Synapse Shield - Core Behavioral Decision Engine v0.4.1 (Anti-Bezier Hardened)
 """
 
 import math
-from typing import Dict, Any, List, Tuple
-from .features import extract_features, MultimodalTokenizer
+from typing import Any
+
+from .features import MultimodalTokenizer, extract_features
 from .models import SynapseHybridModel
 
 # --- GLOBAL WARMUP ---
@@ -30,11 +31,11 @@ def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
     return min(1.0, max(0.0, cumulative_prob))
 
 def analyze_behavior(
-    telemetry: Dict[str, Any], 
+    telemetry: dict[str, Any], 
     recent_request_count: int = 1,
     is_ip_penalized: bool = False,
     accessibility_mode: bool = False
-) -> Tuple[float, str, List[str], Dict[str, Any]]:
+) -> tuple[float, str, list[str], dict[str, Any]]:
     features = extract_features(telemetry)
     reasons = []
     total_risk = 0.0
@@ -159,7 +160,7 @@ def analyze_behavior(
             ai_score = ai_prob * 100.0
         except Exception as e:
             ai_score = 0.0
-            reasons.append(f"AI Model Error: {str(e)}")
+            reasons.append(f"AI Model Error: {e!s}")
             
     # 8. Max Gating (Karar Birleştirme)
     final_bot_score = max(heuristic_score, ai_score)
@@ -198,8 +199,8 @@ def analyze_behavior(
 
 
 def classify_threat(
-    features: Dict[str, Any],
-    telemetry: Dict[str, Any],
+    features: dict[str, Any],
+    telemetry: dict[str, Any],
     recent_request_count: int,
     freq_anomaly: float,
     ai_score: float,

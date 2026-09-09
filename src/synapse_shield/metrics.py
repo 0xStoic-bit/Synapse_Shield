@@ -1,7 +1,7 @@
 import os
 
 try:
-    from prometheus_client import Counter, Histogram, CollectorRegistry, multiprocess
+    from prometheus_client import CollectorRegistry, Counter, Histogram, multiprocess
     
     if "PROMETHEUS_MULTIPROC_DIR" in os.environ:
         registry = CollectorRegistry()

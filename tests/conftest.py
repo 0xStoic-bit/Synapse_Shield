@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 import tempfile
 
 # Testler için zorunlu olarak Mutlak Yol (Absolute Path) temp veritabanı kullanılsın.
@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 import pytest
 from fastapi.testclient import TestClient
+
 
 @pytest.fixture(autouse=True)
 def clear_db_before_test():

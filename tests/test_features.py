@@ -1,18 +1,17 @@
-import pytest
-import math
 from synapse_shield.features import extract_features
+
 
 def test_empty_telemetry():
     features = extract_features({})
     assert features["mouse_points"] == 0
     assert features["click_count"] == 0
-    assert features["webdriver"] == False
+    assert not features["webdriver"]
     assert features["straightness"] == 1.0
 
 def test_missing_data_payloads():
     telemetry = {"browser": {}, "mouse_movements": []}
     features = extract_features(telemetry)
-    assert features["screen_valid"] == False
+    assert not features["screen_valid"]
     assert features["total_distance"] == 0.0
 
 def test_nan_infinity_coordinates():

@@ -1,25 +1,29 @@
-import os
-import tempfile
+import asyncio
+import atexit
+import hashlib
 import json
+import os
 import sqlite3
+import tempfile
+import threading
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 # pyrefly: ignore [missing-import]
 import uvicorn
-import asyncio
-import threading
-import atexit
-from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from collections import deque
-from typing import Dict, Any, List
 
 from synapse_shield.engine import analyze_behavior
-from synapse_shield import tokens
-from synapse_shield.middleware import shield_protect, SynapseShieldMiddleware
-from synapse_shield.tokens import verify_and_consume_token, generate_challenge, generate_pow_salt, verify_pow_salt
-import hashlib
+from synapse_shield.tokens import (
+    generate_challenge,
+    generate_pow_salt,
+    verify_and_consume_token,
+    verify_pow_salt,
+)
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 
@@ -195,7 +199,7 @@ def is_ip_banned(ip: str) -> bool:
             conn.commit()
     return False
 
-_ip_history: Dict[str, deque] = {}
+_ip_history: dict[str, deque] = {}
 _streak_lock = threading.Lock()
 
 def record_ip_decision(ip: str, is_bot: bool):
@@ -214,8 +218,7 @@ def record_ip_decision(ip: str, is_bot: bool):
                     if not v or (now - v[0]).total_seconds() > 60:
                         to_remove.append(k)
                 for k in to_remove:
-                    if k in _ip_history:
-                        del _ip_history[k]
+                    _ip_history.pop(k, None)
                 
                 # Halen > 10000 ise LRU/FIFO tahliyesi
                 while len(_ip_history) > 10000:
@@ -258,9 +261,9 @@ def save_log(
     bot_score: float, 
     classification: str, 
     threat_type: str, 
-    reasons: List[str], 
-    features: Dict[str, Any], 
-    telemetry: Dict[str, Any]
+    reasons: list[str], 
+    features: dict[str, Any], 
+    telemetry: dict[str, Any]
 ):
     conn = get_connection()
     cursor = conn.cursor()
@@ -340,11 +343,10 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     # Proof of Work (Smart Challenge) for Gray Area
     if 35.0 <= bot_score <= 65.0:
         is_pow_valid = False
-        if pow_nonce and pow_salt:
-            if verify_pow_salt(pow_salt):
-                hash_res = hashlib.sha256((pow_salt + pow_nonce).encode()).hexdigest()
-                if hash_res.startswith("0000"):
-                    is_pow_valid = True
+        if pow_nonce and pow_salt and verify_pow_salt(pow_salt):
+            hash_res = hashlib.sha256((pow_salt + pow_nonce).encode()).hexdigest()
+            if hash_res.startswith("0000"):
+                is_pow_valid = True
                     
         if is_pow_valid:
             bot_score = max(0.0, bot_score - 20.0)
@@ -389,7 +391,7 @@ async def get_logs(limit: int = 50):
             "user_agent": r["user_agent"],
             "bot_score": r["bot_score"],
             "classification": r["classification"],
-            "threat_type": r["threat_type"] if ("threat_type" in r.keys() and r["threat_type"]) else "UNKNOWN",
+            "threat_type": r["threat_type"] if (r.get("threat_type")) else "UNKNOWN",
             "reasons": json.loads(r["reasons"]) if r["reasons"] else [],
             "features": json.loads(r["features"]) if r["features"] else {}
         })

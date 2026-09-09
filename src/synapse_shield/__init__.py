@@ -4,16 +4,16 @@ Synapse Shield - Behavioral Biometrics & Bot Mitigation Engine
 
 from .engine import analyze_behavior, poisson_anomaly_score
 from .features import extract_features
-from .middleware import shield_protect, SynapseShieldMiddleware
+from .middleware import SynapseShieldMiddleware, shield_protect
 from .tokens import generate_challenge, verify_and_consume_token
 
 __version__ = "0.7.1"
 __all__ = [
-    "analyze_behavior",
-    "poisson_anomaly_score",
-    "extract_features",
-    "shield_protect",
     "SynapseShieldMiddleware",
+    "analyze_behavior",
+    "extract_features",
     "generate_challenge",
+    "poisson_anomaly_score",
+    "shield_protect",
     "verify_and_consume_token",
 ]

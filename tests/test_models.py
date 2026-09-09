@@ -1,8 +1,11 @@
-import pytest
-import numpy as np
 import os
 import tempfile
+
+import numpy as np
+import pytest
+
 from synapse_shield.models import SynapseHybridModel
+
 
 def test_model_loading_missing_weights():
     with tempfile.TemporaryDirectory() as tmpdirname:
