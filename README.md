@@ -30,7 +30,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.0)
+## ✨ Key Features & Security Architecture (v0.7.1)
 
 | Feature | Description |
 | :--- | :--- |
@@ -53,6 +53,8 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 | 🔒 **100% Zero-PII & Privacy-First** | No keystroke characters or form values collected — strictly relative millisecond timing deltas processed (GDPR & KVKK compliant). |
 | 📊 **Poisson Flooder Defense** | Statistical Poisson anomaly detection identifies high-frequency headless API flooders and applies dynamic IP rate penalties. |
 | 💾 **SQLite WAL with Auto-Pruning** | In-memory TTL nonce management + Write-Ahead Logging (WAL) with 10s timeouts prevents database locks during async BackgroundTasks. |
+| 🧱 **Memory Exhaustion Defense** | Strict 256KB/512KB payload body limits evaluated at stream-read time (`await request.body()`) protecting against chunked-transfer inflation attacks. |
+| 🔑 **Secure Admin APIs** | Administrative operations (`/api/clear`) are cryptographically authenticated via the `SYNAPSE_ADMIN_SECRET` environment variable to prevent unauthorized telemetry tampering. |
 
 ---
 

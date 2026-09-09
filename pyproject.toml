@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.7.0"
+version = "0.7.1"
 authors = [
   { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
 ]
@@ -39,6 +39,7 @@ where = ["src"]
 Homepage = "https://github.com/0xStoic-bit/Synapse_Shield"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 filterwarnings = [
     "ignore::DeprecationWarning:starlette.*",
     "ignore::DeprecationWarning:httpx.*",

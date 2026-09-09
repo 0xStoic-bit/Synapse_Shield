@@ -184,7 +184,11 @@ def is_ip_banned(ip: str) -> bool:
     row = cursor.fetchone()
     if row:
         banned_until = datetime.fromisoformat(row[0])
-        if datetime.now(timezone.utc) < banned_until.replace(tzinfo=timezone.utc):
+        if banned_until.tzinfo is None:
+            banned_until = banned_until.replace(tzinfo=timezone.utc)
+        else:
+            banned_until = banned_until.astimezone(timezone.utc)
+        if datetime.now(timezone.utc) < banned_until:
             return True
         else:
             cursor.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
@@ -203,7 +207,20 @@ def record_ip_decision(ip: str, is_bot: bool):
     with _streak_lock:
         if ip not in _ip_history:
             if len(_ip_history) > 10000:
-                _ip_history.clear()
+                # TTL temizliği
+                now = datetime.now(timezone.utc)
+                to_remove = []
+                for k, v in _ip_history.items():
+                    if not v or (now - v[0]).total_seconds() > 60:
+                        to_remove.append(k)
+                for k in to_remove:
+                    if k in _ip_history:
+                        del _ip_history[k]
+                
+                # Halen > 10000 ise LRU/FIFO tahliyesi
+                while len(_ip_history) > 10000:
+                    oldest_k = next(iter(_ip_history))
+                    del _ip_history[oldest_k]
             _ip_history[ip] = deque()
 
         now = datetime.now(timezone.utc)
@@ -273,15 +290,19 @@ async def get_challenge():
 
 @app.post("/api/score")
 async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
+    raw_body = await request.body()
+    if len(raw_body) > 262_144:
+        raise HTTPException(status_code=413, detail="Payload Too Large: Maximum allowed size is 256 KB")
+
     ip = get_client_ip(request)
     
-    if is_ip_banned(ip):
+    if await asyncio.to_thread(is_ip_banned, ip):
         raise HTTPException(status_code=403, detail="IP address temporarily banned due to suspicious activity.")
 
     user_agent = request.headers.get("user-agent", "Unknown")
     
     try:
-        body = await request.json()
+        body = json.loads(raw_body)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
@@ -305,7 +326,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             "details": {"threat_type": threat_type}
         }
 
-    recent_count = get_recent_request_count(ip)
+    recent_count = await asyncio.to_thread(get_recent_request_count, ip)
     if recent_count > 100:
         ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
         raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
@@ -398,7 +419,16 @@ async def get_logs(limit: int = 50):
     }
 
 @app.post("/api/clear")
-async def clear_logs():
+async def clear_logs(request: Request):
+    import hmac
+    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
+    if admin_secret:
+        provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
+        if not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
+            raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
+    elif os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin operations disabled in production without secret")
+
     with _streak_lock:
         _ip_history.clear()
     conn = get_connection()
@@ -410,8 +440,12 @@ async def clear_logs():
 
 @app.post("/api/collect_dataset")
 async def collect_dataset(request: Request):
+    raw_body = await request.body()
+    if len(raw_body) > 524288:  # 512KB
+        raise HTTPException(status_code=413, detail="Payload Too Large: Maximum allowed size is 512 KB")
+
     try:
-        body = await request.json()
+        body = json.loads(raw_body)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
         

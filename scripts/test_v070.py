@@ -1,5 +1,5 @@
 """
-Synapse Shield v0.7.0 Feature Test Suite
+Synapse Shield v0.7.1 Feature Test Suite
 Tests: 
 1. Proof-of-Work (PoW) Smart Challenge flow
 2. Sliding Window (SSRT-2026-004 fix) streak-reset resistance

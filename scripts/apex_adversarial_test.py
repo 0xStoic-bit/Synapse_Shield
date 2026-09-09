@@ -1,5 +1,5 @@
 """
-Synapse Shield v0.7.0 - Apex Adversarial Benchmark Test Suite
+Synapse Shield v0.7.1 - Apex Adversarial Benchmark Test Suite
 Simulates state-of-the-art biomechanical kinematics, spatial coherence,
 and automated PoW challenge resolution against http://127.0.0.1:8000.
 Strictly designed for local defensive calibration.
@@ -135,7 +135,7 @@ def build_payload(challenge: str, pow_salt: str = None, pow_nonce: str = None) -
 
 def run_apex_test():
     print(f"\n{C.BOLD}{C.CYAN}=============================================================={C.END}")
-    print(f"{C.BOLD}{C.CYAN}    APEX ADVERSARIAL BENCHMARK TEST (v0.7.0){C.END}")
+    print(f"{C.BOLD}{C.CYAN}    APEX ADVERSARIAL BENCHMARK TEST (v0.7.1){C.END}")
     print(f"{C.BOLD}{C.CYAN}=============================================================={C.END}\n")
 
     # 1. Challenge Al

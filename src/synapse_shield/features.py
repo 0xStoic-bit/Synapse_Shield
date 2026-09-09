@@ -25,7 +25,6 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         "screen_valid": True,
         "scroll_count": 0,
         "terminal_decel_ratio": 1.0,
-        "velocity_skewness": 0.0,
         "plugins_length": 1,
         "touch_supported": False,
         "screen_width": 1024.0,
@@ -129,9 +128,8 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
                 terminal_avg_vel = sum(velocities[-last_segment_count:]) / last_segment_count
                 features["terminal_decel_ratio"] = (terminal_avg_vel / max_vel) if max_vel > 1e-5 else 1.0
                 
-                # Hız tepe noktası asimetrisi
+                # Hız tepe noktası asimetrisi (Ölü kod silindi)
                 peak_idx = velocities.index(max_vel)
-                features["velocity_skewness"] = peak_idx / float(max(1, len(velocities)))
                 
                 # İvme ve Jerk (Sarsıntı / Titreme)
                 accelerations = []

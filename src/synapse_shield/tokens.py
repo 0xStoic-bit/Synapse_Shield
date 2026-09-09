@@ -65,9 +65,19 @@ def _load_or_generate_secret_key() -> bytes:
 
 SECRET_KEY = _load_or_generate_secret_key()
 
+def _ensure_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS used_nonces (
+            nonce TEXT PRIMARY KEY,
+            expires_at INTEGER
+        )
+    """)
+    conn.commit()
+
 def _cleanup_expired_nonces():
     try:
         conn = sqlite3.connect(DB_FILE, timeout=5.0)
+        _ensure_table(conn)
         now = int(time.time())
         conn.execute("DELETE FROM used_nonces WHERE expires_at < ?", (now,))
         conn.commit()
@@ -132,7 +142,8 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
         return False, f"Token zaman aşımına uğradı ({elapsed_sec:.1f}sn > 60sn)", {}
     if ts - now_ms > 5000:
         return False, "Gelecek zaman damgası (Saat manipülasyonu)", {}
-    if elapsed_ms < 1500:
+    min_elapsed = int(os.environ.get("SYNAPSE_MIN_ELAPSED_MS", 1500))
+    if elapsed_ms < min_elapsed:
         return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={elapsed_sec:.2f}s", {}
 
     # 2.5 Time Travel Kontrolü (DeepSeek Advanced Bypass Koruması)
@@ -158,6 +169,7 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
     now_sec = int(time.time())
     try:
         conn = sqlite3.connect(DB_FILE, timeout=5.0)
+        _ensure_table(conn)
         # Nonce'ı 120 saniyeliğine 'kullanıldı' olarak işaretle
         conn.execute("INSERT INTO used_nonces (nonce, expires_at) VALUES (?, ?)", (nonce, now_sec + 120))
         conn.commit()
