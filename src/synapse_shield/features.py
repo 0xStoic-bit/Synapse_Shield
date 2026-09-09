@@ -3,9 +3,10 @@ Synapse Shield - Kinematic Feature Extractor v0.4.1 (Anti-Bezier Hardened)
 """
 
 import math
-from typing import Dict, Any, List
+from typing import Any
 
-def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
+
+def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
     features = {
         "mouse_points": 0,
         "total_distance": 0.0,
@@ -49,7 +50,7 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
         features["touch_supported"] = bool(browser.get("touch_supported", False))
         try:
             features["plugins_length"] = int(browser.get("plugins_length", 1))
-        except:
+        except Exception:
             features["plugins_length"] = 1
 
     # 2. Sayaçlar
@@ -129,7 +130,7 @@ def extract_features(telemetry: Dict[str, Any]) -> Dict[str, Any]:
                 features["terminal_decel_ratio"] = (terminal_avg_vel / max_vel) if max_vel > 1e-5 else 1.0
                 
                 # Hız tepe noktası asimetrisi (Ölü kod silindi)
-                peak_idx = velocities.index(max_vel)
+                velocities.index(max_vel)
                 
                 # İvme ve Jerk (Sarsıntı / Titreme)
                 accelerations = []

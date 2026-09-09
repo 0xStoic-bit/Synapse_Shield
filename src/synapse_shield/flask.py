@@ -1,5 +1,7 @@
 from functools import wraps
-from flask import request, jsonify
+
+from flask import jsonify, request
+
 try:
     from .engine import analyze_behavior
 except ImportError:

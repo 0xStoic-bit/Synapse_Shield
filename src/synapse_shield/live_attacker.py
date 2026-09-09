@@ -3,13 +3,13 @@ Synapse Shield - Red Team Automated Bot Attack Suite v0.4.0
 Simulates 7 real-world bot attack campaigns including Replay Attacks.
 """
 
-import time
+import base64
+import json
 import math
 import random
-import json
-import base64
-import urllib.request
+import time
 import urllib.error
+import urllib.request
 
 TARGET_URL = "http://127.0.0.1:8000/api/score"
 CHALLENGE_URL = "http://127.0.0.1:8000/api/challenge"

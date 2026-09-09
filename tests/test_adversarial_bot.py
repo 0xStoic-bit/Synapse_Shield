@@ -1,8 +1,9 @@
-import pytest
-import time
-import json
 import base64
+import json
+import time
+
 from fastapi.testclient import TestClient
+
 from synapse_shield.main import app
 
 client = TestClient(app)

@@ -1,6 +1,8 @@
 import json
+
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+
 try:
     from .engine import analyze_behavior
 except ImportError:

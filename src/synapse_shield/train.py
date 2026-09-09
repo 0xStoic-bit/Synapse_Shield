@@ -3,13 +3,13 @@ Synapse Shield - Active Learning Pipeline
 Zero-Dependency NumPy fine-tuning for the 1D-CNN Dense layers.
 """
 
-import os
-import sqlite3
-import numpy as np
-import tempfile
 import json
 import logging
-from typing import Tuple
+import os
+import sqlite3
+import tempfile
+
+import numpy as np
 
 from synapse_shield.features import MultimodalTokenizer
 
@@ -18,7 +18,7 @@ logger = logging.getLogger("synapse_shield.train")
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
 
-def load_training_data(limit=1000) -> Tuple[list, list]:
+def load_training_data(limit=1000) -> tuple[list, list]:
     """
     Fetches raw telemetry from logs to use as training data.
     Only uses clear edge cases (bot_score > 90 for Bots, bot_score < 10 for Humans)
@@ -64,7 +64,7 @@ def retrain_fc2(epochs=5, learning_rate=0.01):
     Fine-tunes the final FC layer (fc2_w, fc2_b) using Binary Cross Entropy (BCE)
     and Stochastic Gradient Descent (SGD) completely in NumPy.
     """
-    print(f"[*] Synapse Shield Active Learning Pipeline Initiated...")
+    print("[*] Synapse Shield Active Learning Pipeline Initiated...")
     
     if not os.path.exists(WEIGHTS_PATH):
         print(f"❌ Error: Model weights not found at {WEIGHTS_PATH}")
@@ -181,10 +181,10 @@ def retrain_fc2(epochs=5, learning_rate=0.01):
     # WinError 32 koruması için with bloğundan çıktıktan sonra (f.close() olduktan sonra) taşıma işlemini yapıyoruz.
     try:
         os.replace(tmp_name, WEIGHTS_PATH)
-    except OSError as e:
+    except OSError:
         if os.path.exists(tmp_name):
             os.remove(tmp_name)
-        raise e
+        raise
     print("[+] Model successfully retrained and weights updated!")
 
 if __name__ == "__main__":

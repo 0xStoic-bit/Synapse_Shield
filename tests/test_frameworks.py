@@ -1,9 +1,10 @@
-import pytest
-from unittest.mock import MagicMock
 import json
+from unittest.mock import MagicMock
+
 
 def test_flask_middleware():
-    from flask import Flask, request
+    from flask import Flask
+
     from synapse_shield.flask import shield_protect_flask
     
     app = Flask(__name__)
@@ -40,8 +41,9 @@ def test_flask_middleware():
     assert "Access Denied" in res3.json["error"]
 
 def test_django_middleware():
-    from synapse_shield.django import SynapseShieldMiddleware
     from django.conf import settings
+
+    from synapse_shield.django import SynapseShieldMiddleware
     
     if not settings.configured:
         settings.configure(

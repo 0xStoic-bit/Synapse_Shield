@@ -5,17 +5,24 @@ Provides two integration methods:
   2. SynapseShieldMiddleware class for global path-based protection
 """
 
-from functools import wraps
 import asyncio
 import json
-from fastapi import Request, HTTPException
+import time
+from functools import wraps
+
+from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
 from synapse_shield.engine import analyze_behavior
-import time
 from synapse_shield.tokens import verify_and_consume_token
+
 try:
-    from synapse_shield.metrics import METRICS_ENABLED, synapse_requests_total, synapse_inference_latency_seconds
+    from synapse_shield.metrics import (
+        METRICS_ENABLED,
+        synapse_inference_latency_seconds,
+        synapse_requests_total,
+    )
 except ImportError:
     METRICS_ENABLED = False
 def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = False):
@@ -105,7 +112,7 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
     request'lerde bu pattern uygun değildir.
     """
 
-    def __init__(self, app, protected_paths: list = None, max_risk_score: float = 50.0, accessibility_mode: bool = False):
+    def __init__(self, app, protected_paths: list | None = None, max_risk_score: float = 50.0, accessibility_mode: bool = False):
         super().__init__(app)
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score

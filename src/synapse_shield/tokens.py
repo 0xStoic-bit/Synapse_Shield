@@ -3,19 +3,19 @@ Synapse Shield - Cryptographic Token & Replay Attack Defense
 Handles HMAC-SHA256 challenge generation, expiration, and single-use nonce tracking.
 """
 
-import os
-import hmac
-import hashlib
-import time
-import secrets
-import json
 import base64
-import warnings
+import hashlib
+import hmac
+import json
 import logging
+import os
+import secrets
 import sqlite3
 import tempfile
+import time
+import warnings
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from typing import Any
 
 logger = logging.getLogger("synapse_shield")
 
@@ -85,7 +85,7 @@ def _cleanup_expired_nonces():
     except Exception as e:
         logger.warning(f"Nonce cleanup failed: {e}")
 
-def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
+def generate_challenge(expires_in_sec: int = 60) -> dict[str, Any]:
     """
     İstemciye HMAC-SHA256 ile imzalanmış tek kullanımlık bir challenge üretir.
     Format: nonce.timestamp.signature
@@ -104,7 +104,7 @@ def generate_challenge(expires_in_sec: int = 60) -> Dict[str, Any]:
         "expires_in": expires_in_sec
     }
 
-def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]:
+def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]:
     """
     İstemciden gelen token'ı çözer; imza, zaman aşımı ve Replay Attack kontrolü yapar.
     Returns: (is_valid: bool, reason: str, telemetry: dict)
@@ -181,7 +181,7 @@ def verify_and_consume_token(token_str: str) -> Tuple[bool, str, Dict[str, Any]]
     finally:
         try:
             conn.close()
-        except:
+        except Exception:
             pass
 
     return True, "Geçerli", telemetry
@@ -217,7 +217,4 @@ def verify_pow_salt(signed_salt: str) -> bool:
     now_ms = int(time.time() * 1000)
     elapsed_sec = (now_ms - ts) / 1000.0
     # 60 saniyeden eskiyse veya gelecek zamandaysa reddet
-    if elapsed_sec > 60.0 or elapsed_sec < -5.0:
-        return False
-        
-    return True
+    return not (elapsed_sec > 60.0 or elapsed_sec < -5.0)

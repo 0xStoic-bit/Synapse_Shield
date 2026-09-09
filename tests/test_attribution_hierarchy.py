@@ -1,6 +1,6 @@
-import pytest
-from synapse_shield.engine import analyze_behavior, classify_threat
 from fastapi.testclient import TestClient
+
+from synapse_shield.engine import analyze_behavior
 from synapse_shield.main import app
 
 client = TestClient(app)
@@ -57,7 +57,7 @@ def test_hierarchy_stealth_over_linear():
         }
     }
     
-    score, classification, reasons, details = analyze_behavior(telemetry)
+    _score, classification, _reasons, details = analyze_behavior(telemetry)
     assert classification == "Bot"
     assert details["threat_type"] == "STEALTH_AUTOMATION"
 
@@ -79,7 +79,7 @@ def test_hierarchy_stealth_over_min_jerk():
         }
     }
     
-    score, classification, reasons, details = analyze_behavior(telemetry)
+    _score, classification, _reasons, details = analyze_behavior(telemetry)
     assert classification == "Bot"
     assert details["threat_type"] == "STEALTH_AUTOMATION"
 
@@ -102,7 +102,7 @@ def test_hierarchy_min_jerk_over_linear_and_poisson():
     }
     
     # recent_request_count=15 triggers high poisson anomaly (>= 0.95)
-    score, classification, reasons, details = analyze_behavior(telemetry, recent_request_count=15)
+    _score, _classification, _reasons, details = analyze_behavior(telemetry, recent_request_count=15)
     # If jerk or terminal decel triggers MINIMUM_JERK_BOT, it should take precedence over POISSON_FLOOD
     if details["features"]["avg_jerk"] < 0.00008 or details["features"]["acceleration_var"] < 1.5e-5:
         assert details["threat_type"] == "MINIMUM_JERK_BOT"
@@ -124,7 +124,7 @@ def test_hierarchy_linear_macro():
         }
     }
     
-    score, classification, reasons, details = analyze_behavior(telemetry)
+    _score, classification, _reasons, details = analyze_behavior(telemetry)
     assert classification == "Bot"
     assert details["threat_type"] == "LINEAR_MACRO"
 

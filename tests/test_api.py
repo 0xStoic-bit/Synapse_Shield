@@ -1,5 +1,5 @@
-import pytest
 from fastapi.testclient import TestClient
+
 from synapse_shield.main import app
 
 client = TestClient(app)
@@ -26,9 +26,9 @@ def test_score_without_token():
     assert response.status_code == 403
 
 def test_score_with_valid_token():
-    import time
-    import json
     import base64
+    import json
+    import time
     
     # Challenge al
     chal_res = client.get("/api/challenge")

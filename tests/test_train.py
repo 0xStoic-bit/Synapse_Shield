@@ -1,19 +1,20 @@
-import os
 import json
-import pytest
-import sqlite3
-import tempfile
-import numpy as np
-from datetime import datetime, timezone
+import os
 import shutil
+import tempfile
+from datetime import datetime, timezone
+
+import numpy as np
+import pytest
 
 # Set environment variables before importing train.py
 TEST_DB_DIR = tempfile.mkdtemp()
 TEST_DATASET_DB = os.path.join(TEST_DB_DIR, "synapse_dataset_test.db")
 os.environ["SYNAPSE_DATASET_PATH"] = TEST_DATASET_DB
 
-from synapse_shield.train import retrain_fc2, WEIGHTS_PATH
-from synapse_shield.main import get_dataset_connection, init_dataset_db
+from synapse_shield.main import get_dataset_connection, init_dataset_db  # noqa: E402
+from synapse_shield.train import WEIGHTS_PATH, retrain_fc2  # noqa: E402
+
 
 @pytest.fixture(autouse=True)
 def setup_teardown():

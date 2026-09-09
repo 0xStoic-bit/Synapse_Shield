@@ -1,7 +1,8 @@
-import pytest
 import concurrent.futures
-from synapse_shield.main import save_log, get_connection
 import sqlite3
+
+from synapse_shield.main import get_connection, save_log
+
 
 def test_sqlite_wal_mode_enabled():
     """Verify that SQLite connection is configured with WAL journal mode and 10s timeout."""
