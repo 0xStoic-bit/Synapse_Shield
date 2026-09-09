@@ -164,15 +164,27 @@ def retrain_fc2(epochs=5, learning_rate=0.01):
         print(f"   Epoch {epoch+1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
         
     print(f"[*] Saving updated weights to {WEIGHTS_PATH}...")
-    np.savez_compressed(
-        WEIGHTS_PATH,
-        conv_w=conv_w,
-        conv_b=conv_b,
-        fc1_w=fc1_w,
-        fc1_b=fc1_b,
-        fc2_w=fc2_w,
-        fc2_b=fc2_b
-    )
+    weights_dir = os.path.dirname(os.path.abspath(WEIGHTS_PATH))
+    
+    with tempfile.NamedTemporaryFile(dir=weights_dir, delete=False, suffix=".npz") as tmp_f:
+        tmp_name = tmp_f.name
+        np.savez_compressed(
+            tmp_f,
+            conv_w=conv_w,
+            conv_b=conv_b,
+            fc1_w=fc1_w,
+            fc1_b=fc1_b,
+            fc2_w=fc2_w,
+            fc2_b=fc2_b
+        )
+    
+    # WinError 32 koruması için with bloğundan çıktıktan sonra (f.close() olduktan sonra) taşıma işlemini yapıyoruz.
+    try:
+        os.replace(tmp_name, WEIGHTS_PATH)
+    except OSError as e:
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
+        raise e
     print("[+] Model successfully retrained and weights updated!")
 
 if __name__ == "__main__":

@@ -15,11 +15,12 @@ def create_token(challenge: str, telemetry: dict) -> str:
     }
     return base64.b64encode(json.dumps(envelope).encode('utf-8')).decode('utf-8')
 
-def test_fast_bot_time_manipulation():
+def test_fast_bot_time_manipulation(monkeypatch):
     """
     Challenge'ı aldıktan hemen sonra 1.5 saniyeden önce token gönderen bot.
     Zaman manipülasyonundan engellenmelidir.
     """
+    monkeypatch.setenv("SYNAPSE_MIN_ELAPSED_MS", "1500")
     chal_res = client.get("/api/challenge")
     challenge = chal_res.json()["challenge"]
     
@@ -41,7 +42,7 @@ def test_replay_attack():
     challenge = chal_res.json()["challenge"]
     
     # Geçerli bir zaman aralığı (1.6sn) bekleyelim.
-    time.sleep(2.1)
+
     
     token = create_token(challenge, {"browser": {"plugins_length": 1}})
     
@@ -63,7 +64,7 @@ def test_headless_browser_detection():
     chal_res = client.get("/api/challenge")
     challenge = chal_res.json()["challenge"]
     
-    time.sleep(2.1)
+
     
     telemetry = {
         "mouse_movements": [],

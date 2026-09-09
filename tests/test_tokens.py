@@ -18,7 +18,7 @@ def test_valid_token_consumption():
     tok_envelope = {"challenge": ch_data["challenge"], "telemetry": {"mouse_movements": []}}
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
 
-    time.sleep(2.1)
+
     is_valid, reason, telemetry = verify_and_consume_token(tok_b64)
     assert is_valid == True
     assert reason == "Geçerli"
@@ -42,7 +42,7 @@ def test_replay_attack():
     tok_envelope = {"challenge": ch_data["challenge"], "telemetry": {}}
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
 
-    time.sleep(2.1)
+
     is_valid1, reason1, _ = verify_and_consume_token(tok_b64)
     assert is_valid1 == True
     

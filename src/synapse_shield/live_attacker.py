@@ -117,15 +117,21 @@ def main():
     print(f"\n{C.YELLOW}[*] Replay Attack Testi: Gerçek bir token çalınıp 2. kez gönderiliyor...{C.END}")
     ch = get_challenge()
     if ch:
+        # Zaman manipülasyonu korumasına takılmamak için bekle
+        time.sleep(1.6)
+        
         Date_now = int(time.time())
         envelope = {"challenge": ch, "telemetry": {"mouse_movements": human_pts}, "created_at": Date_now}
         valid_token = base64.b64encode(json.dumps(envelope).encode()).decode()
         
         # 1. Gönderim (Başarılı olmalı)
-        send_attack("Replay-1", {"token": valid_token}, ip_suffix=70)
-        # 2. Gönderim (Replay - ENGELLENMELİ!)
-        res7 = send_attack("Replay-2", {"token": valid_token}, ip_suffix=70)
-        print_result(7, "Replay Attack (Aynı Token'ı Tekrar Kullanma)", res7, expected_blocked=True)
+        res_first = send_attack("Replay-1", {"token": valid_token}, ip_suffix=70)
+        if res_first.get("status") == "error" or "Zaman manipülasyonu" in str(res_first.get("reasons", [])):
+            print(f"{C.RED}[!] İlk token gönderimi başarısız oldu, Replay testi yapılamıyor.{C.END}")
+        else:
+            # 2. Gönderim (Replay - ENGELLENMELİ!)
+            res7 = send_attack("Replay-2", {"token": valid_token}, ip_suffix=70)
+            print_result(7, "Replay Attack (Aynı Token'ı Tekrar Kullanma)", res7, expected_blocked=True)
 
     print(f"\n{C.BOLD}{C.GREEN}🎯 TÜM 7 SALDIRI VE GÜVENLİK TESTİ BAŞARIYLA TAMAMLANDI!{C.END}\n")
 

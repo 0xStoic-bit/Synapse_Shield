@@ -91,7 +91,11 @@
           touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
           plugins_length: navigator.plugins ? navigator.plugins.length : 0,
           languages: navigator.languages ? navigator.languages.join(",") : navigator.language,
-          is_plugin_array_fake: Array.isArray(navigator.plugins),
+          is_plugin_array_fake: (function() {
+            try {
+              return Object.prototype.toString.call(navigator.plugins) !== '[object PluginArray]';
+            } catch(e) { return true; }
+          })(),
           has_webdriver_own_prop: navigator.hasOwnProperty("webdriver"),
           is_webgl_hooked: (function() {
             try {

@@ -128,7 +128,7 @@ def generate_adversarial_payload(challenge: str) -> dict:
 
 def run_test():
     print(f"\n{Colors.BOLD}{Colors.CYAN}╔══════════════════════════════════════════════════════════════╗{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.CYAN}║   🔬 SYNAPSE SHIELD — İLERİ SEVİYE BENCHMARK TESTİ (v0.7.0)   ║{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}║   🔬 SYNAPSE SHIELD — İLERİ SEVİYE BENCHMARK TESTİ (v0.7.1)   ║{Colors.END}")
     print(f"{Colors.BOLD}{Colors.CYAN}╚══════════════════════════════════════════════════════════════╝{Colors.END}\n")
 
     clear_api()

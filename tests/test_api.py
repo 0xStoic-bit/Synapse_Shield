@@ -35,8 +35,7 @@ def test_score_with_valid_token():
     assert chal_res.status_code == 200
     challenge = chal_res.json()["challenge"]
     
-    # Hızlı bot (Zaman Manipülasyonu) engeline takılmamak için 1.6s bekle
-    time.sleep(2.1)
+    # Hızlı bot (Zaman Manipülasyonu) engeline takılmamak için bekleme (SYNAPSE_MIN_ELAPSED_MS=0 ile atlandı)
     
     telemetry = {
         "mouse_movements": [],

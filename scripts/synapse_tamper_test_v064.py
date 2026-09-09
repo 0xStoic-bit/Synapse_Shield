@@ -1,5 +1,5 @@
 """
-Synapse Shield v0.7.0 — Anti-Stealth & Tamper Proofing Test Suite
+Synapse Shield v0.7.1 — Anti-Stealth & Tamper Proofing Test Suite
 ==================================================================
 """
 
@@ -183,7 +183,7 @@ class TamperTestSuite:
         return await self._run_tamper_test(client, "Stealth + Mükemmel Mouse (160 Risk, mouse temiz)", "BLOCK", {"is_webgl_hooked": True, "is_canvas_hooked": True})
 
     async def run(self):
-        console.rule("[bold cyan]Synapse Shield v0.7.0 — Tamper Proofing Test Suite")
+        console.rule("[bold cyan]Synapse Shield v0.7.1 — Tamper Proofing Test Suite")
         console.print(f"[dim]Hedef: {self.base_url}[/dim]\n")
 
         tests = [
@@ -246,7 +246,7 @@ class TamperTestSuite:
         console.print(f"\n[bold]Tamper engelleme:[/bold] {block_ok}/{len(block_tests)}")
         console.print(f"[bold]False positive koruması:[/bold] {allow_ok}/{len(allow_tests)}")
         if sum(1 for r in self.results if not r.passed) == 0:
-            console.print("\n[green bold]✓ Tüm testler geçti — v0.7.0 tamper koruması sağlam![/green bold]")
+            console.print("\n[green bold]✓ Tüm testler geçti — v0.7.1 tamper koruması sağlam![/green bold]")
 
     def _save_report(self):
         fname = f"tamper_test_v064_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -255,7 +255,7 @@ class TamperTestSuite:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Synapse Shield v0.7.0 Tamper Test")
+    parser = argparse.ArgumentParser(description="Synapse Shield v0.7.1 Tamper Test")
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     args = parser.parse_args()
     suite = TamperTestSuite(base_url=args.url)

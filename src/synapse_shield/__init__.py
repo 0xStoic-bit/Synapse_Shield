@@ -7,7 +7,7 @@ from .features import extract_features
 from .middleware import shield_protect, SynapseShieldMiddleware
 from .tokens import generate_challenge, verify_and_consume_token
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 __all__ = [
     "analyze_behavior",
     "poisson_anomaly_score",
