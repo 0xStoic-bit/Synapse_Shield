@@ -30,11 +30,14 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.1)
+## ✨ Key Features & Security Architecture (v0.7.2)
 
 | Feature | Description |
 | :--- | :--- |
-| 🧩 **Proof-of-Work (Smart Challenge)** | Sub-second client-side SHA-256 cryptographic puzzle for gray-area sessions (35%–65% risk). Exhausts attacker botnet CPU while remaining invisible to legitimate users. |
+| 🧩 **Dynamic Yielding Proof-of-Work** | Sub-second client-side SHA-256 cryptographic puzzle with UI yielding to prevent main-thread blocking. Replay-attack resistant on retries (v0.7.2). |
+| 🛡️ **Iframe-based Prototype Unhooking** | Advanced anti-stealth mechanism using hidden iframes to access clean native browser prototypes (Canvas, WebGL), bypassing attacker overwrites (v0.7.2). |
+| 🔒 **SDK Runtime Immutability** | `Object.freeze` protects internal SDK states/configurations from malicious tampering on the host page (v0.7.2). |
+| 📱 **Zero-Jank Mobile Events** | Passive touch listeners (`{ passive: true }`) ensure seamless 60 FPS mobile scrolling without blocking the UI thread (v0.7.2). |
 | 🪟 **Sliding Window IP Ban Shield** | Stateful 60-second sliding time-window (SSRT-2026-004 defense). Prevents streak-reset evasion attacks even when attackers inject synthetic human requests. |
 | 🔄 **NumPy-Only Active Learning** | Built-in `synapse-shield retrain` command enabling transfer learning on 1D-CNN FC layers in <3s directly from SQLite logs without PyTorch/TensorFlow. |
 | 🕵️ **Anti-Stealth & Tamper Proofing** | Dynamically detects headless browser fingerprints (`navigator.webdriver`), fake plugin arrays, and native `toString` overwrites in WebGL/Canvas APIs. |
@@ -46,7 +49,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 | ⚡ **Async Non-Blocking SLA (<0.5 ms)** | Heavy CPU-bound kinematics processed via `asyncio.to_thread`, guaranteeing zero event-loop blocking under high concurrency. |
 | 🔐 **Cryptographic Replay Defense** | Every session is bound to a single-use **HMAC-SHA256** signed nonce. Intercepted tokens cannot be replayed. |
 | 🧠 **Fitts's Law Deceleration Kinematics** | Distinguishes advanced Bézier curve bots (`ghost-cursor`) from organic human hands by analyzing terminal velocity drops before click actions. |
-| ⚛️ **React & Next.js Drop-in Support** | Native `"use client"` compatible `<SynapseProtect />` component and `useSynapseShield` hook with event throttling. |
+| ⚛️ **React, Next.js & Vue 3 / Nuxt 3 Support** | Native packages (`synapse-shield-react` & `synapse-shield-vue`) with hooks/composables and `<SynapseProtect />` drop-in protection components. |
 | 🐍 **Multi-Framework Adapters** | Native middlewares and decorators for **Django** (`SynapseShieldMiddleware`) and **Flask** (`@shield_protect_flask`). |
 | ♿ **Accessibility Mode** | Graceful risk scaling (`accessibility_mode=True`) prevents false positives for motor-impaired and assistive device users. |
 | 📈 **Enterprise Prometheus Metrics** | Built-in `/metrics` endpoint supporting multi-process Gunicorn/Uvicorn aggregation via `PROMETHEUS_MULTIPROC_DIR`. |
@@ -200,7 +203,36 @@ export default function LoginForm() {
 }
 ```
 
-### 4. Prometheus Metrics
+### 4. Vue 3 / Nuxt 3 Integration
+
+Official Vue 3 composable and component package (`synapse-shield-vue`). Fully SSR-safe for Nuxt 3.
+
+```vue
+<script setup>
+import { ref } from 'vue';
+import { useSynapseShield, SynapseProtect } from 'synapse-shield-vue';
+
+const { getProtectedPayload } = useSynapseShield();
+const username = ref('');
+const password = ref('');
+
+const handleSubmit = async () => {
+  const payload = getProtectedPayload();
+  // Submit payload.token to backend
+};
+</script>
+
+<template>
+  <form @submit.prevent="handleSubmit">
+    <SynapseProtect />
+    <input v-model="username" type="text" placeholder="Username" />
+    <input v-model="password" type="password" placeholder="Password" />
+    <button type="submit">Login</button>
+  </form>
+</template>
+```
+
+### 5. Prometheus Metrics
 
 Enterprise observability out of the box. Automatically exposes latency and block rates.
 To enable multi-process support (e.g., Gunicorn workers), set the environment variable:

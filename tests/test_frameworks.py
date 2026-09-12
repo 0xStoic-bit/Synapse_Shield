@@ -41,6 +41,8 @@ def test_flask_middleware():
     assert "Access Denied" in res3.json["error"]
 
 def test_django_middleware():
+    import pytest
+    pytest.importorskip("django")
     from django.conf import settings
 
     from synapse_shield.django import SynapseShieldMiddleware

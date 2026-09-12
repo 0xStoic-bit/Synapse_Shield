@@ -5,6 +5,19 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-09-12
+### Added
+- Native mobile & touchscreen biometrics in `synapse-sdk.js` via passive `touchstart`, `touchmove`, and `touchend` listeners to prevent false-positive penalties on mobile devices.
+- Dynamic Proof-of-Work (PoW) difficulty validator supporting arbitrary hex zero lengths with event loop yielding to eliminate UI freezing.
+- Robust UTF-8 Base64 encoding fallback (`safeBtoa`) in the SDK to prevent DOMException errors on international locales and Unicode characters.
+- Anti-stealth prototype defense extracting unpolluted native `Function.prototype.toString` via hidden iframe to detect sophisticated browser hooks.
+- Immutability safeguards locking `window.SynapseShield` via `Object.freeze` and non-writable property descriptors against runtime tampering.
+- Comprehensive test suite `tests/test_sdk.py` validating SDK static serving, UTF-8 token decodes, PoW retry verification, and mobile touch kinematics.
+
+### Fixed
+- Fixed critical PoW retry replay-attack bug where `challenge_required` retried with the already-consumed challenge token instead of proactively acquiring a fresh challenge.
+- Fixed telemetry time-travel detection violation on PoW retries by re-windowing event timestamps to match the active challenge lifecycle.
+
 ## [0.7.1] - 2026-09-09
 ### Added
 - Admin authentication enforcement for the `/api/clear` endpoint using `SYNAPSE_ADMIN_SECRET`.
