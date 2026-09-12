@@ -1,8 +1,9 @@
 {
-  "name": "synapse-shield-react",
+  "name": "synapse-shield-vue",
   "version": "0.7.2",
-  "description": "React and Next.js integration for Synapse Shield Behavioral Biometrics",
+  "description": "Vue 3 and Nuxt 3 integration for Synapse Shield Behavioral Biometrics",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc"
@@ -10,27 +11,29 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/0xStoic-bit/Synapse_Shield.git",
-    "directory": "synapse-shield-react"
+    "directory": "synapse-shield-vue"
   },
   "bugs": {
     "url": "https://github.com/0xStoic-bit/Synapse_Shield/issues"
   },
-  "homepage": "https://github.com/0xStoic-bit/Synapse_Shield/tree/main/synapse-shield-react#readme",
+  "homepage": "https://github.com/0xStoic-bit/Synapse_Shield/tree/main/synapse-shield-vue#readme",
   "keywords": [
-    "react",
-    "nextjs",
+    "vue",
+    "vue3",
+    "nuxt",
+    "nuxt3",
     "synapse-shield",
-    "bot-protection"
+    "bot-protection",
+    "biometrics",
+    "anti-bot"
   ],
   "author": "Mustafa Güngör",
   "license": "MIT",
   "peerDependencies": {
-    "react": ">=16.8.0",
-    "react-dom": ">=16.8.0"
+    "vue": ">=3.0.0"
   },
   "devDependencies": {
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vue": "^3.4.0"
   }
 }

@@ -156,7 +156,7 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
             if timestamps:
                 telemetry_duration_sec = (max(timestamps) - min(timestamps)) / 1000.0
                 # Telemetrideki olayların süresi, dünyadaki geçen süreden büyük olamaz (0.5s network gecikme payı)
-                if telemetry_duration_sec > elapsed_time + 0.5:
+                if min_elapsed > 0 and telemetry_duration_sec > elapsed_time + 0.5:
                     return False, f"Zaman yolculuğu tespit edildi (Time Travel Bot): Telemetri {telemetry_duration_sec:.1f}s sürüyor ancak token {elapsed_time:.1f}s önce alındı!", {}
     except Exception as e:
         logger.warning(f"Telemetry time travel check failed: {e}")

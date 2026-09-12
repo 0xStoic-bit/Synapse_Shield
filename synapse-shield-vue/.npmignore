@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Dev files
+src/
+tsconfig.json
+.eslintrc*
+.prettierrc*
+test/
+tests/
+__tests__/
+
+# Optional: Log files, OS files
+*.log
+.DS_Store
+Thumbs.db

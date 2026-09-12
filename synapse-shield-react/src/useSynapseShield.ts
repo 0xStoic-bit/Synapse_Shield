@@ -1,5 +1,37 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+// Safe UTF-8 Base64 Encoder
+function safeBtoa(str: string): string {
+  try {
+    return window.btoa(str);
+  } catch (e) {
+    return window.btoa(
+      encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (_, p1) {
+        return String.fromCharCode(parseInt(p1, 16));
+      })
+    );
+  }
+}
+
+// Get pristine Function.prototype.toString using a transient iframe to defeat prototype hooks
+function getCleanFunctionToString(): () => string {
+  try {
+    if (typeof document === "undefined" || !document.createElement) {
+      return Function.prototype.toString;
+    }
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    const root = document.body || document.documentElement;
+    if (!root) return Function.prototype.toString;
+    root.appendChild(iframe);
+    const cleanToString = (iframe.contentWindow as any).Function.prototype.toString;
+    root.removeChild(iframe);
+    return cleanToString;
+  } catch (e) {
+    return Function.prototype.toString;
+  }
+}
+
 export interface SynapseTelemetry {
   mouse_movements: Array<{ x: number; y: number; t: number }>;
   clicks: Array<{ x: number; y: number; t: number }>;
@@ -10,6 +42,10 @@ export interface SynapseTelemetry {
     screen_width: number;
     screen_height: number;
     touch_supported: boolean;
+    is_plugin_array_fake?: boolean;
+    has_webdriver_own_prop?: boolean;
+    is_webgl_hooked?: boolean;
+    is_canvas_hooked?: boolean;
   };
 }
 
@@ -53,13 +89,54 @@ export function useSynapseShield() {
   }, []);
 
   useEffect(() => {
+    // Advanced Tamper Detection
+    const checkWebGLHook = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const gl = (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+        if (gl) {
+          const cleanToString = getCleanFunctionToString();
+          const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+          if (debugInfo) {
+            const getParameterFunc = gl.getParameter;
+            const str = cleanToString.call(getParameterFunc);
+            if (str.indexOf("[native code]") === -1) return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    };
+
+    const checkCanvasHook = () => {
+      try {
+        const cleanToString = getCleanFunctionToString();
+        const str = cleanToString.call(HTMLCanvasElement.prototype.toDataURL);
+        if (str.indexOf("[native code]") === -1) return true;
+      } catch (e) {}
+      return false;
+    };
+
+    const isPluginArrayFake = () => {
+      try {
+        if (navigator.plugins && navigator.plugins.length > 0) {
+          if (navigator.plugins.constructor !== PluginArray) return true;
+        }
+      } catch (e) {}
+      return false;
+    };
+
     // Initialize browser info safely on the client
     telemetry.current.browser = {
       webdriver: navigator.webdriver || false,
       screen_width: window.innerWidth || window.screen.width,
       screen_height: window.innerHeight || window.screen.height,
       touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
+      is_plugin_array_fake: isPluginArrayFake(),
+      has_webdriver_own_prop: Object.prototype.hasOwnProperty.call(navigator, "webdriver"),
+      is_webgl_hooked: checkWebGLHook(),
+      is_canvas_hooked: checkCanvasHook(),
     };
+    
     refreshChallenge();
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -68,6 +145,34 @@ export function useSynapseShield() {
         telemetry.current.mouse_movements.push({ x: e.clientX, y: e.clientY, t: now });
         lastMoveTime.current = now;
         if (telemetry.current.mouse_movements.length > 500) telemetry.current.mouse_movements.shift();
+      }
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (!e.touches || e.touches.length === 0) return;
+      const touch = e.touches[0];
+      const now = Date.now();
+      telemetry.current.mouse_movements.push({ x: touch.clientX, y: touch.clientY, t: now });
+      lastMoveTime.current = now;
+      if (telemetry.current.mouse_movements.length > 500) telemetry.current.mouse_movements.shift();
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!e.touches || e.touches.length === 0) return;
+      const now = Date.now();
+      if (now - lastMoveTime.current >= moveThrottleMs) {
+        const touch = e.touches[0];
+        telemetry.current.mouse_movements.push({ x: touch.clientX, y: touch.clientY, t: now });
+        lastMoveTime.current = now;
+        if (telemetry.current.mouse_movements.length > 500) telemetry.current.mouse_movements.shift();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.changedTouches && e.changedTouches.length > 0) {
+        const touch = e.changedTouches[0];
+        telemetry.current.clicks.push({ x: touch.clientX, y: touch.clientY, t: Date.now() });
+        if (telemetry.current.clicks.length > 50) telemetry.current.clicks.shift();
       }
     };
 
@@ -99,6 +204,9 @@ export function useSynapseShield() {
     };
 
     window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
     window.addEventListener("click", handleClick, { passive: true });
     window.addEventListener("keydown", handleKeyDown, { passive: true });
     window.addEventListener("keyup", handleKeyUp, { passive: true });
@@ -106,6 +214,9 @@ export function useSynapseShield() {
 
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("click", handleClick);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
@@ -127,7 +238,7 @@ export function useSynapseShield() {
         telemetry: telemetry.current,
         created_at: Date.now(),
       };
-      return { token: btoa(JSON.stringify(envelope)) };
+      return { token: safeBtoa(JSON.stringify(envelope)) };
     }
     return { telemetry: telemetry.current };
   }, [currentChallenge]);

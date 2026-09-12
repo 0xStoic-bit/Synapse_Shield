@@ -31,6 +31,7 @@ def test_robotic_keyboard():
     assert classification == "Bot"
 
 def test_human_verification():
+    random.seed(42)
     human_movements = []
     t_h = 1000
     for i in range(35):
