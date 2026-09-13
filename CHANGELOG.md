@@ -5,6 +5,15 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-09-13
+### Added
+- Enterprise distributed state & cluster management architecture via `StorageBackend` interface in `storage.py`.
+- Atomic multi-server Replay Attack protection powered by Redis `SET key 1 EX 120 NX`, eliminating race conditions across load-balanced instances.
+- Cluster-wide IP quarantine and sliding-window bot strike synchronization across distributed worker nodes.
+- Resilient zero-downtime runtime fallback: seamlessly degrades to local SQLite storage with `socket_timeout=1.5s` if Redis disconnects or crashes mid-flight.
+- Optional dependency `redis>=5.0.0` in `pyproject.toml` (`pip install synapse-shield[redis]`).
+- Comprehensive multi-worker stress test suite `tests/test_storage.py` and `scripts/stress_test_distributed.py` validating 4-worker concurrency and self-healing failover.
+
 ## [0.7.2] - 2026-09-12
 ### Added
 - Native mobile & touchscreen biometrics in `synapse-sdk.js` via passive `touchstart`, `touchmove`, and `touchend` listeners to prevent false-positive penalties on mobile devices.

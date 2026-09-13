@@ -17,6 +17,8 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from synapse_shield.storage import get_storage
+
 logger = logging.getLogger("synapse_shield")
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
@@ -164,25 +166,10 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     # 3. Süresi Dolan Nonce'ları Temizle
     _cleanup_expired_nonces()
 
-    # 4. Replay Attack (Yeniden Oynatma) Kontrolü
-    # Atomik SQLite INSERT ile Race Condition önlenir
-    now_sec = int(time.time())
-    try:
-        conn = sqlite3.connect(DB_FILE, timeout=5.0)
-        _ensure_table(conn)
-        # Nonce'ı 120 saniyeliğine 'kullanıldı' olarak işaretle
-        conn.execute("INSERT INTO used_nonces (nonce, expires_at) VALUES (?, ?)", (nonce, now_sec + 120))
-        conn.commit()
-    except sqlite3.IntegrityError:
+    # 4. Replay Attack (Yeniden Oynatma) Kontrolü (SQLite veya Dağıtık Redis)
+    is_valid_nonce = get_storage().consume_nonce(nonce, ttl_sec=120)
+    if not is_valid_nonce:
         return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
-    except Exception as e:
-        logger.error(f"Database error during token verify: {e}")
-        return False, "Sunucu veritabanı hatası", {}
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
     return True, "Geçerli", telemetry
 

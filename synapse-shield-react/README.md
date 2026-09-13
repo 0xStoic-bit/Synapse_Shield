@@ -105,8 +105,9 @@ export default function Page() {
 
 ---
 
-## Features (v0.7.2)
+## Features (v0.7.3)
 
+- **Distributed State & Redis Support:** Seamless integration with Synapse Shield's distributed multi-server cluster mode.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with native APIs.
 - **Zero-Jank Touch Events:** Passive listeners (`touchstart`, `touchmove`, `touchend`) for mobile touch kinematics.
 - **Safe Unicode Base64:** Robust UTF-8 payload encoding across internationalized environments.

@@ -1,6 +1,6 @@
 {
   "name": "synapse-shield-vue",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Vue 3 and Nuxt 3 integration for Synapse Shield Behavioral Biometrics",
   "main": "dist/index.js",
   "module": "dist/index.js",
