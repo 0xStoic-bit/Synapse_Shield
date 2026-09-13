@@ -30,10 +30,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.2)
+## ✨ Key Features & Security Architecture (v0.7.3)
 
 | Feature | Description |
 | :--- | :--- |
+| ⚡ **Distributed State & Redis Cluster** | Enterprise multi-server architecture (`SYNAPSE_REDIS_URL`). Atomic cross-worker replay protection (`SET NX EX`), synchronized IP quarantine, and zero-downtime SQLite fallback (v0.7.3). |
 | 🧩 **Dynamic Yielding Proof-of-Work** | Sub-second client-side SHA-256 cryptographic puzzle with UI yielding to prevent main-thread blocking. Replay-attack resistant on retries (v0.7.2). |
 | 🛡️ **Iframe-based Prototype Unhooking** | Advanced anti-stealth mechanism using hidden iframes to access clean native browser prototypes (Canvas, WebGL), bypassing attacker overwrites (v0.7.2). |
 | 🔒 **SDK Runtime Immutability** | `Object.freeze` protects internal SDK states/configurations from malicious tampering on the host page (v0.7.2). |

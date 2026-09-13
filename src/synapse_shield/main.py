@@ -6,7 +6,6 @@ import os
 import sqlite3
 import tempfile
 import threading
-from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -18,6 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from synapse_shield.engine import analyze_behavior
+from synapse_shield.storage import get_storage
 from synapse_shield.tokens import (
     generate_challenge,
     generate_pow_salt,
@@ -182,77 +182,26 @@ def get_recent_request_count(ip: str) -> int:
     return count + 1
 
 def is_ip_banned(ip: str) -> bool:
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT banned_until FROM banned_ips WHERE ip = ?", (ip,))
-    row = cursor.fetchone()
-    if row:
-        banned_until = datetime.fromisoformat(row[0])
-        if banned_until.tzinfo is None:
-            banned_until = banned_until.replace(tzinfo=timezone.utc)
-        else:
-            banned_until = banned_until.astimezone(timezone.utc)
-        if datetime.now(timezone.utc) < banned_until:
-            return True
-        else:
-            cursor.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
-            conn.commit()
-    return False
+    return get_storage().is_ip_banned(ip)
 
-_ip_history: dict[str, deque] = {}
-_streak_lock = threading.Lock()
 
 def record_ip_decision(ip: str, is_bot: bool):
     """
     Sliding Window (Kayan Pencere) Tabanlı Dinamik IP Karantina Takibi:
     Son 60 saniye içerisinde 4 veya daha fazla bot kararı tespit edilirse IP 1 dakika banlanır.
-    İnsan istekleri sayaç sıfırlamaz (Sadece süresi dolan bot kayıtları silinir).
     """
-    with _streak_lock:
-        if ip not in _ip_history:
-            if len(_ip_history) > 10000:
-                # TTL temizliği
-                now = datetime.now(timezone.utc)
-                to_remove = []
-                for k, v in _ip_history.items():
-                    if not v or (now - v[0]).total_seconds() > 60:
-                        to_remove.append(k)
-                for k in to_remove:
-                    _ip_history.pop(k, None)
-                
-                # Halen > 10000 ise LRU/FIFO tahliyesi
-                while len(_ip_history) > 10000:
-                    oldest_k = next(iter(_ip_history))
-                    del _ip_history[oldest_k]
-            _ip_history[ip] = deque()
+    if is_bot:
+        get_storage().record_bot_strike(
+            ip,
+            threshold=4,
+            window_sec=60,
+            ban_duration_sec=60,
+            reason="High bot density in sliding time window (4 bot requests in last 60 seconds)",
+        )
 
-        now = datetime.now(timezone.utc)
-        
-        if is_bot:
-            _ip_history[ip].append(now)
-
-        # 60 saniyeden eski bot kayıtlarını pencereden çıkar
-        while _ip_history[ip] and (now - _ip_history[ip][0]).total_seconds() > 60:
-            _ip_history[ip].popleft()
-
-        bot_count = len(_ip_history[ip])
-        if bot_count >= 4:
-            ban_ip(
-                ip,
-                1,
-                f"High bot density in sliding time window ({bot_count} bot requests in last 60 seconds)"
-            )
-            _ip_history[ip].clear()
 
 def ban_ip(ip: str, minutes: int, reason: str):
-    banned_until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "REPLACE INTO banned_ips (ip, banned_until, reason) VALUES (?, ?, ?)",
-        (ip, banned_until, reason)
-    )
-    conn.commit()
+    get_storage().ban_ip(ip, duration_sec=minutes * 60, reason=reason)
 
 
 def save_log(
@@ -431,12 +380,10 @@ async def clear_logs(request: Request):
     elif os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
         raise HTTPException(status_code=403, detail="Forbidden: Admin operations disabled in production without secret")
 
-    with _streak_lock:
-        _ip_history.clear()
+    get_storage().clear_all()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM logs")
-    cursor.execute("DELETE FROM banned_ips")
     conn.commit()
     return {"status": "success", "message": "Database logs and bans cleared"}
 
