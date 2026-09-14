@@ -115,7 +115,7 @@ def test_pow_gray_area_and_fresh_retry():
     # 2. Solve PoW
     nonce = 0
     found_nonce = None
-    while nonce < 100000:
+    while nonce < 1_000_000:
         hash_val = hashlib.sha256((pow_salt + str(nonce)).encode()).hexdigest()
         if hash_val.startswith("0000"):
             found_nonce = str(nonce)
