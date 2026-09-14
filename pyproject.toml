@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.7.3"
+version = "0.7.4"
 authors = [
   { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
 ]
@@ -15,6 +15,18 @@ requires-python = ">=3.10"
 keywords = [
   "cybersecurity", "bot-detection", "turnstile-alternative",
   "behavioral-biometrics", "kinematics", "fastapi", "zero-pii"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware",
 ]
 dependencies = [
     "fastapi>=0.110.0",
@@ -38,6 +50,9 @@ where = ["src"]
 
 [project.urls]
 Homepage = "https://github.com/0xStoic-bit/Synapse_Shield"
+Repository = "https://github.com/0xStoic-bit/Synapse_Shield"
+Documentation = "https://github.com/0xStoic-bit/Synapse_Shield#readme"
+Issues = "https://github.com/0xStoic-bit/Synapse_Shield/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

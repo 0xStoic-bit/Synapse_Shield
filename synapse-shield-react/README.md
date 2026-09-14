@@ -105,7 +105,7 @@ export default function Page() {
 
 ---
 
-## Features (v0.7.3)
+## Features (v0.7.4)
 
 - **Distributed State & Redis Support:** Seamless integration with Synapse Shield's distributed multi-server cluster mode.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with native APIs.
