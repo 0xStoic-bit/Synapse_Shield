@@ -1,5 +1,5 @@
 """
-Synapse Shield v0.6.5 — Red Team Full Penetration & Bot Mitigation Suite
+Synapse Shield v0.7.5 — Red Team Full Penetration & Bot Mitigation Suite
 =======================================================================
 Kapsamlı Güvenlik & Bypass Doğrulama Paketi:
 1. Katman 1: Kriptografik Savunmalar (HMAC, Replay, Dwell Time, Time Travel, Timestamp)
@@ -52,6 +52,7 @@ class SynapseRedTeamSuite:
     def __init__(self, base_url: str = BASE_URL):
         self.base_url = base_url.rstrip("/")
         self.results: List[TestResult] = []
+        self.test_index = 0
 
     async def clear_db(self, client: httpx.AsyncClient):
         try:
@@ -130,7 +131,11 @@ class SynapseRedTeamSuite:
     async def _post_score(self, client: httpx.AsyncClient, payload: dict) -> tuple[int, float, dict]:
         t0 = time.perf_counter()
         try:
-            resp = await client.post(f"{self.base_url}/api/score", json=payload, timeout=10.0)
+            headers = {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": f"10.0.0.{self.test_index}"
+            }
+            resp = await client.post(f"{self.base_url}/api/score", json=payload, headers=headers, timeout=10.0)
             latency = (time.perf_counter() - t0) * 1000
             try:
                 data = resp.json()
@@ -449,7 +454,11 @@ class SynapseRedTeamSuite:
         await asyncio.sleep(2.1)
         browser = self.clean_browser()
         browser.update(overrides)
-        events = self.human_organic_trajectory()
+        if expected == "ALLOW":
+            events = self.human_organic_trajectory()
+        else:
+            events = self.linear_trajectory()
+            
         telemetry = {
             "mouse_movements": events,
             "clicks": [{"x": events[-1]["x"], "y": events[-1]["y"], "t": events[-1]["t"] + 30}],
@@ -583,7 +592,7 @@ class SynapseRedTeamSuite:
 
     async def run_all(self):
         print("\n" + "="*75)
-        print("  🛡️ SYNAPSE SHIELD v0.6.5 — RED TEAM OTOMATİZE SALDIRI TESTİ")
+        print("  🛡️ SYNAPSE SHIELD v0.7.5 — RED TEAM OTOMATİZE SALDIRI TESTİ")
         print(f"  Hedef: {self.base_url} | Zaman: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*75 + "\n")
 
@@ -613,6 +622,7 @@ class SynapseRedTeamSuite:
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             for display_name, test_func in test_queue:
+                self.test_index += 1
                 # İzolasyon için her test öncesi ban ve log temizliği
                 if display_name != "K5: Dinamik IP Ban":
                     await self.clear_db(client)
@@ -635,7 +645,7 @@ class SynapseRedTeamSuite:
 
     def _render_report(self):
         print("\n" + "="*90)
-        print("  📊 SYNAPSE SHIELD v0.6.5 — RED TEAM SALDIRI SONUÇ RAPORU")
+        print("  📊 SYNAPSE SHIELD v0.7.5 — RED TEAM SALDIRI SONUÇ RAPORU")
         print("="*90)
         header = f"{'Test Adı':<32} | {'Katman':<18} | {'Beklenen':<8} | {'HTTP':<4} | {'Risk %':<7} | {'Karar':<7} | {'Sonuç'}"
         print(header)

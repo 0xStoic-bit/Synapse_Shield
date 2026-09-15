@@ -11,7 +11,7 @@ from typing import Any
 
 # pyrefly: ignore [missing-import]
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -128,6 +128,27 @@ def init_dataset_db():
 init_dataset_db()
 
 app = FastAPI(title="Synapse Shield - Behavioral Bot Detection Engine")
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                pass
+
+manager = ConnectionManager()
 
 
 def _get_cors_origins() -> list:
@@ -314,6 +335,9 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     
     background_tasks.add_task(save_log, ip, user_agent, bot_score, classification, threat_type, reasons, details.get("features", {}), telemetry)
         
+    if classification == "Bot":
+        background_tasks.add_task(manager.broadcast, f"[BOT {bot_score:.1f}%] -> {threat_type} (IP: {ip})")
+
     return {
         "status": "success",
         "bot_score": bot_score,
@@ -322,6 +346,64 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         "reasons": reasons,
         "details": details
     }
+
+@app.websocket("/ws/terminal")
+async def websocket_terminal(websocket: WebSocket):
+    await manager.connect(websocket)
+    await websocket.send_text("Synapse Shield Cyber-Console [Version 0.8.0]")
+    await websocket.send_text("Type 'help' for available commands.")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            cmd = data.strip().lower()
+            if cmd == "help":
+                await websocket.send_text("Available commands: status, ban list, unban <ip>, retrain, help")
+            elif cmd == "status":
+                try:
+                    stats = await get_logs(limit=1)
+                    await websocket.send_text(f"[STATUS] Total Req: {stats['total_requests']}, Bots: {stats['bot_requests']} ({stats['bot_ratio']:.1f}%)")
+                except Exception as e:
+                    await websocket.send_text(f"[ERROR] Could not fetch status: {e}")
+            elif cmd == "ban list":
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT ip, reason FROM banned_ips LIMIT 50")
+                    bans = cursor.fetchall()
+                    if bans:
+                        res = "\n".join([f"IP: {b[0]} | Reason: {b[1]}" for b in bans])
+                        await websocket.send_text(f"[BAN LIST]\n{res}")
+                    else:
+                        await websocket.send_text("[BAN LIST] No IPs are currently banned.")
+                except Exception as e:
+                    await websocket.send_text(f"[ERROR] {e}")
+            elif cmd.startswith("unban "):
+                parts = cmd.split(" ", 1)
+                if len(parts) > 1:
+                    ip_to_unban = parts[1].strip()
+                    try:
+                        get_storage().unban_ip(ip_to_unban)
+                        await websocket.send_text(f"[UNBAN] IP {ip_to_unban} has been removed from quarantine.")
+                    except Exception as e:
+                        await websocket.send_text(f"[ERROR] Could not unban {ip_to_unban}: {e}")
+            elif cmd == "retrain":
+                await websocket.send_text("[RETRAIN] Telemetri logları taranıyor ve transfer learning başlatılıyor...")
+                from .train import retrain_fc2
+                
+                # Asenkron event loop'u tıkamamak için thread havuzunda koştur:
+                res = await asyncio.to_thread(retrain_fc2)
+                
+                if res.get("success"):
+                    samples = res.get("samples", 0)
+                    loss = res.get("loss", 0.0)
+                    await websocket.send_text(f"[SUCCESS] 1D-CNN başarıyla güncellendi! Örneklem: {samples}, Kayıp (Loss): {loss:.4f}")
+                else:
+                    msg = res.get("error", "Bilinmeyen durum")
+                    await websocket.send_text(f"[INFO] Yeniden eğitim atlandı: {msg}")
+            else:
+                await websocket.send_text(f"[ERROR] Unknown command: {cmd}. Type 'help'.")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 @app.get("/api/logs")
 async def get_logs(limit: int = 50):
@@ -340,7 +422,7 @@ async def get_logs(limit: int = 50):
             "user_agent": r["user_agent"],
             "bot_score": r["bot_score"],
             "classification": r["classification"],
-            "threat_type": r["threat_type"] if (r.get("threat_type")) else "UNKNOWN",
+            "threat_type": r["threat_type"] if r["threat_type"] else "UNKNOWN",
             "reasons": json.loads(r["reasons"]) if r["reasons"] else [],
             "features": json.loads(r["features"]) if r["features"] else {}
         })

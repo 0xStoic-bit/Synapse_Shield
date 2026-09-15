@@ -18,6 +18,17 @@ except Exception as e:
     _ai_model = None
     print(f"[Synapse Shield] AI Model load failed: {e}")
 
+def reload_ai_model() -> bool:
+    """Reloads the 1D-CNN model weights dynamically from disk into memory."""
+    global _ai_model, _tokenizer
+    try:
+        _tokenizer = MultimodalTokenizer(max_mouse_steps=60)
+        _ai_model = SynapseHybridModel()
+        return True
+    except Exception as e:
+        print(f"[Synapse Shield] AI Model reload failed: {e}")
+        return False
+
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
     if k <= 1:
         return 0.0
@@ -52,16 +63,29 @@ def analyze_behavior(
         
     # 1.5 Anti-Stealth & Prototype Tamper Detection
     browser_data = telemetry.get("browser", {})
+    is_stealth_automation = features.get("webdriver", False) or browser_data.get("is_plugin_array_fake") or browser_data.get("has_webdriver_own_prop")
+    
     if browser_data.get("is_plugin_array_fake") or browser_data.get("has_webdriver_own_prop"):
         total_risk += 100.0
         reasons.append("Stealth browser tamper detected: Mocked plugins or webdriver prototype override (100% Bot).")
         
-    if browser_data.get("is_webgl_hooked") and browser_data.get("is_canvas_hooked"):
-        total_risk += 85.0
-        reasons.append("Simultaneous WebGL and Canvas prototype hooks detected (Definite Bot Automation).")
+    is_dual_hook = browser_data.get("is_webgl_hooked") and browser_data.get("is_canvas_hooked")
+    has_human_motion = features.get("straightness", 1.0) < 0.99 and features.get("avg_jerk", 0) > 0.00008
+
+    if is_dual_hook:
+        if has_human_motion:
+            total_risk += 45.0  # Brave gibi gizlilik tarayıcısı kullanan gerçek insan!
+            reasons.append("Privacy browser farbling detected with organic human motion.")
+        else:
+            total_risk += 85.0  # Hem çift kanca var hem de robotik hareket -> BOT!
+            reasons.append("Simultaneous WebGL and Canvas prototype hooks detected without human motion.")
     elif browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked"):
-        total_risk += 40.0
-        reasons.append("Browser fingerprinting hook detected: WebGL/Canvas prototype overridden (Possible bot or privacy extension).")
+        if has_human_motion:
+            total_risk += 34.0
+            reasons.append("Browser fingerprinting hook detected, but human motion verified (Risk lowered to avoid PoW).")
+        else:
+            total_risk += 45.0
+            reasons.append("Browser fingerprinting hook detected without human motion (Possible bot).")
         
     # 2. Ekran Boyutları (Headless)
     if not features["screen_valid"]:
@@ -124,12 +148,12 @@ def analyze_behavior(
             reasons.append(f"Superhuman mouse velocity (max: {features['max_velocity']:.2f} px/ms).")
 
     # 5. Klavye Dinamikleri
-    if features["key_count"] > 3:
-        if features["key_interval_var"] < 4.0:
-            total_risk += 60.0
-            reasons.append(f"Highly rhythmic typing pattern detected (variance: {features['key_interval_var']:.2f} ms²).")
+    if features.get("key_count", 0) >= 3:
+        if features.get("key_interval_var", 50.0) < 2.0:
+            total_risk += 75.0
+            reasons.append("Robotic constant-interval keystroke timing detected.")
             
-        if features["key_interval_avg"] < 25.0:
+        if features.get("key_interval_avg", 100.0) < 25.0:
             total_risk += 50.0
             reasons.append(f"Superhuman input frequency (avg typing interval: {features['key_interval_avg']:.1f} ms).")
 
@@ -164,6 +188,12 @@ def analyze_behavior(
             
     # 8. Max Gating (Karar Birleştirme)
     final_bot_score = max(heuristic_score, ai_score)
+    
+    # Brave Farbling Override: AI Model'in yanlış pozitifini engelle
+    is_brave_like = is_dual_hook or browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked")
+    if is_brave_like and has_human_motion and not is_stealth_automation:
+        final_bot_score = min(final_bot_score, 34.0)
+        reasons.append("AI and heuristic scores capped at 34.0 due to verified organic human motion with privacy farbling.")
     
     classification = "Bot" if final_bot_score >= 50.0 else "Human"
     

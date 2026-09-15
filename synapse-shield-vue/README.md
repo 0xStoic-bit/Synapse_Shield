@@ -95,13 +95,14 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.7.4)
+## Features (v0.7.5)
 
 - **Distributed State & Redis Support:** Full compatibility with Synapse Shield multi-worker cluster deployments.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with `Function.prototype.toString`.
 - **Zero-Jank Touch Events:** Passive listeners (`touchstart`, `touchmove`, `touchend`) for high-precision mobile biometrics with zero scroll jank.
 - **Dynamic Yielding PoW Solver:** `solvePow()` yields to the UI thread every 1,000 iterations to avoid freezing browser rendering.
 - **Safe Unicode Base64:** Robust UTF-8 payload encoding across internationalized environments.
+- **Docker Ready Backend:** See the main repository `README.md` for zero-configuration `docker-compose` engine deployment instructions.
 
 ## License
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synapse-shield"
-version = "0.7.4"
+version = "0.7.5"
 authors = [
   { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
 ]
@@ -31,6 +31,7 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
     "numpy>=1.26.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]

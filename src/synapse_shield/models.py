@@ -19,15 +19,15 @@ class SynapseHybridModel:
             
         # Belleğe Yükleme (Isınma / Warmup)
         # Sadece 1 kez okunur (~0.05s)
-        data = np.load(weights_path)
-        self.conv_w = data['conv_w'] # shape: (16, 5, 3)
-        self.conv_b = data['conv_b'] # shape: (16,)
-        
-        self.fc1_w = data['fc1_w']   # shape: (24, 16)
-        self.fc1_b = data['fc1_b']   # shape: (16,)
-        
-        self.fc2_w = data['fc2_w']   # shape: (16, 1)
-        self.fc2_b = data['fc2_b']   # shape: (1,)
+        with np.load(weights_path) as data:
+            self.conv_w = np.array(data['conv_w']) # shape: (16, 5, 3)
+            self.conv_b = np.array(data['conv_b']) # shape: (16,)
+            
+            self.fc1_w = np.array(data['fc1_w'])   # shape: (24, 16)
+            self.fc1_b = np.array(data['fc1_b'])   # shape: (16,)
+            
+            self.fc2_w = np.array(data['fc2_w'])   # shape: (16, 1)
+            self.fc2_b = np.array(data['fc2_b'])   # shape: (1,)
 
     def predict(self, mouse_tensor, static_vector) -> float:
         """

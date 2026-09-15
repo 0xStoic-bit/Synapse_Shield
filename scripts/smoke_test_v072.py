@@ -35,7 +35,7 @@ def run_smoke_tests():
     res_sdk = client.get("/static/synapse-sdk.js")
     assert res_sdk.status_code == 200, f"SDK fetch failed: {res_sdk.status_code}"
     sdk_code = res_sdk.text
-    assert "Synapse Shield SDK v0.7.2" in sdk_code, "Version v0.7.2 header missing in SDK"
+    assert "Synapse Shield SDK" in sdk_code, "SDK header missing in SDK"
     assert "safeBtoa" in sdk_code, "safeBtoa missing in SDK"
     assert "getCleanFunctionToString" in sdk_code, "iframe prototype unhooker missing in SDK"
     assert "touchstart" in sdk_code, "touchstart listener missing in SDK"

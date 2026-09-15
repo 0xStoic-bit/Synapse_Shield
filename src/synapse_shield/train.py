@@ -59,40 +59,50 @@ def load_training_data(limit=1000) -> tuple[list, list]:
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
 
-def retrain_fc2(epochs=5, learning_rate=0.01):
+def retrain_fc2(epochs=5, learning_rate=0.01, callback=None) -> dict:
     """
     Fine-tunes the final FC layer (fc2_w, fc2_b) using Binary Cross Entropy (BCE)
     and Stochastic Gradient Descent (SGD) completely in NumPy.
     """
-    print("[*] Synapse Shield Active Learning Pipeline Initiated...")
+    def notify(msg: str):
+        print(msg)
+        if callback:
+            try:
+                callback(msg)
+            except Exception:
+                pass
+
+    notify("[*] Synapse Shield Active Learning Pipeline Initiated...")
     
     if not os.path.exists(WEIGHTS_PATH):
-        print(f"❌ Error: Model weights not found at {WEIGHTS_PATH}")
-        return
+        err = f"❌ Error: Model weights not found at {WEIGHTS_PATH}"
+        notify(err)
+        return {"success": False, "error": err}
 
     # Load data
-    print("[*] Loading high-confidence telemetry logs from database...")
+    notify("[*] Loading high-confidence telemetry logs from database...")
     X_telemetry, Y_labels = load_training_data(limit=1000)
     
     if len(X_telemetry) < 10:
-        print("[!] Not enough high-confidence data for retraining. At least 10 samples required.")
-        return
+        err = "[!] Not enough high-confidence data for retraining. At least 10 samples required."
+        notify(err)
+        return {"success": False, "error": err}
         
-    print(f"[+] Found {len(X_telemetry)} valid samples ({int(sum(Y_labels))} Bots, {len(Y_labels) - int(sum(Y_labels))} Humans).")
+    notify(f"[+] Found {len(X_telemetry)} valid samples ({int(sum(Y_labels))} Bots, {len(Y_labels) - int(sum(Y_labels))} Humans).")
     
     tokenizer = MultimodalTokenizer(max_mouse_steps=60)
     
-    # Load current weights
-    data = np.load(WEIGHTS_PATH)
-    conv_w = data['conv_w']
-    conv_b = data['conv_b']
-    fc1_w = data['fc1_w']
-    fc1_b = data['fc1_b']
-    fc2_w = data['fc2_w'] # shape (16, 1)
-    fc2_b = data['fc2_b'] # shape (1,)
+    # Load current weights safely with context manager
+    with np.load(WEIGHTS_PATH) as data:
+        conv_w = np.array(data['conv_w'])
+        conv_b = np.array(data['conv_b'])
+        fc1_w = np.array(data['fc1_w'])
+        fc1_b = np.array(data['fc1_b'])
+        fc2_w = np.array(data['fc2_w']) # shape (16, 1)
+        fc2_b = np.array(data['fc2_b']) # shape (1,)
     
     # Prepare extracted feature vectors (Forward pass up to FC1)
-    print("[*] Extracting deep features (Forward Pass: Conv1D + MaxPool + FC1)...")
+    notify("[*] Extracting deep features (Forward Pass: Conv1D + MaxPool + FC1)...")
     
     fc1_outputs = []
     
@@ -121,9 +131,11 @@ def retrain_fc2(epochs=5, learning_rate=0.01):
     X_train = np.array(fc1_outputs) # shape (N, 16)
     Y_train = np.array(Y_labels).reshape(-1, 1) # shape (N, 1)
     
-    print("[*] Starting Fine-Tuning (Transfer Learning on FC2)...")
+    notify(f"[*] Starting Fine-Tuning (Transfer Learning on FC2, {epochs} epochs, lr={learning_rate})...")
     
     n_samples = X_train.shape[0]
+    avg_loss = 0.0
+    accuracy = 0.0
     
     # SGD Training Loop
     for epoch in range(epochs):
@@ -159,11 +171,11 @@ def retrain_fc2(epochs=5, learning_rate=0.01):
             fc2_w -= learning_rate * dw
             fc2_b -= learning_rate * db
             
-        avg_loss = total_loss / n_samples
-        accuracy = (correct / n_samples) * 100.0
-        print(f"   Epoch {epoch+1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
+        avg_loss = float(total_loss / n_samples)
+        accuracy = float((correct / n_samples) * 100.0)
+        notify(f"   Epoch {epoch+1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
         
-    print(f"[*] Saving updated weights to {WEIGHTS_PATH}...")
+    notify(f"[*] Saving updated weights to {WEIGHTS_PATH}...")
     weights_dir = os.path.dirname(os.path.abspath(WEIGHTS_PATH))
     
     with tempfile.NamedTemporaryFile(dir=weights_dir, delete=False, suffix=".npz") as tmp_f:
@@ -178,14 +190,32 @@ def retrain_fc2(epochs=5, learning_rate=0.01):
             fc2_b=fc2_b
         )
     
-    # WinError 32 koruması için with bloğundan çıktıktan sonra (f.close() olduktan sonra) taşıma işlemini yapıyoruz.
     try:
         os.replace(tmp_name, WEIGHTS_PATH)
     except OSError:
-        if os.path.exists(tmp_name):
+        import shutil
+        import time
+        time.sleep(0.05)
+        try:
+            shutil.copyfile(tmp_name, WEIGHTS_PATH)
             os.remove(tmp_name)
-        raise
-    print("[+] Model successfully retrained and weights updated!")
+        except Exception as copy_err:
+            if os.path.exists(tmp_name):
+                try:
+                    os.remove(tmp_name)
+                except OSError:
+                    pass
+            notify(f"❌ Error saving weights: {copy_err}")
+            return {"success": False, "error": str(copy_err)}
+
+    notify("[+] Model successfully retrained and weights updated!")
+    return {
+        "success": True,
+        "samples": len(X_telemetry),
+        "epochs": epochs,
+        "loss": avg_loss,
+        "accuracy": accuracy
+    }
 
 if __name__ == "__main__":
     retrain_fc2()

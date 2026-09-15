@@ -11,12 +11,12 @@ client = TestClient(app)
 
 
 def test_sdk_static_serving():
-    """Verify that the SDK static endpoint serves the updated v0.7.4 JavaScript SDK."""
+    """Verify that the SDK static endpoint serves the updated v0.7.5 JavaScript SDK."""
     response = client.get("/static/synapse-sdk.js")
     assert response.status_code == 200
     assert "application/javascript" in response.headers.get("content-type", "")
     content = response.text
-    assert "Synapse Shield SDK v0.7.4" in content
+    assert "Synapse Shield SDK v0.7.5" in content
     assert "safeBtoa" in content
     assert "solvePoW" in content
     assert "touchstart" in content
