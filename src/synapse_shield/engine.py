@@ -98,6 +98,7 @@ def analyze_behavior(
         reasons.append("Missing browser plugins in desktop environment (Possible headless/stealth bot).")
         
     # 3. Faresiz Form Etkileşimi
+    is_touch = browser_data.get("touch_supported", False)
     if (features["click_count"] > 0 or features["key_count"] > 0) and features["mouse_points"] == 0:
         total_risk += 50.0
         reasons.append("Interactive events occurred without mouse movement telemetry.")
@@ -108,7 +109,7 @@ def analyze_behavior(
         acc_multiplier = 0.3 if accessibility_mode else 1.0
 
         # A. Doğrusallık (Düz Çizgi Botları)
-        if features["total_distance"] > 30 and features["straightness"] > 0.985:
+        if features["total_distance"] > 30 and features["straightness"] > 0.985 and not is_touch:
             risk_add = 75.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(f"Euclidean straight-line trajectory detected (straightness: {features['straightness']:.4f}) [+{risk_add:.1f}].")
@@ -126,7 +127,7 @@ def analyze_behavior(
             reasons.append(f"Unnatural polynomial acceleration curve detected (acceleration_var: {features['acceleration_var']:.7f}) [+{risk_add:.1f}].")
 
         # D. Nöromüsküler Jerk Titremesi Eksikliği (Bézier matematiksel pürüzsüzlük tespiti)
-        if features["total_distance"] > 50 and features["avg_jerk"] < 0.00008:
+        if features["total_distance"] > 50 and features["avg_jerk"] < 0.00008 and not is_touch:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(f"Unnatural mathematical smoothness: Missing physiological 8-12Hz Jerk tremor (avg_jerk: {features['avg_jerk']:.7f}) [+{risk_add:.1f}].")
