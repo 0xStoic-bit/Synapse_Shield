@@ -62,11 +62,23 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
     # 3. Klavye Dinamikleri
     keystrokes = telemetry.get("keystrokes", [])
     if isinstance(keystrokes, list) and len(keystrokes) > 0:
-        valid_keys = [k for k in keystrokes if isinstance(k, dict) and "t" in k and isinstance(k["t"], (int, float)) and not math.isnan(k["t"])]
+        valid_keys = []
+        for k in keystrokes:
+            if isinstance(k, dict):
+                t_val = k.get("t") or k.get("down") or k.get("time")
+                if isinstance(t_val, (int, float)) and not math.isnan(t_val):
+                    valid_keys.append({"t": float(t_val)})
+                    
         features["key_count"] = len(valid_keys)
         if len(valid_keys) > 1:
             sorted_keys = sorted(valid_keys, key=lambda k: k["t"])
-            intervals = [max(0.0, sorted_keys[i]["t"] - sorted_keys[i - 1]["t"]) for i in range(1, len(sorted_keys))]
+            intervals = []
+            for i in range(1, len(sorted_keys)):
+                t_curr = sorted_keys[i]["t"]
+                t_prev = sorted_keys[i-1]["t"]
+                if t_curr > t_prev:
+                    intervals.append(t_curr - t_prev)
+                    
             if intervals:
                 avg_int = sum(intervals) / len(intervals)
                 features["key_interval_avg"] = avg_int

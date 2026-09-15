@@ -526,7 +526,7 @@
         </div>
       </div>
 
-      <!-- Threat Attribution Radar Bar (v0.6.5) -->
+      <!-- Threat Attribution Radar Bar (v0.7.5) -->
       <div id="threat-radar-bar" class="glass-panel p-3 rounded-lg flex flex-wrap items-center justify-between gap-2 font-mono text-xs border border-[#3b494b]/40">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-sm text-[#00f0ff]">radar</span>
@@ -633,9 +633,72 @@
           </div>
         </div>
       </div>
+      <!-- Retro Cyber Terminal (Live TTY) -->
+      <div class="mt-6 glass-panel rounded-xl overflow-hidden flex flex-col border border-[#4edea3]/40 shadow-[0_0_15px_rgba(78,222,163,0.15)] glow-green">
+        <div class="p-2 border-b border-[#4edea3]/40 bg-[#06090F] flex items-center gap-2">
+          <span class="w-3 h-3 rounded-full bg-[#ffb4ab]"></span>
+          <span class="w-3 h-3 rounded-full bg-[#f4d35e]"></span>
+          <span class="w-3 h-3 rounded-full bg-[#4edea3]"></span>
+          <span class="font-mono text-[10px] text-[#4edea3] ml-2 tracking-widest font-bold">SYNAPSE_SHIELD CYBER-CONSOLE // LIVE TELEMETRY</span>
+        </div>
+        <div class="p-4 bg-black min-h-[250px] max-h-[350px] overflow-y-auto font-mono text-xs text-[#4edea3] flex flex-col gap-1" id="retro-terminal-output">
+          <div>[SYSTEM] Initializing secure WebSocket connection...</div>
+        </div>
+        <div class="p-2 bg-black border-t border-[#4edea3]/20 flex items-center text-[#4edea3] font-mono text-xs">
+          <span class="mr-2 font-bold">&gt;</span>
+          <input type="text" id="retro-terminal-input" class="bg-transparent border-none outline-none flex-grow text-[#4edea3] focus:ring-0 placeholder-[#4edea3]/30" placeholder="Type a command (help, status, ban list)..." autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
     </main>
 
     <script>
+      // Retro Cyber Terminal WebSocket Logic
+      let terminalWs;
+      function initRetroTerminal() {
+        const output = document.getElementById("retro-terminal-output");
+        const input = document.getElementById("retro-terminal-input");
+        
+        const appendLine = (text) => {
+          const div = document.createElement("div");
+          div.textContent = text;
+          output.appendChild(div);
+          output.scrollTop = output.scrollHeight;
+        };
+
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/terminal`;
+        
+        terminalWs = new WebSocket(wsUrl);
+        
+        terminalWs.onopen = () => {
+          appendLine("[SYSTEM] WebSocket connected to " + wsUrl);
+        };
+        
+        terminalWs.onmessage = (event) => {
+          appendLine(event.data);
+        };
+        
+        terminalWs.onclose = () => {
+          appendLine("[SYSTEM] Connection lost. Reconnecting in 5s...");
+          setTimeout(initRetroTerminal, 5000);
+        };
+        
+        terminalWs.onerror = (error) => {
+          appendLine("[ERROR] WebSocket encountered an error.");
+        };
+
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            const cmd = input.value.trim();
+            if (cmd && terminalWs.readyState === WebSocket.OPEN) {
+              appendLine(`> ${cmd}`);
+              terminalWs.send(cmd);
+              input.value = "";
+            }
+          }
+        });
+      }
+
       // 1. SDK & Tabs Başlat
       window.addEventListener("DOMContentLoaded", () => {
         if (window.SynapseShield) window.SynapseShield.init();
@@ -643,6 +706,7 @@
         switchDevTab("html");
         fetchLogs();
         setInterval(fetchLogs, 1500);
+        initRetroTerminal();
       });
 
       // Developer Quickstart Tab Snippets
@@ -814,7 +878,7 @@ app.add_middleware(
         }
       }
 
-      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.6.5)
+      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.7.5)
       let isSimulating = false;
       let lastToken = null;
 
