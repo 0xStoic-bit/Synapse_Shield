@@ -30,10 +30,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.5)
+## ✨ Key Features & Security Architecture (v0.7.6)
 
 | Feature | Description |
 | :--- | :--- |
+| 🔔 **Instant Discord & Telegram Webhooks** | Real-time security incident dispatch. Critical threat mitigations (BLOCK) and IP bans are automatically forwarded to configured Discord/Telegram channels via non-blocking background tasks (v0.7.6). |
 | ⚡ **Distributed State & Redis Cluster** | Enterprise multi-server architecture (`SYNAPSE_REDIS_URL`). Atomic cross-worker replay protection (`SET NX EX`), synchronized IP quarantine, and zero-downtime SQLite fallback (v0.7.5). |
 | 🧩 **Dynamic Yielding Proof-of-Work** | Sub-second client-side SHA-256 cryptographic puzzle with UI yielding to prevent main-thread blocking. Replay-attack resistant on retries (v0.7.2). |
 | 🛡️ **Iframe-based Prototype Unhooking** | Advanced anti-stealth mechanism using hidden iframes to access clean native browser prototypes (Canvas, WebGL), bypassing attacker overwrites (v0.7.2). |
@@ -59,6 +60,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 | 💾 **SQLite WAL with Auto-Pruning** | In-memory TTL nonce management + Write-Ahead Logging (WAL) with 10s timeouts prevents database locks during async BackgroundTasks. |
 | 🧱 **Memory Exhaustion Defense** | Strict 256KB/512KB payload body limits evaluated at stream-read time (`await request.body()`) protecting against chunked-transfer inflation attacks. |
 | 🔑 **Secure Admin APIs** | Administrative operations (`/api/clear`) are cryptographically authenticated via the `SYNAPSE_ADMIN_SECRET` environment variable to prevent unauthorized telemetry tampering. |
+| 🚨 **Zero-Latency Webhook Alerts** | Instant real-time Telegram and Discord notifications upon bot detection via `asyncio.to_thread` without blocking the main event loop. Configurable directly from the Cockpit. |
 
 ---
 
@@ -141,6 +143,24 @@ docker-compose logs -f
 ```
 
 The Synapse API and Live Cockpit will be available at [http://localhost:8000](http://localhost:8000).
+
+---
+
+## 🚨 Real-time Webhook Alerts (Telegram & Discord)
+
+Synapse Shield features zero-latency background webhook notifications. When a critical threat is blocked (e.g., `STEALTH_AUTOMATION`, `POISSON_FLOOD`), you receive an instant alert on your phone.
+
+### Setting up Telegram Alerts
+1. Open Telegram and message **[@BotFather](https://t.me/BotFather)** with `/newbot`.
+2. Follow the steps to get your **HTTP API Token** (e.g., `123456:ABC-DEF...`).
+3. Send a message like "Hello" to your newly created bot to initialize the chat.
+4. Message **[@userinfobot](https://t.me/userinfobot)** and press `START` to get your **Chat ID** (e.g., `123456789`).
+5. Open the Synapse Shield Cockpit (`http://127.0.0.1:8000`), click **WEBHOOKS**, and paste your Token and Chat ID.
+
+### Setting up Discord Alerts
+1. Go to your Discord Server settings > **Integrations** > **Webhooks** > **New Webhook**.
+2. Copy the **Webhook URL**.
+3. Open the Synapse Shield Cockpit, click **WEBHOOKS**, and paste the URL.
 
 ---
 

@@ -95,7 +95,7 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.7.5)
+## Features (v0.7.6)
 
 - **Distributed State & Redis Support:** Full compatibility with Synapse Shield multi-worker cluster deployments.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with `Function.prototype.toString`.
