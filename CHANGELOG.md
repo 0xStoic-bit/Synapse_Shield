@@ -5,6 +5,16 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-09-16
+### Added
+- Real-time Webhook Notification Engine: Non-blocking background alerting for critical threats (`BLOCK` / Dynamic IP Bans) dispatched to configured Discord and Telegram webhooks.
+- Webhook management endpoints (`GET /api/settings/webhooks`, `POST /api/settings/webhooks`) for dynamic runtime configuration.
+- Interactive Webhook modal in the Synapse Shield Cockpit (`index.html`) with live feedback and state persistence in SQLite.
+- Fully synchronized SDK, Vue, and React package versions to v0.7.6.
+
+### Fixed
+- Fixed mock targeting in `tests/test_sdk.py` to correctly reference `engine._ai_model.predict`.
+
 ## [0.7.5] - 2026-09-14
 ### Added
 - PyPI health score optimizations (`classifiers` and full `urls` in `pyproject.toml`).

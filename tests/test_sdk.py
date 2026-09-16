@@ -6,17 +6,19 @@ import time
 from fastapi.testclient import TestClient
 from synapse_shield.main import app
 from synapse_shield.engine import analyze_behavior
+from synapse_shield import engine
+from unittest.mock import patch
 
 client = TestClient(app)
 
 
 def test_sdk_static_serving():
-    """Verify that the SDK static endpoint serves the updated v0.7.5 JavaScript SDK."""
+    """Verify that the SDK static endpoint serves the updated v0.7.6 JavaScript SDK."""
     response = client.get("/static/synapse-sdk.js")
     assert response.status_code == 200
     assert "application/javascript" in response.headers.get("content-type", "")
     content = response.text
-    assert "Synapse Shield SDK v0.7.5" in content
+    assert "Synapse Shield SDK v0.7.6" in content
     assert "safeBtoa" in content
     assert "solvePoW" in content
     assert "touchstart" in content
@@ -68,7 +70,8 @@ def test_utf8_token_handling():
     assert data["threat_type"] == "CLEAN_HUMAN"
 
 
-def test_pow_gray_area_and_fresh_retry():
+@patch.object(engine._ai_model, "predict", return_value=0.1)
+def test_pow_gray_area_and_fresh_retry(mock_predict):
     """
     Test the complete PoW workflow:
     1. Initial request lands in gray area (35.0 <= score <= 65.0) -> returns 'challenge_required'.
@@ -154,7 +157,8 @@ def test_pow_gray_area_and_fresh_retry():
     assert any("PoW Challenge successfully solved" in r for r in data2["reasons"])
 
 
-def test_pow_replay_attack_rejection_on_reused_token():
+@patch.object(engine._ai_model, "predict", return_value=0.1)
+def test_pow_replay_attack_rejection_on_reused_token(mock_predict):
     """Verify that reusing the consumed challenge token during PoW retry is rejected as REPLAY_ATTACK."""
     chal_res = client.get("/api/challenge")
     challenge = chal_res.json()["challenge"]
@@ -201,7 +205,8 @@ def test_pow_replay_attack_rejection_on_reused_token():
     assert data_buggy["bot_score"] == 100.0
 
 
-def test_mobile_touch_telemetry_support():
+@patch.object(engine._ai_model, "predict", return_value=0.1)
+def test_mobile_touch_telemetry_support(mock_predict):
     """Verify that mobile telemetry with touch events avoids missing mouse and plugin false positives."""
     # When a mobile user taps the screen, SDK captures touchstart and touchmove points into mouseMovements
     telemetry = {

@@ -143,6 +143,13 @@
       </div>
       <div class="flex items-center gap-4">
         <button
+          onclick="openWebhookModal()"
+          class="bg-[#262a34] text-[#00f0ff] border border-[#3b494b] px-3 py-2 rounded font-mono text-xs font-bold hover:bg-[#3b494b] transition-all flex items-center gap-2"
+        >
+          <span class="material-symbols-outlined text-sm">webhook</span>
+          WEBHOOKS
+        </button>
+        <button
           onclick="triggerVerification()"
           class="bg-[#00f0ff] text-black font-mono text-xs font-bold px-4 py-2 rounded hover:bg-[#7df4ff] transition-all glow-cyan active:scale-95"
         >
@@ -526,7 +533,7 @@
         </div>
       </div>
 
-      <!-- Threat Attribution Radar Bar (v0.7.5) -->
+      <!-- Threat Attribution Radar Bar (v0.7.6) -->
       <div id="threat-radar-bar" class="glass-panel p-3 rounded-lg flex flex-wrap items-center justify-between gap-2 font-mono text-xs border border-[#3b494b]/40">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-sm text-[#00f0ff]">radar</span>
@@ -651,6 +658,59 @@
       </div>
     </main>
 
+    <!-- Webhook Settings Modal -->
+    <div id="webhook-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] hidden flex items-center justify-center p-4">
+      <div class="bg-[#0f131c] border border-[#00f0ff]/30 shadow-[0_0_20px_rgba(0,240,255,0.2)] rounded-xl w-full max-w-lg overflow-hidden transform scale-95 transition-transform duration-150 ease-out" id="webhook-modal-content">
+        <div class="p-4 border-b border-[#3b494b]/50 bg-[#1c1f29]/50 flex justify-between items-center">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-[#00f0ff]">webhook</span>
+            <h2 class="font-mono text-sm font-bold text-[#dfe2ef]">WEBHOOK NOTIFICATIONS</h2>
+          </div>
+          <button onclick="closeWebhookModal()" class="text-slate-400 hover:text-white transition-colors">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="p-6 flex flex-col gap-5">
+          <p class="font-mono text-xs text-slate-400">
+            Kritik tehditler ve bot engellemeleri (BLOCK) anında belirlediğiniz Discord veya Telegram kanalına bildirilir. (Sıfır maliyetli arka plan görevi)
+          </p>
+          
+          <div class="space-y-4">
+            <div>
+              <label class="block font-mono text-[10px] text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-[14px] text-indigo-400">forum</span>
+                Discord Webhook URL
+              </label>
+              <input type="text" id="wh-discord" placeholder="https://discord.com/api/webhooks/..." class="w-full bg-[#181b25] border border-[#3b494b] rounded p-2.5 font-mono text-xs text-[#dfe2ef] focus:outline-none focus:border-[#00f0ff] transition-colors">
+            </div>
+            
+            <div class="pt-2 border-t border-[#3b494b]/30"></div>
+            
+            <div>
+              <label class="block font-mono text-[10px] text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-[14px] text-sky-400">send</span>
+                Telegram Bot Token
+              </label>
+              <input type="text" id="wh-tg-token" placeholder="123456:ABC-DEF1234..." class="w-full bg-[#181b25] border border-[#3b494b] rounded p-2.5 font-mono text-xs text-[#dfe2ef] focus:outline-none focus:border-[#00f0ff] transition-colors mb-3">
+              
+              <label class="block font-mono text-[10px] text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-[14px] text-sky-400">tag</span>
+                Telegram Chat ID
+              </label>
+              <input type="text" id="wh-tg-chat" placeholder="-1001234567890" class="w-full bg-[#181b25] border border-[#3b494b] rounded p-2.5 font-mono text-xs text-[#dfe2ef] focus:outline-none focus:border-[#00f0ff] transition-colors">
+            </div>
+          </div>
+        </div>
+        <div class="p-4 border-t border-[#3b494b]/50 bg-[#1c1f29]/30 flex justify-end gap-3">
+          <button onclick="closeWebhookModal()" class="px-4 py-2 font-mono text-xs font-bold text-slate-400 hover:text-white transition-colors">CANCEL</button>
+          <button onclick="saveWebhooks()" class="bg-[#00f0ff] text-black font-mono text-xs font-bold px-5 py-2 rounded hover:bg-[#7df4ff] transition-all glow-cyan active:scale-95 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[14px]">save</span>
+            SAVE & ACTIVATE
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script>
       // Retro Cyber Terminal WebSocket Logic
       let terminalWs;
@@ -697,6 +757,67 @@
             }
           }
         });
+      }
+
+      // Webhook Settings Logic
+      async function openWebhookModal() {
+        const modal = document.getElementById('webhook-modal');
+        const content = document.getElementById('webhook-modal-content');
+        
+        try {
+          const res = await fetch('/api/settings/webhooks');
+          const data = await res.json();
+          document.getElementById('wh-discord').value = data.discord_url || '';
+          document.getElementById('wh-tg-token').value = data.telegram_token || '';
+          document.getElementById('wh-tg-chat').value = data.telegram_chat_id || '';
+        } catch (e) {
+          console.error("Failed to load webhook settings", e);
+        }
+        
+        modal.classList.remove('hidden');
+        // Trigger animation
+        requestAnimationFrame(() => {
+          content.classList.replace('scale-95', 'scale-100');
+        });
+      }
+      
+      function closeWebhookModal() {
+        const modal = document.getElementById('webhook-modal');
+        const content = document.getElementById('webhook-modal-content');
+        content.classList.replace('scale-100', 'scale-95');
+        setTimeout(() => modal.classList.add('hidden'), 150);
+      }
+      
+      async function saveWebhooks() {
+        const discord_url = document.getElementById('wh-discord').value.trim();
+        const telegram_token = document.getElementById('wh-tg-token').value.trim();
+        const telegram_chat_id = document.getElementById('wh-tg-chat').value.trim();
+        
+        const saveBtn = event.currentTarget;
+        const originalHtml = saveBtn.innerHTML;
+        saveBtn.innerHTML = '<span class="material-symbols-outlined text-[14px] animate-spin">sync</span> SAVING...';
+        
+        try {
+          const res = await fetch('/api/settings/webhooks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ discord_url, telegram_token, telegram_chat_id })
+          });
+          if (res.ok) {
+            saveBtn.innerHTML = '<span class="material-symbols-outlined text-[14px]">check</span> SAVED';
+            setTimeout(() => {
+              saveBtn.innerHTML = originalHtml;
+              closeWebhookModal();
+            }, 600);
+          } else {
+            alert("Failed to save webhooks");
+            saveBtn.innerHTML = originalHtml;
+          }
+        } catch (e) {
+          console.error(e);
+          alert("Network error");
+          saveBtn.innerHTML = originalHtml;
+        }
       }
 
       // 1. SDK & Tabs Başlat
@@ -878,7 +999,7 @@ app.add_middleware(
         }
       }
 
-      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.7.5)
+      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.7.6)
       let isSimulating = false;
       let lastToken = null;
 
