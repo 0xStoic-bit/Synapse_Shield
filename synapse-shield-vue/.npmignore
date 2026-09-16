@@ -1,16 +1,32 @@
-# Dependencies
+# Dependencies & Lockfiles
 node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# Dev files
+# Source & Build configuration
 src/
 tsconfig.json
+tsconfig.tsbuildinfo
+*.tsbuildinfo
 .eslintrc*
 .prettierrc*
+.editorconfig
+
+# Tests & Coverage
 test/
 tests/
 __tests__/
+coverage/
+.nyc_output/
 
-# Optional: Log files, OS files
-*.log
+# IDE, Agent & OS files
+.vscode/
+.idea/
+.agents/
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.log
+*.tmp
