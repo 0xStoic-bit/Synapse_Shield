@@ -25,10 +25,17 @@ ENV/
 
 # Yerel Veritabanı ve Veri Setleri
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 synapse_shield.db
 synapse_dataset.db
+dump.rdb
 *.json
 !package.json
 !tsconfig.json
@@ -40,14 +47,18 @@ synapse_dataset.db
 
 # Loglar ve Geçici Araçlar
 *.log
+*.tmp
+temp_*
 extract_zip.py
 .DS_Store
+Thumbs.db
 scratch/
 
 # Node & Frontend Önbellekleri
 node_modules/
 .next/
 out/
+*.tsbuildinfo
 
 # Editör & IDE Yapılandırmaları
 .vscode/
@@ -56,6 +67,8 @@ out/
 # Rapor, Planlama ve Ajan Dosyaları (IDE Artifacts)
 .agents/
 *_report.md
+*report*.md
+* report*.md
 *roadmap*.md
 implementation_plan.md
 walkthrough.md
