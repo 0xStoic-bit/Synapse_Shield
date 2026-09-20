@@ -1,0 +1,48 @@
+# Git & GitHub
+.git
+.gitignore
+.github
+.agents
+
+# Python Caches & Virtual Environments
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+.venv*
+venv*
+env*
+build
+dist
+
+# Testing & Linting
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+.coverage.*
+htmlcov
+coverage.xml
+tests/
+scripts/
+
+# Databases & Runtime State
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+dump.rdb
+
+# Frontend Dependencies & Builds
+node_modules
+synapse-shield-react/
+synapse-shield-vue/
+
+# Logs & Temporary Files
+*.log
+*.tmp
+temp_*
+scratch/
+.DS_Store
+Thumbs.db

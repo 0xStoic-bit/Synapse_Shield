@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from synapse_shield import __version__
 from synapse_shield.engine import analyze_behavior
 from synapse_shield.storage import get_storage
 from synapse_shield.tokens import (
@@ -489,7 +490,7 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
         return
 
     await manager.connect(websocket)
-    await websocket.send_text("Synapse Shield Cyber-Console [Version 0.8.0]")
+    await websocket.send_text(f"Synapse Shield Cyber-Console [Version {__version__}]")
     await websocket.send_text("Type 'help' for available commands.")
     try:
         while True:

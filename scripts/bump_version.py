@@ -33,14 +33,64 @@ try:
 except FileNotFoundError:
     pass
 
-# 3. README.md içindeki sürüm başlığını güncelle
+# 3. synapse-shield-react package.json & README.md
+for pkg_path in ["synapse-shield-react/package.json", "synapse-shield-vue/package.json"]:
+    try:
+        with open(pkg_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        content = re.sub(r'"version": "[^"]+"', f'"version": "{new_version}"', content)
+        with open(pkg_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"✔ {pkg_path} -> {new_version}")
+    except FileNotFoundError:
+        pass
+
+# 4. synapse-sdk.js header
+sdk_path = "src/synapse_shield/static/synapse-sdk.js"
 try:
-    with open("README.md", "r", encoding="utf-8") as f:
+    with open(sdk_path, "r", encoding="utf-8") as f:
         content = f.read()
-    content = re.sub(r'Key Features & Hardening \(v[0-9\.]+\)', f'Key Features & Hardening (v{new_version})', content)
-    with open("README.md", "w", encoding="utf-8") as f:
+    content = re.sub(r'Synapse Shield SDK v[0-9\.]+', f'Synapse Shield SDK v{new_version}', content)
+    with open(sdk_path, "w", encoding="utf-8") as f:
         f.write(content)
-    print(f"✔ README.md -> {new_version}")
+    print(f"✔ {sdk_path} -> {new_version}")
+except FileNotFoundError:
+    pass
+
+# 5. test_sdk.py assertion
+test_sdk_path = "tests/test_sdk.py"
+try:
+    with open(test_sdk_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    content = re.sub(r'Synapse Shield SDK v[0-9\.]+', f'Synapse Shield SDK v{new_version}', content)
+    with open(test_sdk_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"✔ {test_sdk_path} -> {new_version}")
+except FileNotFoundError:
+    pass
+
+# 6. README.md files
+for r_path in ["README.md", "synapse-shield-react/README.md", "synapse-shield-vue/README.md"]:
+    try:
+        with open(r_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        content = re.sub(r'Features \(v[0-9\.]+\)', f'Features (v{new_version})', content)
+        content = re.sub(r'Key Features & Security Architecture \(v[0-9\.]+\)', f'Key Features & Security Architecture (v{new_version})', content)
+        with open(r_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"✔ {r_path} -> {new_version}")
+    except FileNotFoundError:
+        pass
+
+# 7. static/index.html
+index_html_path = "src/synapse_shield/static/index.html"
+try:
+    with open(index_html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    content = re.sub(r'\(v0\.[0-9\.]+\)', f'(v{new_version})', content)
+    with open(index_html_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"✔ {index_html_path} -> {new_version}")
 except FileNotFoundError:
     pass
 
