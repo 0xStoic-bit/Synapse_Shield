@@ -1,6 +1,5 @@
 import asyncio
 import atexit
-import hashlib
 import json
 import os
 import sqlite3
@@ -27,7 +26,6 @@ from synapse_shield.tokens import (
     generate_challenge,
     generate_pow_salt,
     verify_and_consume_token,
-    verify_pow_salt,
     verify_and_consume_pow,
 )
 
