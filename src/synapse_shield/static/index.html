@@ -726,7 +726,9 @@
         };
 
         const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/terminal`;
+        const adminSecret = localStorage.getItem("synapse_admin_secret") || "";
+        const tokenParam = adminSecret ? `?token=${encodeURIComponent(adminSecret)}` : "";
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/terminal${tokenParam}`;
         
         terminalWs = new WebSocket(wsUrl);
         
@@ -763,9 +765,20 @@
       async function openWebhookModal() {
         const modal = document.getElementById('webhook-modal');
         const content = document.getElementById('webhook-modal-content');
+        const adminSecret = localStorage.getItem("synapse_admin_secret") || "";
         
         try {
-          const res = await fetch('/api/settings/webhooks');
+          const res = await fetch('/api/settings/webhooks', {
+            headers: { 'X-Admin-Secret': adminSecret }
+          });
+          if (res.status === 401 || res.status === 403) {
+            const entered = prompt("Yönetici Yetkilendirmesi Gerekli:\nLütfen SYNAPSE_ADMIN_SECRET anahtarınızı girin:");
+            if (entered) {
+              localStorage.setItem("synapse_admin_secret", entered.trim());
+              return openWebhookModal();
+            }
+            return;
+          }
           const data = await res.json();
           document.getElementById('wh-discord').value = data.discord_url || '';
           document.getElementById('wh-tg-token').value = data.telegram_token || '';
@@ -792,6 +805,7 @@
         const discord_url = document.getElementById('wh-discord').value.trim();
         const telegram_token = document.getElementById('wh-tg-token').value.trim();
         const telegram_chat_id = document.getElementById('wh-tg-chat').value.trim();
+        const adminSecret = localStorage.getItem("synapse_admin_secret") || "";
         
         const saveBtn = event.currentTarget;
         const originalHtml = saveBtn.innerHTML;
@@ -800,7 +814,10 @@
         try {
           const res = await fetch('/api/settings/webhooks', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'X-Admin-Secret': adminSecret
+            },
             body: JSON.stringify({ discord_url, telegram_token, telegram_chat_id })
           });
           if (res.ok) {
@@ -810,7 +827,8 @@
               closeWebhookModal();
             }, 600);
           } else {
-            alert("Failed to save webhooks");
+            const err = await res.json().catch(() => ({}));
+            alert("Failed to save webhooks: " + (err.detail || "Unauthorized/Invalid"));
             saveBtn.innerHTML = originalHtml;
           }
         } catch (e) {
@@ -1393,6 +1411,19 @@ app.add_middleware(
         document.getElementById("fluidity-meter").style.width = `${fluidity}%`;
       }
 
+      function escapeHtml(str) {
+        if (!str) return "";
+        return String(str).replace(/[&<>"']/g, function (m) {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[m];
+        });
+      }
+
       async function fetchLogs() {
         try {
           const res = await fetch("/api/logs");
@@ -1441,11 +1472,15 @@ app.add_middleware(
             else if (threat === "ROBOTIC_KEYSTROKE") threatBadge = "bg-pink-500/20 text-pink-300 border-pink-500/40";
             else if (threat === "CLEAN_HUMAN") threatBadge = "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
 
+            const safeUA = escapeHtml(log.user_agent ? log.user_agent.split(" ")[0] : "Unknown");
+            const safeThreat = escapeHtml(threat);
+            const safeTime = escapeHtml(timeStr);
+
             html += `
                     <tr class="hover:bg-white/[0.02]">
-                        <td class="p-2.5 text-slate-400">${timeStr}</td>
-                        <td class="p-2.5 text-slate-300 font-bold">${log.user_agent ? log.user_agent.split(" ")[0] : "Unknown"}</td>
-                        <td class="p-2.5"><span class="px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${threatBadge}">${threat}</span></td>
+                        <td class="p-2.5 text-slate-400">${safeTime}</td>
+                        <td class="p-2.5 text-slate-300 font-bold">${safeUA}</td>
+                        <td class="p-2.5"><span class="px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${threatBadge}">${safeThreat}</span></td>
                         <td class="p-2.5 font-bold ${isBot ? "text-red-400" : "text-emerald-400"}">${Math.round(log.bot_score)}%</td>
                         <td class="p-2.5 text-right"><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${badgeColor}">${actionText}</span></td>
                     </tr>

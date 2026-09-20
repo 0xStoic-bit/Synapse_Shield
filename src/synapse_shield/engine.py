@@ -190,9 +190,26 @@ def analyze_behavior(
     # 8. Max Gating (Karar Birleştirme)
     final_bot_score = max(heuristic_score, ai_score)
     
-    # Brave Farbling Override: AI Model'in yanlış pozitifini engelle
+    # Brave Farbling Override: Sadece ve sadece başka kritik anomali yoksa skoru düşür
+    typing_speed_anomaly = features.get("key_count", 0) >= 3 and (
+        features.get("key_interval_var", 50.0) < 2.0 or features.get("key_interval_avg", 100.0) < 25.0
+    )
+    fitts_violation = (
+        features.get("click_count", 0) > 0
+        and features.get("total_distance", 0) > 50
+        and features.get("terminal_decel_ratio", 0.0) > 0.70
+    )
+    has_critical_bot_anomaly = (
+        is_stealth_automation
+        or (not features.get("screen_valid", True))
+        or typing_speed_anomaly
+        or fitts_violation
+        or (recent_request_count > 5 and freq_anomaly >= 0.95)
+        or (features.get("max_velocity", 0.0) > 15.0)
+    )
+
     is_brave_like = is_dual_hook or browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked")
-    if is_brave_like and has_human_motion and not is_stealth_automation:
+    if is_brave_like and has_human_motion and not has_critical_bot_anomaly:
         final_bot_score = min(final_bot_score, 34.0)
         reasons.append("AI and heuristic scores capped at 34.0 due to verified organic human motion with privacy farbling.")
     

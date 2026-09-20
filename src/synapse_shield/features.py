@@ -62,6 +62,7 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
     # 3. Klavye Dinamikleri
     keystrokes = telemetry.get("keystrokes", [])
     if isinstance(keystrokes, list) and len(keystrokes) > 0:
+        keystrokes = keystrokes[:150]  # DoS koruması: en fazla 150 tuş vuruşu işle
         valid_keys = []
         for k in keystrokes:
             if isinstance(k, dict):
@@ -241,6 +242,8 @@ class MultimodalTokenizer:
         keystrokes = telemetry.get("keystrokes", [])
         if not isinstance(keystrokes, list):
             keystrokes = []
+        else:
+            keystrokes = keystrokes[:150]  # DoS koruması
             
         valid_keys = [k for k in keystrokes if isinstance(k, dict) and "t" in k and "type" in k]
         sorted_keys = sorted(valid_keys, key=lambda k: k["t"])
@@ -248,7 +251,6 @@ class MultimodalTokenizer:
         key_count = len([k for k in sorted_keys if k["type"] == "down"])
         
         downs = [k for k in sorted_keys if k["type"] == "down"]
-        ups = [k for k in sorted_keys if k["type"] == "up"]
         
         intervals = []
         for i in range(1, len(downs)):
@@ -257,12 +259,26 @@ class MultimodalTokenizer:
         avg_interval = sum(intervals) / len(intervals) if intervals else 0.0
         interval_var = sum((x - avg_interval)**2 for x in intervals) / len(intervals) if intervals else 0.0
         
+        # O(N) hold_times eşleştirmesi (iç içe arama / O(N^2) CPU kilitlenmesini engelle)
+        from collections import defaultdict
+        pending_downs = defaultdict(list)
         hold_times = []
-        for down in downs:
-            possible_ups = [u for u in ups if u["t"] >= down["t"]]
-            if possible_ups:
-                hold_times.append(possible_ups[0]["t"] - down["t"])
-                ups.remove(possible_ups[0])
+
+        for k in sorted_keys:
+            k_type = k.get("type")
+            t_val = k.get("t", 0.0)
+            k_code = k.get("code") or k.get("key") or "default"
+            if k_type == "down":
+                pending_downs[k_code].append(t_val)
+            elif k_type == "up":
+                if pending_downs[k_code]:
+                    down_t = pending_downs[k_code].pop(0)
+                    if t_val >= down_t:
+                        hold_times.append(t_val - down_t)
+                elif pending_downs["default"]:
+                    down_t = pending_downs["default"].pop(0)
+                    if t_val >= down_t:
+                        hold_times.append(t_val - down_t)
                 
         hold_time_avg = sum(hold_times) / len(hold_times) if hold_times else 0.0
         hold_time_var = sum((x - hold_time_avg)**2 for x in hold_times) / len(hold_times) if hold_times else 0.0
@@ -270,6 +286,8 @@ class MultimodalTokenizer:
         scrolls = telemetry.get("scrolls", [])
         if not isinstance(scrolls, list):
             scrolls = []
+        else:
+            scrolls = scrolls[:150]  # DoS koruması
             
         valid_scrolls = [s for s in scrolls if isinstance(s, dict) and "t" in s and "y" in s]
         valid_scrolls = sorted(valid_scrolls, key=lambda s: s["t"])

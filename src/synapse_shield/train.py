@@ -21,15 +21,15 @@ WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
 def load_training_data(limit=1000) -> tuple[list, list]:
     """
     Fetches raw telemetry from logs to use as training data.
-    Only uses clear edge cases (bot_score > 90 for Bots, bot_score < 10 for Humans)
-    to enforce confident active learning.
+    Only uses clear, verified edge cases (bot_score >= 90 for Bots, bot_score <= 10 for verified Humans)
+    to enforce confident active learning and prevent model poisoning.
     """
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT classification, telemetry 
+            SELECT classification, telemetry, threat_type, reasons, features 
             FROM logs 
             WHERE telemetry IS NOT NULL 
               AND (bot_score >= 90 OR bot_score <= 10)
@@ -43,11 +43,31 @@ def load_training_data(limit=1000) -> tuple[list, list]:
         Y_labels = []
         
         for row in rows:
-            label_str, telemetry_json = row
+            label_str, telemetry_json, threat_type, reasons_json, features_json = row
             try:
                 telemetry = json.loads(telemetry_json)
+                reasons = json.loads(reasons_json) if reasons_json else []
+                
+                # Model Zehirleme Koruması (Anti-Poisoning Filter):
+                if label_str == "Human":
+                    # İnsan verisi için doğrulanmış organik hareket şartı
+                    if threat_type and threat_type != "CLEAN_HUMAN":
+                        continue
+                    # Farbling veya geçici override ile skoru düşürülmüş kayıtları havuza alma
+                    if any("farbling" in r.lower() or "capped at 34" in r.lower() for r in reasons):
+                        continue
+                    # Yeterli fare hareketi olmayanları insan zannetme
+                    moves = telemetry.get("mouse_movements", [])
+                    if not isinstance(moves, list) or len(moves) < 5:
+                        continue
+                    Y_labels.append(0.0)
+                else:
+                    # Bot verisi için
+                    if threat_type == "CLEAN_HUMAN":
+                        continue
+                    Y_labels.append(1.0)
+
                 X_telemetry.append(telemetry)
-                Y_labels.append(1.0 if label_str == "Bot" else 0.0)
             except Exception:
                 continue
                 

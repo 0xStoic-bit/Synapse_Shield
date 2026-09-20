@@ -103,6 +103,15 @@ class SQLiteStorageBackend(StorageBackend):
                         reason TEXT
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS ip_strikes (
+                        ip TEXT,
+                        timestamp REAL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_ip_strikes_ip_ts ON ip_strikes(ip, timestamp)
+                """)
                 conn.commit()
         except Exception as e:
             logger.warning(f"SQLite table initialization warning: {e}")
@@ -186,40 +195,44 @@ class SQLiteStorageBackend(StorageBackend):
         ban_duration_sec: int = 60,
         reason: str = "4 ardışık bot kararı",
     ) -> bool:
-        with self._lock:
-            now = datetime.now(timezone.utc)
-            if ip not in self._ip_history:
-                # Hafıza şişmesini önlemek için süresi dolan kayıtları temizle
-                if len(self._ip_history) > 10000:
-                    to_remove = [
-                        k
-                        for k, v in self._ip_history.items()
-                        if not v or (now - v[0]).total_seconds() > window_sec
-                    ]
-                    for k in to_remove:
-                        del self._ip_history[k]
-                self._ip_history[ip] = deque()
+        try:
+            now = time.time()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # 1. Pencere dışındaki eski vuruşları temizle
+                cursor.execute(
+                    "DELETE FROM ip_strikes WHERE ip = ? AND timestamp < ?",
+                    (ip, now - window_sec),
+                )
+                # 2. Yeni vuruşu ekle
+                cursor.execute(
+                    "INSERT INTO ip_strikes (ip, timestamp) VALUES (?, ?)",
+                    (ip, now),
+                )
+                # 3. Kayan penceredeki güncel vuruş sayısını al
+                cursor.execute(
+                    "SELECT COUNT(*) FROM ip_strikes WHERE ip = ? AND timestamp >= ?",
+                    (ip, now - window_sec),
+                )
+                count = cursor.fetchone()[0]
+                conn.commit()
 
-            history = self._ip_history[ip]
-            # Pencere dışındaki eski vuruşları temizle
-            while history and (now - history[0]).total_seconds() > window_sec:
-                history.popleft()
-
-            history.append(now)
-
-            if len(history) >= threshold:
-                self.ban_ip(ip, duration_sec=ban_duration_sec, reason=reason)
-                history.clear()
-                return True
+                if count >= threshold:
+                    self.ban_ip(ip, duration_sec=ban_duration_sec, reason=reason)
+                    cursor.execute("DELETE FROM ip_strikes WHERE ip = ?", (ip,))
+                    conn.commit()
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"SQLite record_bot_strike error: {e}")
             return False
 
     def clear_all(self) -> None:
-        with self._lock:
-            self._ip_history.clear()
         try:
             with self._get_connection() as conn:
                 conn.execute("DELETE FROM used_nonces")
                 conn.execute("DELETE FROM banned_ips")
+                conn.execute("DELETE FROM ip_strikes")
                 conn.commit()
         except Exception as e:
             logger.warning(f"SQLite clear_all error: {e}")

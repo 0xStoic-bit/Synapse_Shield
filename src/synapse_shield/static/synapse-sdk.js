@@ -267,6 +267,14 @@
 
         const data = await response.json();
 
+        // Handle Token Expiration transparent retry (Masum yavaş kullanıcı koruması)
+        if ((data.code === "EXPIRED" || data.status === "token_expired") && !retryWithPoW) {
+          console.log("[Synapse Shield] Challenge token expired. Refreshing token and retrying seamlessly...");
+          await this.refreshChallenge();
+          await new Promise((resolve) => setTimeout(resolve, 1600));
+          return await this.submit(url, false, powData);
+        }
+
         // Handle Smart Challenge (PoW) on Gray Area Classification
         if (data.status === "challenge_required" && !retryWithPoW) {
           console.log("[Synapse Shield] Gray area detected. Solving PoW challenge in background...");
