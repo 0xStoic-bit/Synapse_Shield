@@ -11,15 +11,15 @@ build/
 # Test & Coverage Önbellekleri
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+coverage.xml
 .mypy_cache/
 .ruff_cache/
 
 # Sanal Ortamlar
-.venv312/
-.venv*
-venv*
-.env*
+.venv*/
+venv*/
 env/
 ENV/
 
@@ -75,9 +75,10 @@ walkthrough.md
 task.md
 test_reports.md
 synapse_shield_code_review.md
+!.github/ISSUE_TEMPLATE/*.md
 
 # API Keys and Secrets
-.env
+.env*
 secret*.txt
 *.pem
 credentials.json

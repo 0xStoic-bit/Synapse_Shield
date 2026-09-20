@@ -30,10 +30,15 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.6)
+## ✨ Key Features & Security Architecture (v0.7.7)
 
 | Feature | Description |
 | :--- | :--- |
+| 🛡️ **Comprehensive Security Hardening** | Full remediation across all vector layers (P0-P2): Stored XSS defense, admin-authenticated WebSocket terminal, SSRF & DNS rebinding allowlist for webhooks, and gated Brave Farbling logic (v0.7.7). |
+| ⚡ **Sub-Millisecond Composite SQLite Index** | Composite index (`idx_ip_strikes_ip_ts`) eliminates table scans, enabling sub-millisecond bot strike counting under high-throughput DDoS conditions (v0.7.7). |
+| 🔄 **Transparent Token Expiration Recovery** | Clean separation of expired tokens (`HTTP 400 EXPIRED`) from active replay attacks, allowing the SDK to seamlessly renegotiate challenges without false-positive IP bans (v0.7.7). |
+| 🧱 **O(N) Keystroke DoS Defense** | Queued hold-time analysis with strict input bounds (150 keys/scrolls max), neutralizing algorithmic complexity exhaustion attacks (v0.7.7). |
+| 🧪 **Poisoning-Resistant AI Fine-Tuning** | Telemetry ingestion filters reject non-human or farbling-exempted traffic from the active learning dataset pool, preserving model classification integrity (v0.7.7). |
 | 🔔 **Instant Discord & Telegram Webhooks** | Real-time security incident dispatch. Critical threat mitigations (BLOCK) and IP bans are automatically forwarded to configured Discord/Telegram channels via non-blocking background tasks (v0.7.6). |
 | ⚡ **Distributed State & Redis Cluster** | Enterprise multi-server architecture (`SYNAPSE_REDIS_URL`). Atomic cross-worker replay protection (`SET NX EX`), synchronized IP quarantine, and zero-downtime SQLite fallback (v0.7.5). |
 | 🧩 **Dynamic Yielding Proof-of-Work** | Sub-second client-side SHA-256 cryptographic puzzle with UI yielding to prevent main-thread blocking. Replay-attack resistant on retries (v0.7.2). |

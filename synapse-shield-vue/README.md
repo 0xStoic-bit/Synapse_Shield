@@ -95,8 +95,10 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.7.6)
+## Features (v0.7.7)
 
+- **Hardened Security Architecture:** Full alignment with Synapse Shield v0.7.7 core security patches (P0-P2).
+- **Transparent Token Expiration Refresh:** Seamlessly renegotiates expired tokens (`HTTP 400 EXPIRED`) without triggering IP quarantine or streak bans.
 - **Distributed State & Redis Support:** Full compatibility with Synapse Shield multi-worker cluster deployments.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with `Function.prototype.toString`.
 - **Zero-Jank Touch Events:** Passive listeners (`touchstart`, `touchmove`, `touchend`) for high-precision mobile biometrics with zero scroll jank.

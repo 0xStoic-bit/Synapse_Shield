@@ -105,8 +105,10 @@ export default function Page() {
 
 ---
 
-## Features (v0.7.6)
+## Features (v0.7.7)
 
+- **Hardened Security Architecture:** Full alignment with Synapse Shield v0.7.7 core security patches (P0-P2).
+- **Transparent Token Expiration Refresh:** Seamlessly renegotiates expired tokens (`HTTP 400 EXPIRED`) without triggering IP quarantine or streak bans.
 - **Distributed State & Redis Support:** Seamless integration with Synapse Shield's distributed multi-server cluster mode.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with native APIs.
 - **Zero-Jank Touch Events:** Passive listeners (`touchstart`, `touchmove`, `touchend`) for mobile touch kinematics.
