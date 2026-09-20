@@ -10,12 +10,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 import urllib.request
 import urllib.error
+import urllib.parse
+import hmac
 
 # pyrefly: ignore [missing-import]
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from synapse_shield.engine import analyze_behavior
@@ -25,6 +27,7 @@ from synapse_shield.tokens import (
     generate_pow_salt,
     verify_and_consume_token,
     verify_pow_salt,
+    verify_and_consume_pow,
 )
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
@@ -336,6 +339,40 @@ def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reas
     except Exception as e:
         print(f"Webhook Notification Error: {e}")
 
+def verify_admin(request: Request):
+    """Admin endpoint'leri için yetkilendirme doğrulaması."""
+    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
+    if admin_secret:
+        provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
+        if not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
+            raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
+    elif os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin operations disabled in production without secret")
+
+ALLOWED_WEBHOOK_DOMAINS = {
+    "discord.com",
+    "discordapp.com",
+    "api.telegram.org",
+}
+
+def validate_webhook_url(url: str):
+    """SSRF ve DNS Rebinding koruması: Sadece izinli resmi webhook alan adları kabul edilir."""
+    if not url:
+        return
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise HTTPException(status_code=400, detail="Only HTTPS allowed for webhooks")
+    hostname = (parsed.hostname or "").lower()
+    is_allowed = any(
+        hostname == d or hostname.endswith("." + d)
+        for d in ALLOWED_WEBHOOK_DOMAINS
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid webhook domain '{hostname}'. Only official Discord and Telegram domains are allowed."
+        )
+
 # YENİ ENDPOINT: İstemciye tek kullanımlık challenge verir
 @app.get("/api/challenge")
 async def get_challenge():
@@ -366,6 +403,19 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     # 1. Kriptografik Token Varsa Doğrula
     is_valid, reason, telemetry = verify_and_consume_token(token)
     if not is_valid:
+        # Süresi dolan token: Kullanıcıyı banlama, token yenileme iste (False Positive Engeli)
+        if reason == "TOKEN_EXPIRED":
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "token_expired",
+                    "code": "EXPIRED",
+                    "error": "Token expired, please refresh challenge.",
+                    "bot_score": 0.0,
+                    "classification": "Unknown",
+                    "threat_type": "EXPIRED_CHALLENGE"
+                }
+            )
         # Replay Attack veya sahte token durumu: Ceza havuzuna ekle
         record_ip_decision(ip, is_bot=True)
         threat_type = "REPLAY_ATTACK"
@@ -391,13 +441,11 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     bot_score, classification, reasons, details = await asyncio.to_thread(analyze_behavior, telemetry, recent_count)
     threat_type = details.get("threat_type", "CLEAN_HUMAN" if classification == "Human" else "UNKNOWN_ANOMALY")
     
-    # Proof of Work (Smart Challenge) for Gray Area
+    # Proof of Work (Smart Challenge) for Gray Area - Tek kullanımlık Nonce Tüketimi
     if 35.0 <= bot_score <= 65.0:
         is_pow_valid = False
-        if pow_nonce and pow_salt and verify_pow_salt(pow_salt):
-            hash_res = hashlib.sha256((pow_salt + pow_nonce).encode()).hexdigest()
-            if hash_res.startswith("0000"):
-                is_pow_valid = True
+        if pow_nonce and pow_salt:
+            is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce))
                     
         if is_pow_valid:
             bot_score = max(0.0, bot_score - 20.0)
@@ -430,7 +478,16 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     }
 
 @app.websocket("/ws/terminal")
-async def websocket_terminal(websocket: WebSocket):
+async def websocket_terminal(websocket: WebSocket, token: str | None = Query(None)):
+    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
+    if admin_secret:
+        if not token or not hmac.compare_digest(token, admin_secret):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+    elif os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await manager.connect(websocket)
     await websocket.send_text("Synapse Shield Cyber-Console [Version 0.8.0]")
     await websocket.send_text("Type 'help' for available commands.")
@@ -535,14 +592,7 @@ async def get_logs(limit: int = 50):
 
 @app.post("/api/clear")
 async def clear_logs(request: Request):
-    import hmac
-    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
-    if admin_secret:
-        provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
-        if not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
-            raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
-    elif os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
-        raise HTTPException(status_code=403, detail="Forbidden: Admin operations disabled in production without secret")
+    verify_admin(request)
 
     get_storage().clear_all()
     conn = get_connection()
@@ -553,6 +603,8 @@ async def clear_logs(request: Request):
 
 @app.post("/api/collect_dataset")
 async def collect_dataset(request: Request):
+    verify_admin(request)
+
     raw_body = await request.body()
     if len(raw_body) > 524288:  # 512KB
         raise HTTPException(status_code=413, detail="Payload Too Large: Maximum allowed size is 512 KB")
@@ -582,7 +634,9 @@ async def collect_dataset(request: Request):
     return {"status": "success", "message": "Telemetry collected for dataset."}
 
 @app.get("/api/settings/webhooks")
-async def get_webhooks():
+async def get_webhooks(request: Request):
+    verify_admin(request)
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT discord_url, telegram_token, telegram_chat_id FROM webhook_settings WHERE id = 1")
@@ -597,15 +651,21 @@ async def get_webhooks():
 
 @app.post("/api/settings/webhooks")
 async def update_webhooks(request: Request):
+    verify_admin(request)
+
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
         
-    discord_url = body.get("discord_url", "")
-    telegram_token = body.get("telegram_token", "")
-    telegram_chat_id = body.get("telegram_chat_id", "")
+    discord_url = body.get("discord_url", "").strip()
+    telegram_token = body.get("telegram_token", "").strip()
+    telegram_chat_id = body.get("telegram_chat_id", "").strip()
     
+    # SSRF & DNS Rebinding koruması
+    if discord_url:
+        validate_webhook_url(discord_url)
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""

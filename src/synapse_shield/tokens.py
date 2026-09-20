@@ -135,20 +135,26 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     if not hmac.compare_digest(sig, expected_sig):
         return False, "Sahte challenge imzası (Forged Signature)", {}
 
+    # 2. Replay Attack Koruması: ÖNCE NONCE'U TÜKET (Probe & Retry engeli)
+    # Hızlı gelen veya zaman yolculuğu yapan isteklerde dahi token hemen harcanmalı!
+    is_valid_nonce = get_storage().consume_nonce(nonce, ttl_sec=120)
+    if not is_valid_nonce:
+        return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
+
     now_ms = int(time.time() * 1000)
     elapsed_ms = now_ms - ts
     elapsed_sec = elapsed_ms / 1000.0
 
-    # 2. Zaman Aşımı ve Manipülasyon Kontrolü (Milisaniye Hassasiyetinde)
+    # 3. Zaman Aşımı ve Manipülasyon Kontrolü (Milisaniye Hassasiyetinde)
     if elapsed_sec > 60.0:
-        return False, f"Token zaman aşımına uğradı ({elapsed_sec:.1f}sn > 60sn)", {}
+        return False, "TOKEN_EXPIRED", {}
     if ts - now_ms > 5000:
         return False, "Gelecek zaman damgası (Saat manipülasyonu)", {}
     min_elapsed = int(os.environ.get("SYNAPSE_MIN_ELAPSED_MS", 1500))
     if elapsed_ms < min_elapsed:
         return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={elapsed_sec:.2f}s", {}
 
-    # 2.5 Time Travel Kontrolü (DeepSeek Advanced Bypass Koruması)
+    # 4. Time Travel Kontrolü (DeepSeek Advanced Bypass Koruması)
     # Eğer bot 1.6 saniye bekleyip, içine 3 saniyelik telemetri sığdırmaya çalışırsa yakalanır!
     elapsed_time = elapsed_sec
     try:
@@ -163,13 +169,8 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     except Exception as e:
         logger.warning(f"Telemetry time travel check failed: {e}")
 
-    # 3. Süresi Dolan Nonce'ları Temizle
+    # 5. Süresi Dolan Nonce'ları Temizle
     _cleanup_expired_nonces()
-
-    # 4. Replay Attack (Yeniden Oynatma) Kontrolü (SQLite veya Dağıtık Redis)
-    is_valid_nonce = get_storage().consume_nonce(nonce, ttl_sec=120)
-    if not is_valid_nonce:
-        return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
 
     return True, "Geçerli", telemetry
 
@@ -205,3 +206,21 @@ def verify_pow_salt(signed_salt: str) -> bool:
     elapsed_sec = (now_ms - ts) / 1000.0
     # 60 saniyeden eskiyse veya gelecek zamandaysa reddet
     return not (elapsed_sec > 60.0 or elapsed_sec < -5.0)
+
+def verify_and_consume_pow(salt: str, nonce: str) -> bool:
+    """
+    PoW (Proof of Work) çözümünün geçerliliğini kontrol eder ve salt:nonce ikilisini
+    tek kullanımlık olarak depolama katmanında tüketir (Replay koruması).
+    """
+    if not salt or not nonce:
+        return False
+
+    if not verify_pow_salt(salt):
+        return False
+
+    hash_res = hashlib.sha256((salt + nonce).encode()).hexdigest()
+    if not hash_res.startswith("0000"):
+        return False
+
+    pow_key = f"pow:{salt}:{nonce}"
+    return get_storage().consume_nonce(pow_key, ttl_sec=120)

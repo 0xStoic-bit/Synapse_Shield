@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from synapse_shield.engine import analyze_behavior
+from synapse_shield.storage import get_storage
 from synapse_shield.tokens import verify_and_consume_token
 
 try:
@@ -48,6 +49,14 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
             if not request:
                 raise HTTPException(status_code=500, detail="Request object not found in endpoint signature")
 
+            client_ip = request.client.host if request.client else "127.0.0.1"
+            storage = get_storage()
+            if storage.is_ip_banned(client_ip):
+                raise HTTPException(
+                    status_code=403, 
+                    detail={"error": "IP address is banned by Synapse Shield.", "ip": client_ip}
+                )
+
             try:
                 body = await request.json()
             except Exception:
@@ -59,21 +68,25 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
 
             is_valid, reason, telemetry = verify_and_consume_token(token)
             if not is_valid:
+                if reason != "TOKEN_EXPIRED":
+                    storage.record_bot_strike(client_ip)
                 raise HTTPException(status_code=403, detail=f"[Synapse Shield] Token Error: {reason}")
 
             # İzolasyon (Decoupling) -> Telemetry'yi state'e koy
             request.state.telemetry = telemetry
 
+            is_penalized = storage.is_ip_banned(client_ip)
             start_time = time.perf_counter()
             bot_score, classification, reasons, _ = await asyncio.to_thread(
-                analyze_behavior, telemetry, 1, False, accessibility_mode
+                analyze_behavior, telemetry, 1, is_penalized, accessibility_mode
             )
             latency = time.perf_counter() - start_time
             
             if METRICS_ENABLED:
                 synapse_inference_latency_seconds.observe(latency)
 
-            if bot_score >= max_risk_score:
+            if bot_score >= max_risk_score or classification == "Bot":
+                storage.record_bot_strike(client_ip)
                 if METRICS_ENABLED:
                     synapse_requests_total.labels(status="block", classification=classification).inc()
                 raise HTTPException(
@@ -127,6 +140,14 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         if request.method not in ("POST", "PUT", "PATCH"):
             return await call_next(request)
 
+        client_ip = request.client.host if request.client else "127.0.0.1"
+        storage = get_storage()
+        if storage.is_ip_banned(client_ip):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "[Synapse Shield] IP address is banned.", "ip": client_ip}
+            )
+
         try:
             body_bytes = await request.body()
             body = json.loads(body_bytes)
@@ -145,6 +166,8 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
 
         is_valid, reason, telemetry = verify_and_consume_token(token)
         if not is_valid:
+            if reason != "TOKEN_EXPIRED":
+                storage.record_bot_strike(client_ip)
             return JSONResponse(
                 status_code=403,
                 content={"error": f"[Synapse Shield] Token Error: {reason}"}
@@ -152,16 +175,18 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
 
         request.state.telemetry = telemetry
 
+        is_penalized = storage.is_ip_banned(client_ip)
         start_time = time.perf_counter()
         bot_score, classification, reasons, _ = await asyncio.to_thread(
-            analyze_behavior, telemetry, 1, False, self.accessibility_mode
+            analyze_behavior, telemetry, 1, is_penalized, self.accessibility_mode
         )
         latency = time.perf_counter() - start_time
         
         if METRICS_ENABLED:
             synapse_inference_latency_seconds.observe(latency)
 
-        if bot_score >= self.max_risk_score:
+        if bot_score >= self.max_risk_score or classification == "Bot":
+            storage.record_bot_strike(client_ip)
             if METRICS_ENABLED:
                 synapse_requests_total.labels(status="block", classification=classification).inc()
             return JSONResponse(
