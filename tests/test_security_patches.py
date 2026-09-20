@@ -163,7 +163,6 @@ def test_brave_farbling_override_with_anomalies():
 def test_pow_replay_protection():
     salt = generate_pow_salt()
     # Find a valid 4-zero nonce
-    nonce = 0
     import hashlib
     found_nonce = None
     for n in range(500000):
@@ -248,7 +247,9 @@ def test_sqlite_ip_strikes_index_and_concurrency(tmp_path):
 # --- [AÇIK-09] Token Expired Separation ---
 def test_token_expired_response(client, monkeypatch):
     # Construct an expired challenge (> 60s ago)
-    import secrets, hmac, hashlib
+    import secrets
+    import hmac
+    import hashlib
     from synapse_shield.tokens import SECRET_KEY
     nonce = secrets.token_hex(16)
     ts = int((time.time() - 90) * 1000) # 90 seconds ago
