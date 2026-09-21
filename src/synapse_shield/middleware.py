@@ -6,6 +6,7 @@ Provides two integration methods:
 """
 
 import asyncio
+import hashlib
 import json
 import time
 from functools import wraps
@@ -75,12 +76,31 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
             # İzolasyon (Decoupling) -> Telemetry'yi state'e koy
             request.state.telemetry = telemetry
 
+            # Session Identifier & History (Client IP + User-Agent Hash)
+            user_agent = request.headers.get("user-agent", "unknown")
+            session_id = f"{client_ip}:{hashlib.md5(user_agent.encode()).hexdigest()[:8]}"
+            session_history = storage.get_session_telemetries(session_id, window_sec=300)
+
             is_penalized = storage.is_ip_banned(client_ip)
             start_time = time.perf_counter()
-            bot_score, classification, reasons, _ = await asyncio.to_thread(
-                analyze_behavior, telemetry, 1, is_penalized, accessibility_mode
+            bot_score, classification, reasons, details = await asyncio.to_thread(
+                analyze_behavior, telemetry, 1, is_penalized, accessibility_mode, session_history
             )
             latency = time.perf_counter() - start_time
+            
+            # Kinetik metrikleri oturum geçmişine kaydet
+            features = details.get("features", {})
+            storage.record_session_telemetry(
+                session_id,
+                {
+                    "avg_jerk": features.get("avg_jerk", 0.0),
+                    "straightness": features.get("straightness", 1.0),
+                    "submovement_count": features.get("submovement_count", 0),
+                    "spectral_purity": features.get("spectral_purity", 0.0),
+                },
+                max_history=10,
+                window_sec=300
+            )
             
             if METRICS_ENABLED:
                 synapse_inference_latency_seconds.observe(latency)
@@ -175,12 +195,31 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
 
         request.state.telemetry = telemetry
 
+        # Session Identifier & History (Client IP + User-Agent Hash)
+        user_agent = request.headers.get("user-agent", "unknown")
+        session_id = f"{client_ip}:{hashlib.md5(user_agent.encode()).hexdigest()[:8]}"
+        session_history = storage.get_session_telemetries(session_id, window_sec=300)
+
         is_penalized = storage.is_ip_banned(client_ip)
         start_time = time.perf_counter()
-        bot_score, classification, reasons, _ = await asyncio.to_thread(
-            analyze_behavior, telemetry, 1, is_penalized, self.accessibility_mode
+        bot_score, classification, reasons, details = await asyncio.to_thread(
+            analyze_behavior, telemetry, 1, is_penalized, self.accessibility_mode, session_history
         )
         latency = time.perf_counter() - start_time
+        
+        # Kinetik metrikleri oturum geçmişine kaydet
+        features = details.get("features", {})
+        storage.record_session_telemetry(
+            session_id,
+            {
+                "avg_jerk": features.get("avg_jerk", 0.0),
+                "straightness": features.get("straightness", 1.0),
+                "submovement_count": features.get("submovement_count", 0),
+                "spectral_purity": features.get("spectral_purity", 0.0),
+            },
+            max_history=10,
+            window_sec=300
+        )
         
         if METRICS_ENABLED:
             synapse_inference_latency_seconds.observe(latency)

@@ -13,6 +13,7 @@ Supports:
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import datetime, timezone
+import json
 import logging
 import os
 import sqlite3
@@ -73,6 +74,18 @@ class StorageBackend(ABC):
         """Clear all nonces, bans, and bot strikes (used for tests and admin clear)."""
         pass
 
+    @abstractmethod
+    def record_session_telemetry(
+        self, session_id: str, metrics: dict, max_history: int = 10, window_sec: int = 300
+    ) -> None:
+        """Record kinetic summary metrics for a session."""
+        pass
+
+    @abstractmethod
+    def get_session_telemetries(self, session_id: str, window_sec: int = 300) -> list[dict]:
+        """Fetch recent kinetic summaries for a session within window_sec."""
+        pass
+
 
 class SQLiteStorageBackend(StorageBackend):
     """Local SQLite & Thread-safe In-Memory fallback implementation."""
@@ -111,6 +124,16 @@ class SQLiteStorageBackend(StorageBackend):
                 """)
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_ip_strikes_ip_ts ON ip_strikes(ip, timestamp)
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS session_telemetry (
+                        session_id TEXT,
+                        timestamp REAL,
+                        data_json TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_session_telemetry_sid_ts ON session_telemetry(session_id, timestamp)
                 """)
                 conn.commit()
         except Exception as e:
@@ -233,9 +256,61 @@ class SQLiteStorageBackend(StorageBackend):
                 conn.execute("DELETE FROM used_nonces")
                 conn.execute("DELETE FROM banned_ips")
                 conn.execute("DELETE FROM ip_strikes")
+                conn.execute("DELETE FROM session_telemetry")
                 conn.commit()
         except Exception as e:
             logger.warning(f"SQLite clear_all error: {e}")
+
+    def record_session_telemetry(
+        self, session_id: str, metrics: dict, max_history: int = 10, window_sec: int = 300
+    ) -> None:
+        try:
+            now = time.time()
+            data_str = json.dumps(metrics)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM session_telemetry WHERE session_id = ? AND timestamp < ?",
+                    (session_id, now - window_sec),
+                )
+                cursor.execute(
+                    "INSERT INTO session_telemetry (session_id, timestamp, data_json) VALUES (?, ?, ?)",
+                    (session_id, now, data_str),
+                )
+                cursor.execute(
+                    """DELETE FROM session_telemetry 
+                       WHERE session_id = ? 
+                         AND rowid NOT IN (
+                             SELECT rowid FROM session_telemetry 
+                             WHERE session_id = ? 
+                             ORDER BY timestamp DESC LIMIT ?
+                         )""",
+                    (session_id, session_id, max_history),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"SQLite record_session_telemetry error: {e}")
+
+    def get_session_telemetries(self, session_id: str, window_sec: int = 300) -> list[dict]:
+        try:
+            now = time.time()
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT data_json FROM session_telemetry WHERE session_id = ? AND timestamp >= ? ORDER BY timestamp ASC",
+                    (session_id, now - window_sec),
+                )
+                rows = cursor.fetchall()
+                results = []
+                for (row,) in rows:
+                    try:
+                        results.append(json.loads(row))
+                    except Exception:
+                        pass
+                return results
+        except Exception as e:
+            logger.error(f"SQLite get_session_telemetries error: {e}")
+            return []
 
 
 class RedisStorageBackend(StorageBackend):
@@ -340,6 +415,41 @@ class RedisStorageBackend(StorageBackend):
         except Exception as e:
             logger.warning("Redis clear_all failed (%s), falling back to SQLite", e)
             self.fallback.clear_all()
+
+    def record_session_telemetry(
+        self, session_id: str, metrics: dict, max_history: int = 10, window_sec: int = 300
+    ) -> None:
+        try:
+            key = f"synapse:session:{session_id}"
+            now = time.time()
+            metrics_payload = {**metrics, "_ts": now}
+            data_str = json.dumps(metrics_payload)
+            pipeline = self.client.pipeline()
+            pipeline.rpush(key, data_str)
+            pipeline.ltrim(key, -max_history, -1)
+            pipeline.expire(key, window_sec)
+            pipeline.execute()
+        except Exception as e:
+            logger.warning("Redis record_session_telemetry failed (%s), falling back to SQLite", e)
+            self.fallback.record_session_telemetry(session_id, metrics, max_history, window_sec)
+
+    def get_session_telemetries(self, session_id: str, window_sec: int = 300) -> list[dict]:
+        try:
+            key = f"synapse:session:{session_id}"
+            items = self.client.lrange(key, 0, -1)
+            now = time.time()
+            res = []
+            for item in items:
+                try:
+                    d = json.loads(item)
+                    if now - d.get("_ts", now) <= window_sec:
+                        res.append(d)
+                except Exception:
+                    pass
+            return res
+        except Exception as e:
+            logger.warning("Redis get_session_telemetries failed (%s), falling back to SQLite", e)
+            return self.fallback.get_session_telemetries(session_id, window_sec)
 
 
 _global_storage: Optional[StorageBackend] = None

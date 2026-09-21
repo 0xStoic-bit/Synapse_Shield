@@ -18,11 +18,12 @@ logger = logging.getLogger("synapse_shield.train")
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
 
-def load_training_data(limit=1000) -> tuple[list, list]:
+def load_training_data(limit=1000, include_adversarial: bool = True, adversarial_count: int = 20) -> tuple[list, list]:
     """
     Fetches raw telemetry from logs to use as training data.
     Only uses clear, verified edge cases (bot_score >= 90 for Bots, bot_score <= 10 for verified Humans)
     to enforce confident active learning and prevent model poisoning.
+    Optionally enriches the dataset with synthetic adversarial bot samples (Adversarial Training).
     """
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -71,9 +72,27 @@ def load_training_data(limit=1000) -> tuple[list, list]:
             except Exception:
                 continue
                 
+        # Düşmansal Eğitim (Adversarial Training): Sentetik matematiksel bot telemetrileri enjekte et
+        if include_adversarial:
+            try:
+                from synapse_shield.adversarial import generate_adversarial_telemetry_batch
+                adv_samples = generate_adversarial_telemetry_batch(count=adversarial_count)
+                for sample in adv_samples:
+                    X_telemetry.append(sample)
+                    Y_labels.append(1.0)
+            except Exception as e:
+                logger.warning(f"Adversarial batch generation skipped: {e}")
+
         return X_telemetry, Y_labels
     except Exception as e:
         print(f"[Error] Failed to load training data from SQLite: {e}")
+        if include_adversarial:
+            try:
+                from synapse_shield.adversarial import generate_adversarial_telemetry_batch
+                adv_samples = generate_adversarial_telemetry_batch(count=adversarial_count)
+                return adv_samples, [1.0] * len(adv_samples)
+            except Exception:
+                pass
         return [], []
 
 def sigmoid(x):
