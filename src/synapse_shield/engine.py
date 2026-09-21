@@ -45,7 +45,8 @@ def analyze_behavior(
     telemetry: dict[str, Any], 
     recent_request_count: int = 1,
     is_ip_penalized: bool = False,
-    accessibility_mode: bool = False
+    accessibility_mode: bool = False,
+    session_history: list[dict[str, Any]] | None = None
 ) -> tuple[float, str, list[str], dict[str, Any]]:
     features = extract_features(telemetry)
     reasons = []
@@ -148,6 +149,35 @@ def analyze_behavior(
             total_risk += 40.0
             reasons.append(f"Superhuman mouse velocity (max: {features['max_velocity']:.2f} px/ms).")
 
+        # H. Tremor Spektral Saflığı (FFT Spectral Purity & Entropi)
+        # Biyolojik insan tremoru stokastik ve geniş bantlıdır; botların sinüs dalgaları tek frekansta sivrilir
+        if features["total_distance"] > 30 and not is_touch:
+            purity = features.get("spectral_purity", 0.0)
+            entropy = features.get("spectral_entropy", 1.0)
+            if purity > 0.65:
+                risk_add = 65.0 * acc_multiplier
+                total_risk += risk_add
+                reasons.append(
+                    f"Synthetic harmonic oscillator tremor detected via FFT (spectral_purity: {purity:.3f}, spectral_entropy: {entropy:.3f}) [+{risk_add:.1f}]."
+                )
+
+        # I. Alt-Hareket (Sub-movement Decomposition) Dağılımı
+        # Hızlı insan hareketleri hedefe varana kadar mikro düzeltme darbeleri (2-4 tepe) üretir
+        if not is_touch:
+            submoves = features.get("submovement_count", 0)
+            if features["total_distance"] > 60 and submoves <= 1:
+                risk_add = 55.0 * acc_multiplier
+                total_risk += risk_add
+                reasons.append(
+                    f"Lack of physiological sub-movement decomposition in trajectory (submovement_count: {submoves}, distance: {features['total_distance']:.1f}px) [+{risk_add:.1f}]."
+                )
+            elif features["total_distance"] > 40 and submoves > 18:
+                risk_add = 45.0 * acc_multiplier
+                total_risk += risk_add
+                reasons.append(
+                    f"Superhuman artificial sub-movement stutter detected ({submoves} peaks) [+{risk_add:.1f}]."
+                )
+
     # 5. Klavye Dinamikleri
     if features.get("key_count", 0) >= 3:
         if features.get("key_interval_var", 50.0) < 2.0:
@@ -173,6 +203,28 @@ def analyze_behavior(
         else:
             total_risk += 60.0 * freq_anomaly
             reasons.append(f"Poisson request frequency anomaly (rate: {recent_request_count} req/10s, risk confidence: {freq_anomaly*100:.1f}%).")
+
+    # 6.5 Oturum Düzeyinde Kinetik Değişmezlik (Session Behavioral Invariance)
+    # Aynı oturumdan gelen ardışık isteklerde kinetik parametrelerin robotik sabitliği
+    if session_history and len(session_history) >= 3:
+        s_jerks = [float(h.get("avg_jerk", 0.0)) for h in session_history if "avg_jerk" in h]
+        s_straightness = [float(h.get("straightness", 0.0)) for h in session_history if "straightness" in h]
+        
+        # Jerk varyansı: bot her istekte aynı sabit tremor genliğini yolluyorsa
+        if len(s_jerks) >= 3 and all(j > 0 for j in s_jerks):
+            mean_j = sum(s_jerks) / len(s_jerks)
+            jerk_var = sum((x - mean_j) ** 2 for x in s_jerks) / len(s_jerks)
+            if jerk_var < 1e-12:
+                total_risk += 60.0
+                reasons.append("Session Behavioral Invariance: Identical neuromuscular jerk tremor repeated across session requests (deterministic bot template).")
+
+        # Straightness varyansı: bot her istekte tıpatıp aynı düzlüğü üretiyorsa
+        if len(s_straightness) >= 3:
+            mean_s = sum(s_straightness) / len(s_straightness)
+            st_var = sum((x - mean_s) ** 2 for x in s_straightness) / len(s_straightness)
+            if st_var < 1e-8:
+                total_risk += 50.0
+                reasons.append("Session Behavioral Invariance: Zero straightness variance across consecutive session requests.")
 
     heuristic_score = min(100.0, max(0.0, total_risk))
     
@@ -229,7 +281,8 @@ def analyze_behavior(
         recent_request_count=recent_request_count,
         freq_anomaly=freq_anomaly,
         ai_score=ai_score,
-        classification=classification
+        classification=classification,
+        reasons=reasons
     )
 
     details = {
@@ -240,7 +293,8 @@ def analyze_behavior(
         "ai_score": ai_score,
         "threat_type": threat_type,
         "is_ip_penalized": is_ip_penalized,
-        "accessibility_mode": accessibility_mode
+        "accessibility_mode": accessibility_mode,
+        "session_history_count": len(session_history) if session_history else 0
     }
     
     return final_bot_score, classification, reasons, details
@@ -252,7 +306,8 @@ def classify_threat(
     recent_request_count: int,
     freq_anomaly: float,
     ai_score: float,
-    classification: str
+    classification: str,
+    reasons: list[str] | None = None
 ) -> str:
     """
     Deterministik Tehdit Atıf Hiyerarşisi:
@@ -260,6 +315,9 @@ def classify_threat(
     """
     if classification == "Human":
         return "CLEAN_HUMAN"
+
+    if reasons and any("Session Behavioral Invariance" in r for r in reasons):
+        return "SESSION_INVARIANCE_BOT"
 
     browser_data = telemetry.get("browser", {})
     
@@ -276,17 +334,19 @@ def classify_threat(
     if is_stealth:
         return "STEALTH_AUTOMATION"
 
-    # 2. MINIMUM_JERK_BOT (Sentetik Biyolojik Eğri / Flash & Hogan / Bézier İvme / Fitts İhlali)
-    # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler
+    # 2. MINIMUM_JERK_BOT (Sentetik Biyolojik Eğri / Flash & Hogan / Bézier İvme / Fitts İhlali / Spektral Sinüs)
+    # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler veya FFT sinüs osilatörü
     if features.get("mouse_points", 0) > 5 and features.get("total_distance", 0) > 30:
         is_min_jerk = (
-            features.get("straightness", 0.0) <= 0.985
+            (features.get("straightness", 0.0) <= 0.985
             and (
                 features.get("avg_jerk", 1.0) < 0.00008
                 or features.get("acceleration_var", 1.0) < 1.5e-5
                 or (features.get("click_count", 0) > 0 and features.get("terminal_decel_ratio", 0.0) > 0.70)
                 or (features.get("mouse_points", 0) >= 10 and features.get("dt_var", 1.0) < 0.01)
-            )
+                or (features.get("total_distance", 0) > 60 and features.get("submovement_count", 0) <= 1)
+            ))
+            or (features.get("spectral_purity", 0.0) > 0.65)
         )
         if is_min_jerk:
             return "MINIMUM_JERK_BOT"

@@ -5,6 +5,17 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-09-21
+### Security & Architectural Hardening
+- **[P0] FFT Tremor Spectral Analysis (DSP):** Integrated Fast Fourier Transform (`numpy.fft.rfft`) into kinematic feature extraction. Calculates Power Spectral Density (PSD), `spectral_purity`, and normalized `spectral_entropy` to distinguish biological stochastic tremor from artificial harmonic oscillators ($\sin(2\pi ft)$).
+- **[P0] Sub-Movement Kinematic Decomposition:** Decomposed mouse trajectories into discrete corrective velocity pulses based on Fitts's Law and Flash & Hogan kinematic theory. Trajectories lacking physiological sub-movements (`submovement_count <= 1` across >60px) or showing superhuman stutter (>18 peaks) are unconditionally mitigated.
+- **[P1] Session-Level Behavioral Invariance Detection:** Introduced stateful sliding-window session telemetry tracking in SQLite (`session_telemetry` table) and Redis (`synapse:session:{key}`). Detects bots repeating deterministic kinetic templates (zero jerk or straightness variance across consecutive requests).
+- **[P1] Adversarial Training Pipeline:** Added modular synthetic telemetry generators (`synapse_shield.adversarial`) producing Bézier, sinusoidal oscillator, and minimum-jerk curves. Integrated synthetic bot injection into `train.py` active learning to eliminate 1D-CNN out-of-distribution blindspots.
+
+### Added & Improved
+- **Zero-Dependency Guarantee:** Maintained zero external runtime dependencies by leveraging NumPy's native FFT engine.
+- **Package Synchronization:** Synchronized Python core, JavaScript SDK (`synapse-sdk.js`), React SDK (`synapse-shield-react`), and Vue SDK (`synapse-shield-vue`) packages to `v0.7.8`.
+
 ## [0.7.7] - 2026-09-20
 ### Security
 - **[P0] Stored XSS Mitigation:** Enforced HTML entity sanitization (`escapeHtml`) across all client-rendered fields in the cockpit (`index.html`), preventing script injection via spoofed telemetry and User-Agent headers.

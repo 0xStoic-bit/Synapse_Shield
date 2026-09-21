@@ -30,10 +30,14 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.7)
+## ✨ Key Features & Security Architecture (v0.7.8)
 
 | Feature | Description |
 | :--- | :--- |
+| 🌊 **FFT Tremor Spectral Analysis (DSP)** | Fast Fourier Transform (`np.fft.rfft`) decomposes velocity sequences to evaluate Power Spectral Density (`spectral_purity` & `spectral_entropy`), mitigating synthetic harmonic oscillator tremors ($\sin(2\pi ft)$) in the frequency domain (v0.7.8). |
+| 🖐️ **Sub-Movement Kinematic Decomposition** | Decomposes trajectory paths into discrete ballistic and corrective velocity pulses based on Fitts's Law. Trajectories lacking physiological sub-movements (`submovement_count <= 1`) are flagged as polynomial bots (v0.7.8). |
+| 🔄 **Session-Level Behavioral Invariance** | Stateful sliding-window telemetry tracking across session requests. Mitigates attackers rotating random seeds or repeating deterministic kinetic templates (v0.7.8). |
+| 🎯 **Adversarial AI Retraining Pipeline** | Built-in synthetic telemetry generator (`synapse_shield.adversarial`) enriches 1D-CNN active learning with adversarial Bézier, sinusoidal, and minimum-jerk curves, eliminating out-of-distribution blindspots (v0.7.8). |
 | 🛡️ **Comprehensive Security Hardening** | Full remediation across all vector layers (P0-P2): Stored XSS defense, admin-authenticated WebSocket terminal, SSRF & DNS rebinding allowlist for webhooks, and gated Brave Farbling logic (v0.7.7). |
 | ⚡ **Sub-Millisecond Composite SQLite Index** | Composite index (`idx_ip_strikes_ip_ts`) eliminates table scans, enabling sub-millisecond bot strike counting under high-throughput DDoS conditions (v0.7.7). |
 | 🔄 **Transparent Token Expiration Recovery** | Clean separation of expired tokens (`HTTP 400 EXPIRED`) from active replay attacks, allowing the SDK to seamlessly renegotiate challenges without false-positive IP bans (v0.7.7). |

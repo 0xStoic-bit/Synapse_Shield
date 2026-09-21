@@ -5,6 +5,8 @@ Synapse Shield - Kinematic Feature Extractor v0.4.1 (Anti-Bezier Hardened)
 import math
 from typing import Any
 
+import numpy as np
+
 
 def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
     features = {
@@ -29,6 +31,9 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
         "plugins_length": 1,
         "touch_supported": False,
         "screen_width": 1024.0,
+        "spectral_purity": 0.0,
+        "spectral_entropy": 1.0,
+        "submovement_count": 0,
     }
 
     if not isinstance(telemetry, dict):
@@ -142,9 +147,39 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
                 terminal_avg_vel = sum(velocities[-last_segment_count:]) / last_segment_count
                 features["terminal_decel_ratio"] = (terminal_avg_vel / max_vel) if max_vel > 1e-5 else 1.0
                 
-                # Hız tepe noktası asimetrisi (Ölü kod silindi)
-                velocities.index(max_vel)
-                
+                # Alt-Hareket (Sub-movement Decomposition)
+                # İnsan el hareketleri hedefe ulaşana kadar birden fazla yerel hız tepe noktası (çan profili) üretir.
+                peak_count = 0
+                min_peak_thresh = 0.15 * max_vel if max_vel > 1e-5 else 0.0
+                for i in range(1, len(velocities) - 1):
+                    if velocities[i] > velocities[i-1] and velocities[i] > velocities[i+1]:
+                        if velocities[i] >= min_peak_thresh:
+                            peak_count += 1
+                features["submovement_count"] = max(1, peak_count) if max_vel > 1e-5 else 0
+
+                # Spektral Analiz (FFT & PSD)
+                # Hız serisindeki osilasyonların frekans spektrumunu inceler
+                if len(velocities) >= 8:
+                    try:
+                        v_centered = [v - avg_vel for v in velocities]
+                        fft_vals = np.fft.rfft(v_centered)
+                        psd = np.abs(fft_vals) ** 2
+                        ac_psd = psd[1:] if len(psd) > 1 else psd
+                        total_power = float(np.sum(ac_psd))
+                        
+                        if total_power > 1e-9:
+                            max_power = float(np.max(ac_psd))
+                            features["spectral_purity"] = float(max_power / total_power)
+                            
+                            p = ac_psd / total_power
+                            p_nonzero = p[p > 1e-12]
+                            entropy = -float(np.sum(p_nonzero * np.log2(p_nonzero)))
+                            max_entropy = float(np.log2(len(ac_psd))) if len(ac_psd) > 1 else 1.0
+                            features["spectral_entropy"] = float(entropy / max_entropy) if max_entropy > 0 else 0.0
+                    except Exception:
+                        features["spectral_purity"] = 0.0
+                        features["spectral_entropy"] = 1.0
+
                 # İvme ve Jerk (Sarsıntı / Titreme)
                 accelerations = []
                 for i in range(1, len(velocities)):
