@@ -30,8 +30,8 @@ def generate_bezier_telemetry(
         # Bernstein polynomials
         b0 = (1 - u) ** 3
         b1 = 3 * (1 - u) ** 2 * u
-        b2 = 3 * (1 - u) * u ** 2
-        b3 = u ** 3
+        b2 = 3 * (1 - u) * u**2
+        b3 = u**3
 
         x = b0 * p0[0] + b1 * p1[0] + b2 * p2[0] + b3 * p3[0]
         y = b0 * p0[1] + b1 * p1[1] + b2 * p2[1] + b3 * p3[1]
@@ -114,7 +114,7 @@ def generate_minimum_jerk_telemetry(
 
     for i in range(steps):
         tau = i / (steps - 1)
-        poly = 10 * (tau ** 3) - 15 * (tau ** 4) + 6 * (tau ** 5)
+        poly = 10 * (tau**3) - 15 * (tau**4) + 6 * (tau**5)
 
         x = start[0] + (end[0] - start[0]) * poly
         y = start[1] + (end[1] - start[1]) * poly
@@ -252,4 +252,3 @@ def generate_adversarial_telemetry_batch(count: int = 30) -> list[dict[str, Any]
         batch.append(gen(start=(sx, sy), end=(ex, ey), steps=steps, duration_ms=dur))
 
     return batch
-

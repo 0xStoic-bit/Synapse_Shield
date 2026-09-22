@@ -9,42 +9,45 @@ def test_token_generation():
     assert "challenge" in challenge_data
     assert "expires_in" in challenge_data
 
+
 def test_valid_token_consumption():
     # Tablonun var olduğundan emin olmak için init_db çağır:
     from synapse_shield.main import init_db
+
     init_db()
-    
+
     ch_data = generate_challenge()
     tok_envelope = {"challenge": ch_data["challenge"], "telemetry": {"mouse_movements": []}}
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
 
-
     is_valid, reason, _telemetry = verify_and_consume_token(tok_b64)
     assert is_valid
     assert reason == "Geçerli"
+
 
 def test_forged_signature():
     ch_data = generate_challenge()
     bad_challenge = ch_data["challenge"][:-5] + "12345"
     tok_envelope = {"challenge": bad_challenge, "telemetry": {}}
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
-    
+
     is_valid, reason, _telemetry = verify_and_consume_token(tok_b64)
     assert not is_valid
     assert "Sahte challenge imzası" in reason
 
+
 def test_replay_attack():
     from synapse_shield.main import init_db
+
     init_db()
 
     ch_data = generate_challenge()
     tok_envelope = {"challenge": ch_data["challenge"], "telemetry": {}}
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
 
-
     is_valid1, _reason1, _ = verify_and_consume_token(tok_b64)
     assert is_valid1
-    
+
     # 2. Kez aynı tokenı deneyince Replay algılamalı
     is_valid2, reason2, _ = verify_and_consume_token(tok_b64)
     assert not is_valid2

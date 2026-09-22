@@ -324,6 +324,7 @@ class RedisStorageBackend(StorageBackend):
         else:
             try:
                 import redis
+
                 self.client = redis.Redis.from_url(
                     redis_url,
                     decode_responses=True,

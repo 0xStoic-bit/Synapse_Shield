@@ -4,10 +4,12 @@ from synapse_shield.main import app
 
 client = TestClient(app)
 
+
 def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
 
 def test_challenge_endpoint():
     response = client.get("/api/challenge")
@@ -16,27 +18,30 @@ def test_challenge_endpoint():
     assert "challenge" in data
     assert "expires_in" in data
 
+
 def test_score_endpoint_invalid_json():
     response = client.post("/api/score", content="invalid json string", headers={"Content-Type": "application/json"})
     assert response.status_code == 400
+
 
 def test_score_without_token():
     response = client.post("/api/score", json={"telemetry": {}}, headers={"X-Forwarded-For": "10.0.0.2"})
     # Token zorunlu olduğu için 403 Forbidden bekliyoruz
     assert response.status_code == 403
 
+
 def test_score_with_valid_token():
     import base64
     import json
     import time
-    
+
     # Challenge al
     chal_res = client.get("/api/challenge")
     assert chal_res.status_code == 200
     challenge = chal_res.json()["challenge"]
-    
+
     # Hızlı bot (Zaman Manipülasyonu) engeline takılmamak için bekleme (SYNAPSE_MIN_ELAPSED_MS=0 ile atlandı)
-    
+
     telemetry = {
         "mouse_movements": [],
         "clicks": [],
@@ -47,26 +52,23 @@ def test_score_with_valid_token():
             "screen_width": 1920,
             "screen_height": 1080,
             "touch_supported": False,
-            "plugins_length": 3
-        }
+            "plugins_length": 3,
+        },
     }
-    
-    envelope = {
-        "challenge": challenge,
-        "telemetry": telemetry,
-        "created_at": int(time.time() * 1000)
-    }
-    
-    token = base64.b64encode(json.dumps(envelope).encode('utf-8')).decode('utf-8')
-    
+
+    envelope = {"challenge": challenge, "telemetry": telemetry, "created_at": int(time.time() * 1000)}
+
+    token = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("utf-8")
+
     response = client.post("/api/score", json={"token": token}, headers={"X-Forwarded-For": "10.0.0.3"})
-    
+
     # Eger bot score < 50 ise status "success" doner, yoksa "success" donup bot skoru 50+ verir, ya da token hatasi varsa "blocked" döner
     assert response.status_code == 200
     res_data = response.json()
-    
+
     # Beklenen durum, valid token olduğu için başarılı loglama. Bot score ne olursa olsun "success" (veya eger çok tehlikeliyse blocked ama 200 ile, ya da challenge_required)
     assert res_data["status"] in ("success", "blocked", "challenge_required")
+
 
 def test_logs_endpoint():
     response = client.get("/api/logs")

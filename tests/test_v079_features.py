@@ -8,9 +8,7 @@ Unit Tests for Synapse Shield v0.7.9 Features:
 
 import json
 import os
-import tempfile
 import numpy as np
-import pytest
 
 from synapse_shield.adversarial import (
     generate_synthetic_human_telemetry,

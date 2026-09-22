@@ -8,29 +8,29 @@ def test_empty_telemetry():
     assert not features["webdriver"]
     assert features["straightness"] == 1.0
 
+
 def test_missing_data_payloads():
     telemetry = {"browser": {}, "mouse_movements": []}
     features = extract_features(telemetry)
     assert not features["screen_valid"]
     assert features["total_distance"] == 0.0
 
+
 def test_nan_infinity_coordinates():
     telemetry = {
-        "mouse_movements": [
-            {"x": float('nan'), "y": 10, "t": 100},
-            {"x": float('inf'), "y": float('-inf'), "t": 120}
-        ]
+        "mouse_movements": [{"x": float("nan"), "y": 10, "t": 100}, {"x": float("inf"), "y": float("-inf"), "t": 120}]
     }
     features = extract_features(telemetry)
     # The math operations shouldn't crash completely, should degrade gracefully.
     assert "total_distance" in features
+
 
 def test_zero_division_time_delta():
     # Delta t = 0
     telemetry = {
         "mouse_movements": [
             {"x": 10, "y": 10, "t": 100},
-            {"x": 20, "y": 20, "t": 100} # Same timestamp
+            {"x": 20, "y": 20, "t": 100},  # Same timestamp
         ]
     }
     features = extract_features(telemetry)

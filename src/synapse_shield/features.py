@@ -51,7 +51,7 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
                 features["screen_valid"] = False
         except (ValueError, TypeError):
             features["screen_valid"] = False
-            
+
         features["touch_supported"] = bool(browser.get("touch_supported", False))
         try:
             features["plugins_length"] = int(browser.get("plugins_length", 1))
@@ -74,17 +74,17 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
                 t_val = k.get("t") or k.get("down") or k.get("time")
                 if isinstance(t_val, (int, float)) and not math.isnan(t_val):
                     valid_keys.append({"t": float(t_val)})
-                    
+
         features["key_count"] = len(valid_keys)
         if len(valid_keys) > 1:
             sorted_keys = sorted(valid_keys, key=lambda k: k["t"])
             intervals = []
             for i in range(1, len(sorted_keys)):
                 t_curr = sorted_keys[i]["t"]
-                t_prev = sorted_keys[i-1]["t"]
+                t_prev = sorted_keys[i - 1]["t"]
                 if t_curr > t_prev:
                     intervals.append(t_curr - t_prev)
-                    
+
             if intervals:
                 avg_int = sum(intervals) / len(intervals)
                 features["key_interval_avg"] = avg_int
@@ -100,7 +100,14 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
                     x = float(m["x"])
                     y = float(m["y"])
                     t = float(m["t"])
-                    if not (math.isnan(x) or math.isnan(y) or math.isnan(t) or math.isinf(x) or math.isinf(y) or math.isinf(t)):
+                    if not (
+                        math.isnan(x)
+                        or math.isnan(y)
+                        or math.isnan(t)
+                        or math.isinf(x)
+                        or math.isinf(y)
+                        or math.isinf(t)
+                    ):
                         valid_moves.append({"x": x, "y": y, "t": t})
                 except (ValueError, TypeError):
                     continue
@@ -113,46 +120,46 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
             distances, dts, velocities = [], [], []
             start_x, start_y = movements[0]["x"], movements[0]["y"]
             end_x, end_y = movements[-1]["x"], movements[-1]["y"]
-            displacement = math.sqrt((end_x - start_x)**2 + (end_y - start_y)**2)
-            
+            displacement = math.sqrt((end_x - start_x) ** 2 + (end_y - start_y) ** 2)
+
             for i in range(1, len(movements)):
-                x1, y1, t1 = movements[i-1]["x"], movements[i-1]["y"], movements[i-1]["t"]
+                x1, y1, t1 = movements[i - 1]["x"], movements[i - 1]["y"], movements[i - 1]["t"]
                 x2, y2, t2 = movements[i]["x"], movements[i]["y"], movements[i]["t"]
-                
-                d_dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+                d_dist = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
                 d_time = max(0.1, t2 - t1)
-                
+
                 distances.append(d_dist)
                 dts.append(d_time)
                 velocities.append(d_dist / d_time)
-            
+
             total_dist = sum(distances)
             features["total_distance"] = total_dist
             features["straightness"] = (displacement / total_dist) if total_dist > 1e-4 else 1.0
             features["straightness"] = min(1.0, max(0.0, features["straightness"]))
-                
+
             if velocities:
                 avg_vel = sum(velocities) / len(velocities)
                 max_vel = max(velocities)
                 features["avg_velocity"] = avg_vel
                 features["max_velocity"] = max_vel
                 features["velocity_var"] = sum((v - avg_vel) ** 2 for v in velocities) / len(velocities)
-                
+
                 # dt varyansı (Zamanlama jitter'ı)
                 avg_dt = sum(dts) / len(dts)
                 features["dt_var"] = sum((dt - avg_dt) ** 2 for dt in dts) / len(dts)
-                
+
                 # Fitts Kanunu: Hedefe varırken yavaşlama oranı
                 last_segment_count = max(1, int(len(velocities) * 0.25))
                 terminal_avg_vel = sum(velocities[-last_segment_count:]) / last_segment_count
                 features["terminal_decel_ratio"] = (terminal_avg_vel / max_vel) if max_vel > 1e-5 else 1.0
-                
+
                 # Alt-Hareket (Sub-movement Decomposition)
                 # İnsan el hareketleri hedefe ulaşana kadar birden fazla yerel hız tepe noktası (çan profili) üretir.
                 peak_count = 0
                 min_peak_thresh = 0.15 * max_vel if max_vel > 1e-5 else 0.0
                 for i in range(1, len(velocities) - 1):
-                    if velocities[i] > velocities[i-1] and velocities[i] > velocities[i+1]:
+                    if velocities[i] > velocities[i - 1] and velocities[i] > velocities[i + 1]:
                         if velocities[i] >= min_peak_thresh:
                             peak_count += 1
                 features["submovement_count"] = max(1, peak_count) if max_vel > 1e-5 else 0
@@ -166,11 +173,11 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
                         psd = np.abs(fft_vals) ** 2
                         ac_psd = psd[1:] if len(psd) > 1 else psd
                         total_power = float(np.sum(ac_psd))
-                        
+
                         if total_power > 1e-9:
                             max_power = float(np.max(ac_psd))
                             features["spectral_purity"] = float(max_power / total_power)
-                            
+
                             p = ac_psd / total_power
                             p_nonzero = p[p > 1e-12]
                             entropy = -float(np.sum(p_nonzero * np.log2(p_nonzero)))
@@ -183,17 +190,17 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
                 # İvme ve Jerk (Sarsıntı / Titreme)
                 accelerations = []
                 for i in range(1, len(velocities)):
-                    accelerations.append((velocities[i] - velocities[i-1]) / dts[i])
-                    
+                    accelerations.append((velocities[i] - velocities[i - 1]) / dts[i])
+
                 if accelerations:
                     avg_acc = sum(accelerations) / len(accelerations)
                     features["avg_acceleration"] = avg_acc
                     features["acceleration_var"] = sum((a - avg_acc) ** 2 for a in accelerations) / len(accelerations)
-                    
+
                     jerks = []
                     for i in range(1, len(accelerations)):
-                        jerks.append((accelerations[i] - accelerations[i-1]) / dts[i+1])
-                    
+                        jerks.append((accelerations[i] - accelerations[i - 1]) / dts[i + 1])
+
                     if jerks:
                         features["avg_jerk"] = sum(map(abs, jerks)) / len(jerks)
 
@@ -203,9 +210,10 @@ def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
 class MultimodalTokenizer:
     """
     v0.6.1 - Temporal Sequence Tokenizer (Late Fusion)
-    Fare, Klavye ve Scroll olaylarını 1D-CNN (v0.6.2) modeline uygun 
+    Fare, Klavye ve Scroll olaylarını 1D-CNN (v0.6.2) modeline uygun
     Tensörlere çevirir.
     """
+
     def __init__(self, max_mouse_steps=60):
         self.max_mouse_steps = max_mouse_steps
 
@@ -229,44 +237,44 @@ class MultimodalTokenizer:
                     valid_moves.append({"x": x, "y": y, "t": t})
                 except (ValueError, TypeError):
                     pass
-        
+
         valid_moves = sorted(valid_moves, key=lambda m: m["t"])
-        
+
         if len(valid_moves) > self.max_mouse_steps + 2:
-            valid_moves = valid_moves[-(self.max_mouse_steps + 2):]
+            valid_moves = valid_moves[-(self.max_mouse_steps + 2) :]
 
         tensor = []
         if len(valid_moves) >= 3:
             distances, dts, velocities, accelerations = [], [], [], []
             for i in range(1, len(valid_moves)):
-                dx = valid_moves[i]["x"] - valid_moves[i-1]["x"]
-                dy = valid_moves[i]["y"] - valid_moves[i-1]["y"]
-                dt = max(0.1, valid_moves[i]["t"] - valid_moves[i-1]["t"])
+                dx = valid_moves[i]["x"] - valid_moves[i - 1]["x"]
+                dy = valid_moves[i]["y"] - valid_moves[i - 1]["y"]
+                dt = max(0.1, valid_moves[i]["t"] - valid_moves[i - 1]["t"])
                 dist = math.sqrt(dx**2 + dy**2)
                 vel = dist / dt
                 distances.append((dx, dy, dt, vel))
                 dts.append(dt)
                 velocities.append(vel)
-            
+
             for i in range(1, len(velocities)):
-                acc = (velocities[i] - velocities[i-1]) / dts[i]
+                acc = (velocities[i] - velocities[i - 1]) / dts[i]
                 accelerations.append(acc)
 
             jerks = []
             for i in range(1, len(accelerations)):
-                jerk = (accelerations[i] - accelerations[i-1]) / dts[i+1]
+                jerk = (accelerations[i] - accelerations[i - 1]) / dts[i + 1]
                 jerks.append(jerk)
-                
+
             for i in range(len(jerks)):
-                dx, dy, dt, vel = distances[i+2]
+                dx, dy, dt, vel = distances[i + 2]
                 tensor.append([dx, dy, dt, vel, jerks[i]])
-        
+
         if len(tensor) > self.max_mouse_steps:
-            tensor = tensor[-self.max_mouse_steps:]
-            
+            tensor = tensor[-self.max_mouse_steps :]
+
         while len(tensor) < self.max_mouse_steps:
             tensor.append([0.0, 0.0, 0.0, 0.0, 0.0])
-            
+
         return tensor
 
     def tokenize_static(self, telemetry: dict) -> list:
@@ -279,23 +287,24 @@ class MultimodalTokenizer:
             keystrokes = []
         else:
             keystrokes = keystrokes[:150]  # DoS koruması
-            
+
         valid_keys = [k for k in keystrokes if isinstance(k, dict) and "t" in k and "type" in k]
         sorted_keys = sorted(valid_keys, key=lambda k: k["t"])
-        
+
         key_count = len([k for k in sorted_keys if k["type"] == "down"])
-        
+
         downs = [k for k in sorted_keys if k["type"] == "down"]
-        
+
         intervals = []
         for i in range(1, len(downs)):
-            intervals.append(max(0.0, downs[i]["t"] - downs[i-1]["t"]))
-            
+            intervals.append(max(0.0, downs[i]["t"] - downs[i - 1]["t"]))
+
         avg_interval = sum(intervals) / len(intervals) if intervals else 0.0
-        interval_var = sum((x - avg_interval)**2 for x in intervals) / len(intervals) if intervals else 0.0
-        
+        interval_var = sum((x - avg_interval) ** 2 for x in intervals) / len(intervals) if intervals else 0.0
+
         # O(N) hold_times eşleştirmesi (iç içe arama / O(N^2) CPU kilitlenmesini engelle)
         from collections import defaultdict
+
         pending_downs = defaultdict(list)
         hold_times = []
 
@@ -314,35 +323,39 @@ class MultimodalTokenizer:
                     down_t = pending_downs["default"].pop(0)
                     if t_val >= down_t:
                         hold_times.append(t_val - down_t)
-                
+
         hold_time_avg = sum(hold_times) / len(hold_times) if hold_times else 0.0
-        hold_time_var = sum((x - hold_time_avg)**2 for x in hold_times) / len(hold_times) if hold_times else 0.0
-        
+        hold_time_var = sum((x - hold_time_avg) ** 2 for x in hold_times) / len(hold_times) if hold_times else 0.0
+
         scrolls = telemetry.get("scrolls", [])
         if not isinstance(scrolls, list):
             scrolls = []
         else:
             scrolls = scrolls[:150]  # DoS koruması
-            
+
         valid_scrolls = [s for s in scrolls if isinstance(s, dict) and "t" in s and "y" in s]
         valid_scrolls = sorted(valid_scrolls, key=lambda s: s["t"])
-        
+
         scroll_count = len(valid_scrolls)
         scroll_speeds = []
         for i in range(1, len(valid_scrolls)):
-            dy = abs(valid_scrolls[i]["y"] - valid_scrolls[i-1]["y"])
-            dt = max(0.1, valid_scrolls[i]["t"] - valid_scrolls[i-1]["t"])
+            dy = abs(valid_scrolls[i]["y"] - valid_scrolls[i - 1]["y"])
+            dt = max(0.1, valid_scrolls[i]["t"] - valid_scrolls[i - 1]["t"])
             scroll_speeds.append(dy / dt)
-            
+
         avg_scroll_speed = sum(scroll_speeds) / len(scroll_speeds) if scroll_speeds else 0.0
-        
+
         scroll_accels = []
         for i in range(1, len(scroll_speeds)):
-            dt = max(0.1, valid_scrolls[i+1]["t"] - valid_scrolls[i]["t"])
-            scroll_accels.append((scroll_speeds[i] - scroll_speeds[i-1]) / dt)
-            
-        scroll_accel_var = sum((a - (sum(scroll_accels)/len(scroll_accels)))**2 for a in scroll_accels) / len(scroll_accels) if scroll_accels else 0.0
-        
+            dt = max(0.1, valid_scrolls[i + 1]["t"] - valid_scrolls[i]["t"])
+            scroll_accels.append((scroll_speeds[i] - scroll_speeds[i - 1]) / dt)
+
+        scroll_accel_var = (
+            sum((a - (sum(scroll_accels) / len(scroll_accels))) ** 2 for a in scroll_accels) / len(scroll_accels)
+            if scroll_accels
+            else 0.0
+        )
+
         return [
             float(key_count),
             float(avg_interval),
@@ -351,11 +364,8 @@ class MultimodalTokenizer:
             float(hold_time_var),
             float(scroll_count),
             float(avg_scroll_speed),
-            float(scroll_accel_var)
+            float(scroll_accel_var),
         ]
 
     def fuse(self, telemetry: dict) -> dict:
-        return {
-            "mouse_tensor": self.tokenize_mouse(telemetry),
-            "static_vector": self.tokenize_static(telemetry)
-        }
+        return {"mouse_tensor": self.tokenize_mouse(telemetry), "static_vector": self.tokenize_static(telemetry)}

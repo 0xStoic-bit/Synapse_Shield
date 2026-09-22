@@ -113,9 +113,7 @@ def test_session_level_behavioral_invariance():
         duration_ms=1200.0,
     )
 
-    score, classification, reasons, details = analyze_behavior(
-        telemetry, session_history=session_history
-    )
+    score, classification, reasons, details = analyze_behavior(telemetry, session_history=session_history)
     assert any("Session Behavioral Invariance" in r for r in reasons)
     assert details["threat_type"] == "SESSION_INVARIANCE_BOT"
     assert classification == "Bot"
