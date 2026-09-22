@@ -15,6 +15,7 @@ def test_sqlite_wal_mode_enabled():
 
 def test_concurrent_background_writes():
     """Simulate 30 concurrent threads saving logs simultaneously to ensure no database locks."""
+
     def worker(i):
         try:
             save_log(
@@ -25,7 +26,7 @@ def test_concurrent_background_writes():
                 threat_type="LINEAR_MACRO" if i % 2 == 0 else "CLEAN_HUMAN",
                 reasons=[f"Test reason {i}"],
                 features={"test_id": i},
-                telemetry={"test_id": i}
+                telemetry={"test_id": i},
             )
             return True
         except sqlite3.OperationalError as e:

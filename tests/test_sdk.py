@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import time
+
 # pyrefly: ignore [missing-import]
 from fastapi.testclient import TestClient
 from synapse_shield.main import app
@@ -37,7 +38,8 @@ def test_utf8_token_handling():
 
     telemetry = {
         "mouse_movements": [
-            {"x": 100 + i * 5 + (i % 5), "y": 150 + i * 3 - (i % 4), "t": 1000 + i * 25 + (i % 3) * 5} for i in range(25)
+            {"x": 100 + i * 5 + (i % 5), "y": 150 + i * 3 - (i % 4), "t": 1000 + i * 25 + (i % 3) * 5}
+            for i in range(25)
         ],
         "clicks": [{"x": 220, "y": 222, "t": 1700}],
         "keystrokes": [],
@@ -214,9 +216,7 @@ def test_mobile_touch_telemetry_support(mock_predict):
             {"x": 180, "y": 320, "t": 1000},
             {"x": 181, "y": 321, "t": 1025},
         ],
-        "clicks": [
-            {"x": 181, "y": 321, "t": 1030}
-        ],
+        "clicks": [{"x": 181, "y": 321, "t": 1030}],
         "keystrokes": [],
         "scrolls": [],
         "browser": {
@@ -238,6 +238,7 @@ def test_mobile_touch_telemetry_support(mock_predict):
 
 def test_dynamic_pow_difficulty_logic():
     """Test dynamic difficulty validator with various leading zero targets."""
+
     def check_leading_zero_hex(hash_bytes: bytes, difficulty: int) -> bool:
         full_bytes = difficulty // 2
         for i in range(full_bytes):

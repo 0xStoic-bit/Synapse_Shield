@@ -27,6 +27,8 @@ try:
     )
 except ImportError:
     METRICS_ENABLED = False
+
+
 def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = False):
     """
     Decorator to protect any FastAPI endpoint with Synapse Shield behavioral biometrics.
@@ -36,6 +38,7 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
         async def login(request: Request):
             ...
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -54,8 +57,7 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
             storage = get_storage()
             if storage.is_ip_banned(client_ip):
                 raise HTTPException(
-                    status_code=403, 
-                    detail={"error": "IP address is banned by Synapse Shield.", "ip": client_ip}
+                    status_code=403, detail={"error": "IP address is banned by Synapse Shield.", "ip": client_ip}
                 )
 
             try:
@@ -87,7 +89,7 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
                 analyze_behavior, telemetry, 1, is_penalized, accessibility_mode, session_history
             )
             latency = time.perf_counter() - start_time
-            
+
             # Kinetik metrikleri oturum geçmişine kaydet
             features = details.get("features", {})
             storage.record_session_telemetry(
@@ -99,9 +101,9 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
                     "spectral_purity": features.get("spectral_purity", 0.0),
                 },
                 max_history=10,
-                window_sec=300
+                window_sec=300,
             )
-            
+
             if METRICS_ENABLED:
                 synapse_inference_latency_seconds.observe(latency)
 
@@ -110,19 +112,21 @@ def shield_protect(max_risk_score: float = 50.0, accessibility_mode: bool = Fals
                 if METRICS_ENABLED:
                     synapse_requests_total.labels(status="block", classification=classification).inc()
                 raise HTTPException(
-                    status_code=403, 
+                    status_code=403,
                     detail={
                         "error": "Access Denied by Synapse Shield",
                         "classification": classification,
                         "bot_score": f"{bot_score}%",
-                        "reasons": reasons
-                    }
+                        "reasons": reasons,
+                    },
                 )
 
             if METRICS_ENABLED:
                 synapse_requests_total.labels(status="allow", classification=classification).inc()
             return await func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -145,7 +149,9 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
     request'lerde bu pattern uygun değildir.
     """
 
-    def __init__(self, app, protected_paths: list | None = None, max_risk_score: float = 50.0, accessibility_mode: bool = False):
+    def __init__(
+        self, app, protected_paths: list | None = None, max_risk_score: float = 50.0, accessibility_mode: bool = False
+    ):
         super().__init__(app)
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score
@@ -164,34 +170,24 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         storage = get_storage()
         if storage.is_ip_banned(client_ip):
             return JSONResponse(
-                status_code=403,
-                content={"error": "[Synapse Shield] IP address is banned.", "ip": client_ip}
+                status_code=403, content={"error": "[Synapse Shield] IP address is banned.", "ip": client_ip}
             )
 
         try:
             body_bytes = await request.body()
             body = json.loads(body_bytes)
         except Exception:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "[Synapse Shield] Invalid JSON payload."}
-            )
+            return JSONResponse(status_code=400, content={"error": "[Synapse Shield] Invalid JSON payload."})
 
         token = body.get("token")
         if not token:
-            return JSONResponse(
-                status_code=403,
-                content={"error": "[Synapse Shield] Missing token."}
-            )
+            return JSONResponse(status_code=403, content={"error": "[Synapse Shield] Missing token."})
 
         is_valid, reason, telemetry = verify_and_consume_token(token)
         if not is_valid:
             if reason != "TOKEN_EXPIRED":
                 storage.record_bot_strike(client_ip)
-            return JSONResponse(
-                status_code=403,
-                content={"error": f"[Synapse Shield] Token Error: {reason}"}
-            )
+            return JSONResponse(status_code=403, content={"error": f"[Synapse Shield] Token Error: {reason}"})
 
         request.state.telemetry = telemetry
 
@@ -206,7 +202,7 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
             analyze_behavior, telemetry, 1, is_penalized, self.accessibility_mode, session_history
         )
         latency = time.perf_counter() - start_time
-        
+
         # Kinetik metrikleri oturum geçmişine kaydet
         features = details.get("features", {})
         storage.record_session_telemetry(
@@ -218,9 +214,9 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
                 "spectral_purity": features.get("spectral_purity", 0.0),
             },
             max_history=10,
-            window_sec=300
+            window_sec=300,
         )
-        
+
         if METRICS_ENABLED:
             synapse_inference_latency_seconds.observe(latency)
 
@@ -235,7 +231,7 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
                     "classification": classification,
                     "bot_score": f"{bot_score}%",
                     "reasons": reasons,
-                }
+                },
             )
 
         if METRICS_ENABLED:

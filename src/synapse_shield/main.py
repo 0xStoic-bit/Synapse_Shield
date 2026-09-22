@@ -62,6 +62,7 @@ def _cleanup_connections():
 
 atexit.register(_cleanup_connections)
 
+
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
@@ -106,13 +107,17 @@ def init_db():
             telegram_chat_id TEXT
         )
     """)
-    cursor.execute("INSERT OR IGNORE INTO webhook_settings (id, discord_url, telegram_token, telegram_chat_id) VALUES (1, '', '', '')")
+    cursor.execute(
+        "INSERT OR IGNORE INTO webhook_settings (id, discord_url, telegram_token, telegram_chat_id) VALUES (1, '', '', '')"
+    )
     conn.commit()
+
 
 init_db()
 
 DATASET_DB_FILE = os.environ.get("SYNAPSE_DATASET_PATH", os.path.join(tempfile.gettempdir(), "synapse_dataset.db"))
 _dataset_thread_local = threading.local()
+
 
 def get_dataset_connection() -> sqlite3.Connection:
     conn = getattr(_dataset_thread_local, "connection", None)
@@ -121,6 +126,7 @@ def get_dataset_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL;")
         _dataset_thread_local.connection = conn
     return conn
+
 
 def init_dataset_db():
     conn = get_dataset_connection()
@@ -138,9 +144,11 @@ def init_dataset_db():
     """)
     conn.commit()
 
+
 init_dataset_db()
 
 app = FastAPI(title="Synapse Shield - Behavioral Bot Detection Engine")
+
 
 class ConnectionManager:
     def __init__(self):
@@ -160,6 +168,7 @@ class ConnectionManager:
                 await connection.send_text(message)
             except Exception:
                 pass
+
 
 manager = ConnectionManager()
 
@@ -199,6 +208,7 @@ if _cors_origins:
 
 TRUSTED_PROXIES = {"127.0.0.1", "::1"}
 
+
 def get_client_ip(request: Request) -> str:
     client_ip = request.client.host if request.client else "127.0.0.1"
     if client_ip in TRUSTED_PROXIES:
@@ -207,6 +217,7 @@ def get_client_ip(request: Request) -> str:
             return forwarded.split(",")[0].strip()
     return client_ip
 
+
 def get_recent_request_count(ip: str) -> int:
     conn = get_connection()
     cursor = conn.cursor()
@@ -214,6 +225,7 @@ def get_recent_request_count(ip: str) -> int:
     cursor.execute("SELECT COUNT(*) FROM logs WHERE ip = ? AND timestamp > ?", (ip, ten_seconds_ago))
     count = cursor.fetchone()[0]
     return count + 1
+
 
 def is_ip_banned(ip: str) -> bool:
     return get_storage().is_ip_banned(ip)
@@ -239,14 +251,14 @@ def ban_ip(ip: str, minutes: int, reason: str):
 
 
 def save_log(
-    ip: str, 
-    user_agent: str, 
-    bot_score: float, 
-    classification: str, 
-    threat_type: str, 
-    reasons: list[str], 
-    features: dict[str, Any], 
-    telemetry: dict[str, Any]
+    ip: str,
+    user_agent: str,
+    bot_score: float,
+    classification: str,
+    threat_type: str,
+    reasons: list[str],
+    features: dict[str, Any],
+    telemetry: dict[str, Any],
 ):
     conn = get_connection()
     cursor = conn.cursor()
@@ -256,7 +268,17 @@ def save_log(
         INSERT INTO logs (timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features, telemetry)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (now, ip, user_agent, bot_score, classification, threat_type, json.dumps(reasons), json.dumps(features), json.dumps(telemetry))
+        (
+            now,
+            ip,
+            user_agent,
+            bot_score,
+            classification,
+            threat_type,
+            json.dumps(reasons),
+            json.dumps(features),
+            json.dumps(telemetry),
+        ),
     )
     # Otomatik temizlik: sadece son 5000 logu tut
     cursor.execute("""
@@ -269,6 +291,7 @@ def save_log(
     """)
     conn.commit()
 
+
 def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reasons: list[str]):
     try:
         conn = get_connection()
@@ -278,38 +301,40 @@ def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reas
         if not row:
             return
         discord_url, telegram_token, telegram_chat_id = row
-        
+
         # Don't do anything if no webhooks are configured
         if not discord_url and not (telegram_token and telegram_chat_id):
             return
-            
+
         reason_str = reasons[0] if reasons else "Unknown anomaly"
         now_str = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M:%S UTC")
-        
+
         if discord_url and discord_url.startswith("http"):
             discord_payload = {
-                "embeds": [{
-                    "title": "🚨 [SYNAPSE SHIELD] KRİTİK TEHDİT ENGELLENDİ",
-                    "color": 16711680,
-                    "description": (
-                        f"**• Hedef IP:** `{ip}` (Banned)\n"
-                        f"**• Tehdit Türü:** `{threat_type}`\n"
-                        f"**• Risk Skoru:** `%{(risk_score):.1f}` (BLOCK)\n"
-                        f"**• Tetiklenen:** {reason_str}\n"
-                        f"**• Zaman:** {now_str}"
-                    )
-                }]
+                "embeds": [
+                    {
+                        "title": "🚨 [SYNAPSE SHIELD] KRİTİK TEHDİT ENGELLENDİ",
+                        "color": 16711680,
+                        "description": (
+                            f"**• Hedef IP:** `{ip}` (Banned)\n"
+                            f"**• Tehdit Türü:** `{threat_type}`\n"
+                            f"**• Risk Skoru:** `%{(risk_score):.1f}` (BLOCK)\n"
+                            f"**• Tetiklenen:** {reason_str}\n"
+                            f"**• Zaman:** {now_str}"
+                        ),
+                    }
+                ]
             }
             req = urllib.request.Request(
                 discord_url,
-                data=json.dumps(discord_payload).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'User-Agent': 'SynapseShield/1.0'}
+                data=json.dumps(discord_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "SynapseShield/1.0"},
             )
             try:
                 urllib.request.urlopen(req, timeout=5)
             except Exception:
                 pass
-                
+
         if telegram_token and telegram_chat_id:
             msg = (
                 "🚨 *[SYNAPSE SHIELD] KRİTİK TEHDİT ENGELLENDİ*\n"
@@ -321,15 +346,11 @@ def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reas
                 f"• *Zaman:* {now_str}"
             )
             tg_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-            tg_payload = {
-                "chat_id": telegram_chat_id,
-                "text": msg,
-                "parse_mode": "Markdown"
-            }
+            tg_payload = {"chat_id": telegram_chat_id, "text": msg, "parse_mode": "Markdown"}
             req = urllib.request.Request(
                 tg_url,
-                data=json.dumps(tg_payload).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'User-Agent': 'SynapseShield/1.0'}
+                data=json.dumps(tg_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "SynapseShield/1.0"},
             )
             try:
                 urllib.request.urlopen(req, timeout=5)
@@ -338,6 +359,7 @@ def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reas
     except Exception as e:
         print(f"Webhook Notification Error: {e}")
 
+
 def verify_admin(request: Request):
     """Admin endpoint'leri için yetkilendirme doğrulaması."""
     admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
@@ -345,17 +367,21 @@ def verify_admin(request: Request):
     is_localhost = client_host in ("127.0.0.1", "::1", "localhost", "testclient")
 
     if admin_secret:
-        provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
+        provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace(
+            "Bearer ", ""
+        )
         if not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
             raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
     elif not is_localhost and os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
         raise HTTPException(status_code=403, detail="Forbidden: Admin operations disabled in production without secret")
+
 
 ALLOWED_WEBHOOK_DOMAINS = {
     "discord.com",
     "discordapp.com",
     "api.telegram.org",
 }
+
 
 def validate_webhook_url(url: str):
     """SSRF ve DNS Rebinding koruması: Sadece izinli resmi webhook alan adları kabul edilir."""
@@ -365,20 +391,19 @@ def validate_webhook_url(url: str):
     if parsed.scheme != "https":
         raise HTTPException(status_code=400, detail="Only HTTPS allowed for webhooks")
     hostname = (parsed.hostname or "").lower()
-    is_allowed = any(
-        hostname == d or hostname.endswith("." + d)
-        for d in ALLOWED_WEBHOOK_DOMAINS
-    )
+    is_allowed = any(hostname == d or hostname.endswith("." + d) for d in ALLOWED_WEBHOOK_DOMAINS)
     if not is_allowed:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid webhook domain '{hostname}'. Only official Discord and Telegram domains are allowed."
+            detail=f"Invalid webhook domain '{hostname}'. Only official Discord and Telegram domains are allowed.",
         )
+
 
 # YENİ ENDPOINT: İstemciye tek kullanımlık challenge verir
 @app.get("/api/challenge")
 async def get_challenge():
     return generate_challenge()
+
 
 @app.post("/api/score")
 async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
@@ -387,12 +412,12 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=413, detail="Payload Too Large: Maximum allowed size is 256 KB")
 
     ip = get_client_ip(request)
-    
+
     if await asyncio.to_thread(is_ip_banned, ip):
         raise HTTPException(status_code=403, detail="IP address temporarily banned due to suspicious activity.")
 
     user_agent = request.headers.get("user-agent", "Unknown")
-    
+
     try:
         body = json.loads(raw_body)
     except Exception:
@@ -415,8 +440,8 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
                     "error": "Token expired, please refresh challenge.",
                     "bot_score": 0.0,
                     "classification": "Unknown",
-                    "threat_type": "EXPIRED_CHALLENGE"
-                }
+                    "threat_type": "EXPIRED_CHALLENGE",
+                },
             )
         # Replay Attack veya sahte token durumu: Ceza havuzuna ekle
         record_ip_decision(ip, is_bot=True)
@@ -429,43 +454,49 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             "classification": "Bot",
             "threat_type": threat_type,
             "reasons": [reason],
-            "details": {"threat_type": threat_type}
+            "details": {"threat_type": threat_type},
         }
 
     recent_count = await asyncio.to_thread(get_recent_request_count, ip)
     if recent_count > 100:
         ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
         raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
-    
+
     pow_nonce = body.get("pow_nonce")
     pow_salt = body.get("pow_salt")
 
     bot_score, classification, reasons, details = await asyncio.to_thread(analyze_behavior, telemetry, recent_count)
     threat_type = details.get("threat_type", "CLEAN_HUMAN" if classification == "Human" else "UNKNOWN_ANOMALY")
-    
+
     # Proof of Work (Smart Challenge) for Gray Area - Tek kullanımlık Nonce Tüketimi
     if 35.0 <= bot_score <= 65.0:
         is_pow_valid = False
         if pow_nonce and pow_salt:
             is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce))
-                    
+
         if is_pow_valid:
             bot_score = max(0.0, bot_score - 20.0)
             classification = "Human"
             threat_type = "CLEAN_HUMAN"
             reasons.append("Gray area PoW Challenge successfully solved (Risk reduced).")
         else:
-            return {
-                "status": "challenge_required",
-                "pow_difficulty": 4,
-                "pow_salt": generate_pow_salt()
-            }
-    
+            return {"status": "challenge_required", "pow_difficulty": 4, "pow_salt": generate_pow_salt()}
+
     # Atomik ceza takibi
     record_ip_decision(ip, is_bot=(classification == "Bot"))
-    
-    background_tasks.add_task(save_log, ip, user_agent, bot_score, classification, threat_type, reasons, details.get("features", {}), telemetry)
-        
+
+    background_tasks.add_task(
+        save_log,
+        ip,
+        user_agent,
+        bot_score,
+        classification,
+        threat_type,
+        reasons,
+        details.get("features", {}),
+        telemetry,
+    )
+
     if classification == "Bot":
         background_tasks.add_task(manager.broadcast, f"[BOT {bot_score:.1f}%] -> {threat_type} (IP: {ip})")
         background_tasks.add_task(asyncio.to_thread, send_webhook_notification, ip, threat_type, bot_score, reasons)
@@ -476,8 +507,9 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         "classification": classification,
         "threat_type": threat_type,
         "reasons": reasons,
-        "details": details
+        "details": details,
     }
+
 
 @app.websocket("/ws/terminal")
 async def websocket_terminal(websocket: WebSocket, token: str | None = Query(None)):
@@ -501,7 +533,9 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
             data = await websocket.receive_text()
             cmd = data.strip().lower()
             if cmd == "help":
-                await websocket.send_text("Available commands: status, ban list, unban <ip>, retrain, clear, clear logs, help")
+                await websocket.send_text(
+                    "Available commands: status, ban list, unban <ip>, retrain, clear, clear logs, help"
+                )
             elif cmd in ("clear", "cls"):
                 await websocket.send_text("[CLEAR]")
             elif cmd in ("clear logs", "clear all"):
@@ -517,7 +551,9 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
             elif cmd == "status":
                 try:
                     stats = await get_logs(limit=1)
-                    await websocket.send_text(f"[STATUS] Total Req: {stats['total_requests']}, Bots: {stats['bot_requests']} ({stats['bot_ratio']:.1f}%)")
+                    await websocket.send_text(
+                        f"[STATUS] Total Req: {stats['total_requests']}, Bots: {stats['bot_requests']} ({stats['bot_ratio']:.1f}%)"
+                    )
                 except Exception as e:
                     await websocket.send_text(f"[ERROR] Could not fetch status: {e}")
             elif cmd == "ban list":
@@ -545,14 +581,16 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
             elif cmd == "retrain":
                 await websocket.send_text("[RETRAIN] Telemetri logları taranıyor ve transfer learning başlatılıyor...")
                 from .train import retrain_fc2
-                
+
                 # Asenkron event loop'u tıkamamak için thread havuzunda koştur:
                 res = await asyncio.to_thread(retrain_fc2)
-                
+
                 if res.get("success"):
                     samples = res.get("samples", 0)
                     loss = res.get("loss", 0.0)
-                    await websocket.send_text(f"[SUCCESS] 1D-CNN başarıyla güncellendi! Örneklem: {samples}, Kayıp (Loss): {loss:.4f}")
+                    await websocket.send_text(
+                        f"[SUCCESS] 1D-CNN başarıyla güncellendi! Örneklem: {samples}, Kayıp (Loss): {loss:.4f}"
+                    )
                 else:
                     msg = res.get("error", "Bilinmeyen durum")
                     await websocket.send_text(f"[INFO] Yeniden eğitim atlandı: {msg}")
@@ -561,28 +599,34 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+
 @app.get("/api/logs")
 async def get_logs(limit: int = 50):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT id, timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+    cursor.execute(
+        "SELECT id, timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features FROM logs ORDER BY id DESC LIMIT ?",
+        (limit,),
+    )
     rows = cursor.fetchall()
-    
+
     recent_logs = []
     for r in rows:
-        recent_logs.append({
-            "id": r["id"],
-            "timestamp": r["timestamp"],
-            "ip": r["ip"],
-            "user_agent": r["user_agent"],
-            "bot_score": r["bot_score"],
-            "classification": r["classification"],
-            "threat_type": r["threat_type"] if r["threat_type"] else "UNKNOWN",
-            "reasons": json.loads(r["reasons"]) if r["reasons"] else [],
-            "features": json.loads(r["features"]) if r["features"] else {}
-        })
-        
+        recent_logs.append(
+            {
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "ip": r["ip"],
+                "user_agent": r["user_agent"],
+                "bot_score": r["bot_score"],
+                "classification": r["classification"],
+                "threat_type": r["threat_type"] if r["threat_type"] else "UNKNOWN",
+                "reasons": json.loads(r["reasons"]) if r["reasons"] else [],
+                "features": json.loads(r["features"]) if r["features"] else {},
+            }
+        )
+
     cursor.execute("SELECT COUNT(*) FROM logs")
     total_requests = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM logs WHERE classification = 'Bot'")
@@ -591,11 +635,11 @@ async def get_logs(limit: int = 50):
     avg_bot = cursor.fetchone()[0] or 0.0
     cursor.execute("SELECT AVG(bot_score) FROM logs WHERE classification = 'Human'")
     avg_human = cursor.fetchone()[0] or 0.0
-    
+
     # Tehdit Dağılım İstatistiği (Threat Distribution)
     cursor.execute("SELECT threat_type, COUNT(*) FROM logs WHERE classification = 'Bot' GROUP BY threat_type")
     threat_distribution = {row[0]: row[1] for row in cursor.fetchall()}
-    
+
     return {
         "total_requests": total_requests,
         "bot_requests": bot_requests,
@@ -604,15 +648,19 @@ async def get_logs(limit: int = 50):
         "avg_bot_score": round(avg_bot, 2),
         "avg_human_score": round(avg_human, 2),
         "threat_distribution": threat_distribution,
-        "logs": recent_logs
+        "logs": recent_logs,
     }
+
 
 @app.get("/api/logs/export")
 async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: int = Query(1000, ge=1, le=10000)):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT id, timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+    cursor.execute(
+        "SELECT id, timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features FROM logs ORDER BY id DESC LIMIT ?",
+        (limit,),
+    )
     rows = cursor.fetchall()
 
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -651,7 +699,7 @@ async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: i
         return Response(
             content=content,
             media_type="text/markdown; charset=utf-8",
-            headers={"Content-Disposition": f"attachment; filename=synapse_security_report_{date_slug}.md"}
+            headers={"Content-Disposition": f"attachment; filename=synapse_security_report_{date_slug}.md"},
         )
     else:  # txt format
         lines = [
@@ -660,7 +708,7 @@ async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: i
             f"Exported At: {now_utc}",
             f"Total Records: {total_count} | Blocked Bots: {bot_count} ({bot_ratio:.1f}%) | Verified Humans: {total_count - bot_count}",
             "=" * 80,
-            ""
+            "",
         ]
         for r in rows:
             reasons = json.loads(r["reasons"]) if r["reasons"] else []
@@ -677,8 +725,9 @@ async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: i
         return Response(
             content=content,
             media_type="text/plain; charset=utf-8",
-            headers={"Content-Disposition": f"attachment; filename=synapse_security_logs_{date_slug}.txt"}
+            headers={"Content-Disposition": f"attachment; filename=synapse_security_logs_{date_slug}.txt"},
         )
+
 
 @app.post("/api/clear")
 async def clear_logs(request: Request):
@@ -690,6 +739,7 @@ async def clear_logs(request: Request):
     cursor.execute("DELETE FROM logs")
     conn.commit()
     return {"status": "success", "message": "Database logs and bans cleared"}
+
 
 @app.post("/api/collect_dataset")
 async def collect_dataset(request: Request):
@@ -703,13 +753,13 @@ async def collect_dataset(request: Request):
         body = json.loads(raw_body)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
-        
+
     mouse_movements = json.dumps(body.get("mouse_movements", []))
     keystrokes = json.dumps(body.get("keystrokes", []))
     clicks = json.dumps(body.get("clicks", []))
     scrolls = json.dumps(body.get("scrolls", []))
     browser = json.dumps(body.get("browser", {}))
-    
+
     conn = get_dataset_connection()
     cursor = conn.cursor()
     now = datetime.now(timezone.utc).isoformat()
@@ -718,10 +768,11 @@ async def collect_dataset(request: Request):
         INSERT INTO raw_telemetry (timestamp, mouse_movements, keystrokes, clicks, scrolls, browser)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (now, mouse_movements, keystrokes, clicks, scrolls, browser)
+        (now, mouse_movements, keystrokes, clicks, scrolls, browser),
     )
     conn.commit()
     return {"status": "success", "message": "Telemetry collected for dataset."}
+
 
 @app.get("/api/settings/webhooks")
 async def get_webhooks(request: Request):
@@ -733,11 +784,8 @@ async def get_webhooks(request: Request):
     row = cursor.fetchone()
     if not row:
         return {"discord_url": "", "telegram_token": "", "telegram_chat_id": ""}
-    return {
-        "discord_url": row[0] or "",
-        "telegram_token": row[1] or "",
-        "telegram_chat_id": row[2] or ""
-    }
+    return {"discord_url": row[0] or "", "telegram_token": row[1] or "", "telegram_chat_id": row[2] or ""}
+
 
 @app.post("/api/settings/webhooks")
 async def update_webhooks(request: Request):
@@ -747,26 +795,31 @@ async def update_webhooks(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
     discord_url = body.get("discord_url", "").strip()
     telegram_token = body.get("telegram_token", "").strip()
     telegram_chat_id = body.get("telegram_chat_id", "").strip()
-    
+
     # SSRF & DNS Rebinding koruması
     if discord_url:
         validate_webhook_url(discord_url)
 
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE webhook_settings 
         SET discord_url = ?, telegram_token = ?, telegram_chat_id = ? 
         WHERE id = 1
-    """, (discord_url, telegram_token, telegram_chat_id))
+    """,
+        (discord_url, telegram_token, telegram_chat_id),
+    )
     conn.commit()
     return {"status": "success"}
 
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
 
 @app.get("/")
 def read_root():
@@ -775,12 +828,14 @@ def read_root():
         return FileResponse(index_path)
     return HTMLResponse("<h2>Synapse Shield Cockpit: index.html missing.</h2>")
 
+
 @app.get("/store")
 def read_store():
     store_path = os.path.join(STATIC_DIR, "store.html")
     if os.path.exists(store_path):
         return FileResponse(store_path)
     return HTMLResponse("<h2>Synapse Shield Store: store.html missing.</h2>")
+
 
 @app.get("/static/synapse-sdk.js")
 def read_sdk():
@@ -789,12 +844,15 @@ def read_sdk():
         return FileResponse(sdk_path, media_type="application/javascript")
     return HTMLResponse("<h2>synapse-sdk.js missing.</h2>", status_code=404)
 
+
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
 
 if __name__ == "__main__":
     try:

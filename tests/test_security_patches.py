@@ -30,8 +30,9 @@ def client():
 # --- [AÇIK-01] XSS Protection Verification ---
 def test_xss_protection_in_logs_and_html():
     from synapse_shield.main import save_log
+
     # User agent with raw XSS payload
-    xss_ua = '<img/src=x/onerror=alert(document.domain)>'
+    xss_ua = "<img/src=x/onerror=alert(document.domain)>"
     save_log(
         ip="127.0.0.1",
         user_agent=xss_ua,
@@ -40,7 +41,7 @@ def test_xss_protection_in_logs_and_html():
         threat_type="STEALTH_AUTOMATION",
         reasons=["Test XSS"],
         features={},
-        telemetry={}
+        telemetry={},
     )
     # Check that reading index.html defines escapeHtml
     with open("src/synapse_shield/static/index.html", "r", encoding="utf-8") as f:
@@ -112,15 +113,10 @@ def test_brave_farbling_override_with_anomalies():
 
     # Case A: Pure organic user with Brave canvas farbling -> Capped at 34% (Human)
     clean_brave_telemetry = {
-        "browser": {
-            "is_canvas_hooked": True,
-            "webdriver": False,
-            "screen_width": 1920,
-            "screen_height": 1080
-        },
+        "browser": {"is_canvas_hooked": True, "webdriver": False, "screen_width": 1920, "screen_height": 1080},
         "mouse_movements": mouse_movements,
         "clicks": [{"x": 140, "y": 110, "t": 750}],
-        "keystrokes": []
+        "keystrokes": [],
     }
     score_a, cls_a, reasons_a, _ = analyze_behavior(clean_brave_telemetry)
     assert score_a <= 34.0
@@ -129,15 +125,10 @@ def test_brave_farbling_override_with_anomalies():
 
     # Case B: Bot using Brave farbling BUT with headless screen (0x0) -> Farbling override must NOT apply!
     bot_headless_telemetry = {
-        "browser": {
-            "is_canvas_hooked": True,
-            "webdriver": False,
-            "screen_width": 0,
-            "screen_height": 0
-        },
+        "browser": {"is_canvas_hooked": True, "webdriver": False, "screen_width": 0, "screen_height": 0},
         "mouse_movements": mouse_movements,
         "clicks": [{"x": 140, "y": 110, "t": 750}],
-        "keystrokes": []
+        "keystrokes": [],
     }
     score_b, cls_b, reasons_b, _ = analyze_behavior(bot_headless_telemetry)
     assert not any("capped at 34.0" in r for r in reasons_b)
@@ -145,15 +136,10 @@ def test_brave_farbling_override_with_anomalies():
 
     # Case C: Bot using Brave farbling BUT with robotic superfast keystrokes -> Must NOT be capped!
     bot_robotic_keys_telemetry = {
-        "browser": {
-            "is_canvas_hooked": True,
-            "webdriver": False,
-            "screen_width": 1920,
-            "screen_height": 1080
-        },
+        "browser": {"is_canvas_hooked": True, "webdriver": False, "screen_width": 1920, "screen_height": 1080},
         "mouse_movements": mouse_movements,
         "clicks": [{"x": 140, "y": 110, "t": 750}],
-        "keystrokes": [{"t": i * 10, "type": "down"} for i in range(10)] # constant 10ms typing!
+        "keystrokes": [{"t": i * 10, "type": "down"} for i in range(10)],  # constant 10ms typing!
     }
     score_c, cls_c, reasons_c, _ = analyze_behavior(bot_robotic_keys_telemetry)
     assert not any("capped at 34.0" in r for r in reasons_c)
@@ -164,6 +150,7 @@ def test_pow_replay_protection():
     salt = generate_pow_salt()
     # Find a valid 4-zero nonce
     import hashlib
+
     found_nonce = None
     for n in range(500000):
         h = hashlib.sha256((salt + str(n)).encode()).hexdigest()
@@ -188,10 +175,7 @@ def test_early_nonce_consumption(monkeypatch):
     challenge = challenge_data["challenge"]
 
     # Submit too fast (< 1.5s)
-    envelope = {
-        "challenge": challenge,
-        "telemetry": {}
-    }
+    envelope = {"challenge": challenge, "telemetry": {}}
     token_str = base64.b64encode(json.dumps(envelope).encode()).decode()
 
     # Attempt 1: Rejected because too fast
@@ -251,15 +235,13 @@ def test_token_expired_response(client, monkeypatch):
     import hmac
     import hashlib
     from synapse_shield.tokens import SECRET_KEY
+
     nonce = secrets.token_hex(16)
-    ts = int((time.time() - 90) * 1000) # 90 seconds ago
+    ts = int((time.time() - 90) * 1000)  # 90 seconds ago
     sig = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     challenge = f"{nonce}.{ts}.{sig}"
 
-    envelope = {
-        "challenge": challenge,
-        "telemetry": {}
-    }
+    envelope = {"challenge": challenge, "telemetry": {}}
     token_str = base64.b64encode(json.dumps(envelope).encode()).decode()
 
     res = client.post("/api/score", json={"token": token_str})
@@ -285,7 +267,7 @@ def test_keystroke_dos_linear_time_and_capping():
 
     # Must be capped at 150
     assert features["key_count"] <= 150
-    assert elapsed_features < 0.05 # < 50ms
+    assert elapsed_features < 0.05  # < 50ms
 
     tokenizer = MultimodalTokenizer()
     t1 = time.perf_counter()
@@ -293,7 +275,7 @@ def test_keystroke_dos_linear_time_and_capping():
     elapsed_tok = time.perf_counter() - t1
 
     assert len(static_vec) == 8
-    assert elapsed_tok < 0.05 # < 50ms (previously took seconds due to O(N^2))
+    assert elapsed_tok < 0.05  # < 50ms (previously took seconds due to O(N^2))
 
 
 # --- [AÇIK-11] Middleware IP Ban and Strike Enforcement ---
@@ -302,11 +284,7 @@ def test_middleware_ip_ban_enforcement():
     from synapse_shield.middleware import SynapseShieldMiddleware
 
     test_app = FastAPI()
-    test_app.add_middleware(
-        SynapseShieldMiddleware,
-        protected_paths=["/protected"],
-        max_risk_score=50.0
-    )
+    test_app.add_middleware(SynapseShieldMiddleware, protected_paths=["/protected"], max_risk_score=50.0)
 
     @test_app.post("/protected/action")
     async def action():

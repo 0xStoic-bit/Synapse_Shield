@@ -9,9 +9,7 @@ Profiles microsecond-level execution times for:
 
 import argparse
 import json
-import os
 import platform
-import sys
 import time
 from typing import Any
 
@@ -76,10 +74,12 @@ def run_micro_benchmarks(iterations: int = 500, export_path: str | None = None) 
     model = SynapseHybridModel()
 
     # Stage 1: Kinematics Feature Extraction
-    bench_features = lambda: tokenizer.fuse(sample_telemetry)
+    def bench_features():
+        tokenizer.fuse(sample_telemetry)
 
     # Stage 2: 1D-CNN Pure NumPy Inference
-    bench_inference = lambda: model.predict(mouse_tensor, static_vector)
+    def bench_inference():
+        model.predict(mouse_tensor, static_vector)
 
     # Stage 3: Cryptographic Token Challenge & Verification
     def bench_crypto():
@@ -87,7 +87,8 @@ def run_micro_benchmarks(iterations: int = 500, export_path: str | None = None) 
         verify_and_consume_token(chal["challenge"])
 
     # Stage 4: End-to-End Decision Pipeline
-    bench_e2e = lambda: analyze_behavior(sample_telemetry)
+    def bench_e2e():
+        analyze_behavior(sample_telemetry)
 
     stages = [
         ("19D Kinematic Feature Extraction", bench_features),
@@ -137,7 +138,9 @@ def print_benchmark_report(report: dict[str, Any]) -> None:
     print(f"  Runtime Env   : Python {info['python_version']} | NumPy {info['numpy_version']}")
     print(f"  Sample Size   : {info['iterations']} iterations per pipeline stage")
     print("-" * width)
-    print(f"  {'STAGE / PIPELINE MODULE':<34} | {'MEAN (us)':<10} | {'P50 (us)':<10} | {'P95 (us)':<10} | {'P99 (us)':<10} | {'THROUGHPUT':<12}")
+    print(
+        f"  {'STAGE / PIPELINE MODULE':<34} | {'MEAN (us)':<10} | {'P50 (us)':<10} | {'P95 (us)':<10} | {'P99 (us)':<10} | {'THROUGHPUT':<12}"
+    )
     print("-" * width)
 
     for stage_name, stats in benchmarks.items():
@@ -152,15 +155,17 @@ def print_benchmark_report(report: dict[str, Any]) -> None:
     print("=" * width)
     e2e = benchmarks.get("Full End-to-End Pipeline", {})
     if e2e:
-        mean_ms = e2e['mean_us'] / 1000.0
-        print(f"  [RESULT] End-to-End Decision Latency: {mean_ms:.3f} ms (p95: {e2e['p95_us']/1000.0:.3f} ms)")
+        mean_ms = e2e["mean_us"] / 1000.0
+        print(f"  [RESULT] End-to-End Decision Latency: {mean_ms:.3f} ms (p95: {e2e['p95_us'] / 1000.0:.3f} ms)")
         print(f"  [RPS] Single-Core Throughput Capacity: ~{e2e['throughput_ops_sec']:,.0f} req/sec")
     print("=" * width)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Synapse Shield Latency & Throughput Benchmark")
-    parser.add_argument("--iterations", "-n", type=int, default=500, help="Number of benchmark iterations (default: 500)")
+    parser.add_argument(
+        "--iterations", "-n", type=int, default=500, help="Number of benchmark iterations (default: 500)"
+    )
     parser.add_argument("--export", "-e", type=str, default=None, help="Export benchmark metrics to JSON file")
     args = parser.parse_args()
 

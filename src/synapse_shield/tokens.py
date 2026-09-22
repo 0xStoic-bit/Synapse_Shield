@@ -67,6 +67,7 @@ def _load_or_generate_secret_key() -> bytes:
 
 SECRET_KEY = _load_or_generate_secret_key()
 
+
 def _ensure_table(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS used_nonces (
@@ -75,6 +76,7 @@ def _ensure_table(conn):
         )
     """)
     conn.commit()
+
 
 def _cleanup_expired_nonces():
     try:
@@ -87,6 +89,7 @@ def _cleanup_expired_nonces():
     except Exception as e:
         logger.warning(f"Nonce cleanup failed: {e}")
 
+
 def generate_challenge(expires_in_sec: int = 60) -> dict[str, Any]:
     """
     İstemciye HMAC-SHA256 ile imzalanmış tek kullanımlık bir challenge üretir.
@@ -94,17 +97,15 @@ def generate_challenge(expires_in_sec: int = 60) -> dict[str, Any]:
     """
     # Süresi dolan nonceları temizleyerek db şişmesini önle
     _cleanup_expired_nonces()
-    
+
     now_ms = int(time.time() * 1000)
 
     nonce = secrets.token_hex(16)
     ts = now_ms
     signature = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     challenge = f"{nonce}.{ts}.{signature}"
-    return {
-        "challenge": challenge,
-        "expires_in": expires_in_sec
-    }
+    return {"challenge": challenge, "expires_in": expires_in_sec}
+
 
 def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]:
     """
@@ -112,14 +113,14 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     Returns: (is_valid: bool, reason: str, telemetry: dict)
     """
     try:
-        raw_json = base64.b64decode(token_str.encode('utf-8')).decode('utf-8')
+        raw_json = base64.b64decode(token_str.encode("utf-8")).decode("utf-8")
         payload = json.loads(raw_json)
     except Exception:
         return False, "Geçersiz token formatı / Base64 hatası", {}
 
     challenge = payload.get("challenge", "")
     telemetry = payload.get("telemetry", {})
-    
+
     parts = challenge.split(".")
     if len(parts) != 3:
         return False, "Bozuk challenge yapısı", {}
@@ -158,14 +159,23 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     # Eğer bot 1.6 saniye bekleyip, içine 3 saniyelik telemetri sığdırmaya çalışırsa yakalanır!
     elapsed_time = elapsed_sec
     try:
-        events = telemetry.get("mouse_movements", []) + telemetry.get("keystrokes", []) + telemetry.get("clicks", []) + telemetry.get("scrolls", [])
+        events = (
+            telemetry.get("mouse_movements", [])
+            + telemetry.get("keystrokes", [])
+            + telemetry.get("clicks", [])
+            + telemetry.get("scrolls", [])
+        )
         if events:
             timestamps = [e.get("t", 0) for e in events if isinstance(e, dict) and "t" in e]
             if timestamps:
                 telemetry_duration_sec = (max(timestamps) - min(timestamps)) / 1000.0
                 # Telemetrideki olayların süresi, dünyadaki geçen süreden büyük olamaz (0.5s network gecikme payı)
                 if min_elapsed > 0 and telemetry_duration_sec > elapsed_time + 0.5:
-                    return False, f"Zaman yolculuğu tespit edildi (Time Travel Bot): Telemetri {telemetry_duration_sec:.1f}s sürüyor ancak token {elapsed_time:.1f}s önce alındı!", {}
+                    return (
+                        False,
+                        f"Zaman yolculuğu tespit edildi (Time Travel Bot): Telemetri {telemetry_duration_sec:.1f}s sürüyor ancak token {elapsed_time:.1f}s önce alındı!",
+                        {},
+                    )
     except Exception as e:
         logger.warning(f"Telemetry time travel check failed: {e}")
 
@@ -173,6 +183,7 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     _cleanup_expired_nonces()
 
     return True, "Geçerli", telemetry
+
 
 def generate_pow_salt() -> str:
     """
@@ -184,6 +195,7 @@ def generate_pow_salt() -> str:
     signature = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     return f"{salt_hex}.{ts}.{signature}"
 
+
 def verify_pow_salt(signed_salt: str) -> bool:
     """
     İstemciden gelen imzalı salt'ın geçerliliğini ve süresini kontrol eder (Son 60 saniye).
@@ -192,20 +204,21 @@ def verify_pow_salt(signed_salt: str) -> bool:
     if len(parts) != 3:
         return False
     salt_hex, ts_str, sig = parts
-    
+
     try:
         ts = int(ts_str)
     except ValueError:
         return False
-        
+
     expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected_sig):
         return False
-        
+
     now_ms = int(time.time() * 1000)
     elapsed_sec = (now_ms - ts) / 1000.0
     # 60 saniyeden eskiyse veya gelecek zamandaysa reddet
     return not (elapsed_sec > 60.0 or elapsed_sec < -5.0)
+
 
 def verify_and_consume_pow(salt: str, nonce: str) -> bool:
     """

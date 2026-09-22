@@ -18,6 +18,7 @@ except Exception as e:
     _ai_model = None
     print(f"[Synapse Shield] AI Model load failed: {e}")
 
+
 def reload_ai_model() -> bool:
     """Reloads the 1D-CNN model weights dynamically from disk into memory."""
     global _ai_model, _tokenizer
@@ -28,6 +29,7 @@ def reload_ai_model() -> bool:
     except Exception as e:
         print(f"[Synapse Shield] AI Model reload failed: {e}")
         return False
+
 
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
     if k <= 1:
@@ -41,35 +43,40 @@ def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
             break
     return min(1.0, max(0.0, cumulative_prob))
 
+
 def analyze_behavior(
-    telemetry: dict[str, Any], 
+    telemetry: dict[str, Any],
     recent_request_count: int = 1,
     is_ip_penalized: bool = False,
     accessibility_mode: bool = False,
-    session_history: list[dict[str, Any]] | None = None
+    session_history: list[dict[str, Any]] | None = None,
 ) -> tuple[float, str, list[str], dict[str, Any]]:
     features = extract_features(telemetry)
     reasons = []
     total_risk = 0.0
-    
+
     # 0. Dinamik IP Ceza Durumu
     if is_ip_penalized:
         total_risk += 50.0
         reasons.append("IP address is temporarily penalized due to repeated high-risk bot activity.")
-    
+
     # 1. Webdriver Tespiti (Hard Block)
     if features["webdriver"]:
         total_risk += 100.0
         reasons.append("Automation tool interface (navigator.webdriver) detected.")
-        
+
     # 1.5 Anti-Stealth & Prototype Tamper Detection
     browser_data = telemetry.get("browser", {})
-    is_stealth_automation = features.get("webdriver", False) or browser_data.get("is_plugin_array_fake") or browser_data.get("has_webdriver_own_prop")
-    
+    is_stealth_automation = (
+        features.get("webdriver", False)
+        or browser_data.get("is_plugin_array_fake")
+        or browser_data.get("has_webdriver_own_prop")
+    )
+
     if browser_data.get("is_plugin_array_fake") or browser_data.get("has_webdriver_own_prop"):
         total_risk += 100.0
         reasons.append("Stealth browser tamper detected: Mocked plugins or webdriver prototype override (100% Bot).")
-        
+
     is_dual_hook = browser_data.get("is_webgl_hooked") and browser_data.get("is_canvas_hooked")
     has_human_motion = features.get("straightness", 1.0) < 0.99 and features.get("avg_jerk", 0) > 0.00008
 
@@ -83,21 +90,27 @@ def analyze_behavior(
     elif browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked"):
         if has_human_motion:
             total_risk += 34.0
-            reasons.append("Browser fingerprinting hook detected, but human motion verified (Risk lowered to avoid PoW).")
+            reasons.append(
+                "Browser fingerprinting hook detected, but human motion verified (Risk lowered to avoid PoW)."
+            )
         else:
             total_risk += 45.0
             reasons.append("Browser fingerprinting hook detected without human motion (Possible bot).")
-        
+
     # 2. Ekran Boyutları (Headless)
     if not features["screen_valid"]:
         total_risk += 35.0
         reasons.append("Invalid or headless screen dimensions detected.")
-        
+
     # 2.5 Tarayıcı Eklenti Kontrolü (Mobil Yanlış Pozitif Korumalı)
-    if not features.get("touch_supported", False) and features.get("screen_width", 0) >= 1024 and features.get("plugins_length", 1) == 0:
+    if (
+        not features.get("touch_supported", False)
+        and features.get("screen_width", 0) >= 1024
+        and features.get("plugins_length", 1) == 0
+    ):
         total_risk += 50.0
         reasons.append("Missing browser plugins in desktop environment (Possible headless/stealth bot).")
-        
+
     # 3. Faresiz Form Etkileşimi
     is_touch = browser_data.get("touch_supported", False)
     if (features["click_count"] > 0 or features["key_count"] > 0) and features["mouse_points"] == 0:
@@ -113,25 +126,31 @@ def analyze_behavior(
         if features["total_distance"] > 30 and features["straightness"] > 0.985 and not is_touch:
             risk_add = 75.0 * acc_multiplier
             total_risk += risk_add
-            reasons.append(f"Euclidean straight-line trajectory detected (straightness: {features['straightness']:.4f}) [+{risk_add:.1f}].")
-            
+            reasons.append(
+                f"Euclidean straight-line trajectory detected (straightness: {features['straightness']:.4f}) [+{risk_add:.1f}]."
+            )
+
         # B. Robotik Hız & İvme Varyansı
         if features["total_distance"] > 30 and features["velocity_var"] < 1e-5:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(f"Near-zero velocity variance observed in mouse path [+{risk_add:.1f}].")
-            
+
         # C. Bézier Eğrisi & Polinomal İvme İmzası (Bézier botlarında < 1.5e-5)
         if features["total_distance"] > 30 and features["acceleration_var"] < 1.5e-5:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
-            reasons.append(f"Unnatural polynomial acceleration curve detected (acceleration_var: {features['acceleration_var']:.7f}) [+{risk_add:.1f}].")
+            reasons.append(
+                f"Unnatural polynomial acceleration curve detected (acceleration_var: {features['acceleration_var']:.7f}) [+{risk_add:.1f}]."
+            )
 
         # D. Nöromüsküler Jerk Titremesi Eksikliği (Bézier matematiksel pürüzsüzlük tespiti)
         if features["total_distance"] > 50 and features["avg_jerk"] < 0.00008 and not is_touch:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
-            reasons.append(f"Unnatural mathematical smoothness: Missing physiological 8-12Hz Jerk tremor (avg_jerk: {features['avg_jerk']:.7f}) [+{risk_add:.1f}].")
+            reasons.append(
+                f"Unnatural mathematical smoothness: Missing physiological 8-12Hz Jerk tremor (avg_jerk: {features['avg_jerk']:.7f}) [+{risk_add:.1f}]."
+            )
 
         # E. Deterministik Zamanlayıcı (dt_var == 0)
         if features["mouse_points"] >= 10 and features["dt_var"] < 0.01:
@@ -142,7 +161,9 @@ def analyze_behavior(
         if features["click_count"] > 0 and features["total_distance"] > 50:
             if features["terminal_decel_ratio"] > 0.70:
                 total_risk += 45.0
-                reasons.append(f"Fitts's Law violation: Lack of terminal deceleration before click ({features['terminal_decel_ratio']:.2f}).")
+                reasons.append(
+                    f"Fitts's Law violation: Lack of terminal deceleration before click ({features['terminal_decel_ratio']:.2f})."
+                )
 
         # G. İnsanüstü Hız
         if features["max_velocity"] > 15.0:
@@ -183,7 +204,7 @@ def analyze_behavior(
         if features.get("key_interval_var", 50.0) < 2.0:
             total_risk += 75.0
             reasons.append("Robotic constant-interval keystroke timing detected.")
-            
+
         if features.get("key_interval_avg", 100.0) < 25.0:
             total_risk += 50.0
             reasons.append(f"Superhuman input frequency (avg typing interval: {features['key_interval_avg']:.1f} ms).")
@@ -192,31 +213,37 @@ def analyze_behavior(
     freq_anomaly = poisson_anomaly_score(recent_request_count, lambda_val=2.0)
     if freq_anomaly >= 0.95:
         is_human_telemetry = (
-            features["mouse_points"] > 5 
-            and features["straightness"] < 0.96 
+            features["mouse_points"] > 5
+            and features["straightness"] < 0.96
             and features["avg_jerk"] > 0.00010
             and features["acceleration_var"] > 2e-5
         )
         if is_human_telemetry:
             total_risk += 25.0 * freq_anomaly
-            reasons.append(f"High request frequency ({recent_request_count} req/10s), but organic human kinematics verified.")
+            reasons.append(
+                f"High request frequency ({recent_request_count} req/10s), but organic human kinematics verified."
+            )
         else:
             total_risk += 60.0 * freq_anomaly
-            reasons.append(f"Poisson request frequency anomaly (rate: {recent_request_count} req/10s, risk confidence: {freq_anomaly*100:.1f}%).")
+            reasons.append(
+                f"Poisson request frequency anomaly (rate: {recent_request_count} req/10s, risk confidence: {freq_anomaly * 100:.1f}%)."
+            )
 
     # 6.5 Oturum Düzeyinde Kinetik Değişmezlik (Session Behavioral Invariance)
     # Aynı oturumdan gelen ardışık isteklerde kinetik parametrelerin robotik sabitliği
     if session_history and len(session_history) >= 3:
         s_jerks = [float(h.get("avg_jerk", 0.0)) for h in session_history if "avg_jerk" in h]
         s_straightness = [float(h.get("straightness", 0.0)) for h in session_history if "straightness" in h]
-        
+
         # Jerk varyansı: bot her istekte aynı sabit tremor genliğini yolluyorsa
         if len(s_jerks) >= 3 and all(j > 0 for j in s_jerks):
             mean_j = sum(s_jerks) / len(s_jerks)
             jerk_var = sum((x - mean_j) ** 2 for x in s_jerks) / len(s_jerks)
             if jerk_var < 1e-12:
                 total_risk += 60.0
-                reasons.append("Session Behavioral Invariance: Identical neuromuscular jerk tremor repeated across session requests (deterministic bot template).")
+                reasons.append(
+                    "Session Behavioral Invariance: Identical neuromuscular jerk tremor repeated across session requests (deterministic bot template)."
+                )
 
         # Straightness varyansı: bot her istekte tıpatıp aynı düzlüğü üretiyorsa
         if len(s_straightness) >= 3:
@@ -224,10 +251,12 @@ def analyze_behavior(
             st_var = sum((x - mean_s) ** 2 for x in s_straightness) / len(s_straightness)
             if st_var < 1e-8:
                 total_risk += 50.0
-                reasons.append("Session Behavioral Invariance: Zero straightness variance across consecutive session requests.")
+                reasons.append(
+                    "Session Behavioral Invariance: Zero straightness variance across consecutive session requests."
+                )
 
     heuristic_score = min(100.0, max(0.0, total_risk))
-    
+
     # 7. Yapay Zeka (1D-CNN) Puanlaması
     ai_score = 0.0
     if _ai_model and _tokenizer:
@@ -238,10 +267,10 @@ def analyze_behavior(
         except Exception as e:
             ai_score = 0.0
             reasons.append(f"AI Model Error: {e!s}")
-            
+
     # 8. Max Gating (Karar Birleştirme)
     final_bot_score = max(heuristic_score, ai_score)
-    
+
     # Brave Farbling Override: Sadece ve sadece başka kritik anomali yoksa skoru düşür
     typing_speed_anomaly = features.get("key_count", 0) >= 3 and (
         features.get("key_interval_var", 50.0) < 2.0 or features.get("key_interval_avg", 100.0) < 25.0
@@ -263,17 +292,19 @@ def analyze_behavior(
     is_brave_like = is_dual_hook or browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked")
     if is_brave_like and has_human_motion and not has_critical_bot_anomaly:
         final_bot_score = min(final_bot_score, 34.0)
-        reasons.append("AI and heuristic scores capped at 34.0 due to verified organic human motion with privacy farbling.")
-    
+        reasons.append(
+            "AI and heuristic scores capped at 34.0 due to verified organic human motion with privacy farbling."
+        )
+
     classification = "Bot" if final_bot_score >= 50.0 else "Human"
-    
+
     if final_bot_score >= 50.0:
         if ai_score >= 50.0:
             reasons.append(f"1D-CNN AI Engine Confidence: {ai_score:.1f}% Bot.")
     else:
         if final_bot_score < 10.0:
             reasons.append("Natural behavioral telemetry flags verified by AI & Heuristics.")
-            
+
     # 9. Tehdit Atıf Hiyerarşisi (Threat Attribution Hierarchy)
     threat_type = classify_threat(
         features=features,
@@ -282,7 +313,7 @@ def analyze_behavior(
         freq_anomaly=freq_anomaly,
         ai_score=ai_score,
         classification=classification,
-        reasons=reasons
+        reasons=reasons,
     )
 
     details = {
@@ -294,9 +325,9 @@ def analyze_behavior(
         "threat_type": threat_type,
         "is_ip_penalized": is_ip_penalized,
         "accessibility_mode": accessibility_mode,
-        "session_history_count": len(session_history) if session_history else 0
+        "session_history_count": len(session_history) if session_history else 0,
     }
-    
+
     return final_bot_score, classification, reasons, details
 
 
@@ -307,7 +338,7 @@ def classify_threat(
     freq_anomaly: float,
     ai_score: float,
     classification: str,
-    reasons: list[str] | None = None
+    reasons: list[str] | None = None,
 ) -> str:
     """
     Deterministik Tehdit Atıf Hiyerarşisi:
@@ -320,7 +351,7 @@ def classify_threat(
         return "SESSION_INVARIANCE_BOT"
 
     browser_data = telemetry.get("browser", {})
-    
+
     # 1. STEALTH_AUTOMATION (Tarayıcı Seviyesi / Stealth Botlar)
     is_stealth = (
         features.get("webdriver", False)
@@ -329,7 +360,11 @@ def classify_threat(
         or browser_data.get("is_webgl_hooked", False)
         or browser_data.get("is_canvas_hooked", False)
         or (not features.get("screen_valid", True))
-        or (not features.get("touch_supported", False) and features.get("screen_width", 0) >= 1024 and features.get("plugins_length", 1) == 0)
+        or (
+            not features.get("touch_supported", False)
+            and features.get("screen_width", 0) >= 1024
+            and features.get("plugins_length", 1) == 0
+        )
     )
     if is_stealth:
         return "STEALTH_AUTOMATION"
@@ -338,25 +373,26 @@ def classify_threat(
     # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler veya FFT sinüs osilatörü
     if features.get("mouse_points", 0) > 5 and features.get("total_distance", 0) > 30:
         is_min_jerk = (
-            (features.get("straightness", 0.0) <= 0.985
+            features.get("straightness", 0.0) <= 0.985
             and (
                 features.get("avg_jerk", 1.0) < 0.00008
                 or features.get("acceleration_var", 1.0) < 1.5e-5
                 or (features.get("click_count", 0) > 0 and features.get("terminal_decel_ratio", 0.0) > 0.70)
                 or (features.get("mouse_points", 0) >= 10 and features.get("dt_var", 1.0) < 0.01)
                 or (features.get("total_distance", 0) > 60 and features.get("submovement_count", 0) <= 1)
-            ))
-            or (features.get("spectral_purity", 0.0) > 0.65)
-        )
+            )
+        ) or (features.get("spectral_purity", 0.0) > 0.65)
         if is_min_jerk:
             return "MINIMUM_JERK_BOT"
 
     # 3. LINEAR_MACRO (Doğrusal Hareket / Sıfır Hız Varyansı / Teleport Fare)
     is_linear = (
-        (features.get("mouse_points", 0) > 5 and features.get("total_distance", 0) > 30 and (
-            features.get("straightness", 0.0) > 0.985 or features.get("velocity_var", 1.0) < 1e-5
-        ))
-        or ((features.get("click_count", 0) > 0 or features.get("key_count", 0) > 0) and features.get("mouse_points", 0) == 0)
+        features.get("mouse_points", 0) > 5
+        and features.get("total_distance", 0) > 30
+        and (features.get("straightness", 0.0) > 0.985 or features.get("velocity_var", 1.0) < 1e-5)
+    ) or (
+        (features.get("click_count", 0) > 0 or features.get("key_count", 0) > 0)
+        and features.get("mouse_points", 0) == 0
     )
     if is_linear:
         return "LINEAR_MACRO"
@@ -372,4 +408,3 @@ def classify_threat(
 
     # 6. Genel AI veya Kural Anomalisi
     return "UNKNOWN_ANOMALY"
-
