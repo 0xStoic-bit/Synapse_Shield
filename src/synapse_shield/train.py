@@ -16,92 +16,125 @@ from synapse_shield.features import MultimodalTokenizer
 logger = logging.getLogger("synapse_shield.train")
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
-WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
+BASE_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
+WEIGHTS_PATH = BASE_WEIGHTS_PATH
+DEFAULT_LOCAL_WEIGHTS_PATH = os.path.join(os.getcwd(), "synapse_weights.npz")
 
-def load_training_data(limit=1000, include_adversarial: bool = True, adversarial_count: int = 20) -> tuple[list, list]:
+def get_active_weights_path() -> str:
+    """Returns the path of the weights file to load, prioritizing custom/local over base."""
+    env_w = os.environ.get("SYNAPSE_WEIGHTS_PATH")
+    if env_w and os.path.exists(env_w):
+        return env_w
+    if os.path.exists(DEFAULT_LOCAL_WEIGHTS_PATH):
+        return DEFAULT_LOCAL_WEIGHTS_PATH
+    return BASE_WEIGHTS_PATH
+
+def load_training_data(
+    limit: int = 1000,
+    include_adversarial: bool = True,
+    adversarial_count: int = 20,
+    bootstrap: bool = False,
+    bootstrap_count: int = 30,
+) -> tuple[list, list]:
     """
     Fetches raw telemetry from logs to use as training data.
     Only uses clear, verified edge cases (bot_score >= 90 for Bots, bot_score <= 10 for verified Humans)
     to enforce confident active learning and prevent model poisoning.
     Optionally enriches the dataset with synthetic adversarial bot samples (Adversarial Training).
+    If bootstrap=True or database has zero verified human samples, automatically synthesizes
+    balanced biological human and adversarial bot telemetries to prevent class collapse.
     """
+    X_telemetry = []
+    Y_labels = []
+
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT classification, telemetry, threat_type, reasons, features 
-            FROM logs 
-            WHERE telemetry IS NOT NULL 
-              AND (bot_score >= 90 OR bot_score <= 10)
-            ORDER BY id DESC LIMIT ?
-        ''', (limit,))
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        X_telemetry = []
-        Y_labels = []
-        
-        for row in rows:
-            label_str, telemetry_json, threat_type, reasons_json, features_json = row
-            try:
-                telemetry = json.loads(telemetry_json)
-                reasons = json.loads(reasons_json) if reasons_json else []
-                
-                # Model Zehirleme Koruması (Anti-Poisoning Filter):
-                if label_str == "Human":
-                    # İnsan verisi için doğrulanmış organik hareket şartı
-                    if threat_type and threat_type != "CLEAN_HUMAN":
-                        continue
-                    # Farbling veya geçici override ile skoru düşürülmüş kayıtları havuza alma
-                    if any("farbling" in r.lower() or "capped at 34" in r.lower() for r in reasons):
-                        continue
-                    # Yeterli fare hareketi olmayanları insan zannetme
-                    moves = telemetry.get("mouse_movements", [])
-                    if not isinstance(moves, list) or len(moves) < 5:
-                        continue
-                    Y_labels.append(0.0)
-                else:
-                    # Bot verisi için
-                    if threat_type == "CLEAN_HUMAN":
-                        continue
-                    Y_labels.append(1.0)
+        if os.path.exists(DB_FILE):
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT classification, telemetry, threat_type, reasons, features 
+                FROM logs 
+                WHERE telemetry IS NOT NULL 
+                  AND (bot_score >= 90 OR bot_score <= 10)
+                ORDER BY id DESC LIMIT ?
+            ''', (limit,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            for row in rows:
+                label_str, telemetry_json, threat_type, reasons_json, features_json = row
+                try:
+                    telemetry = json.loads(telemetry_json)
+                    reasons = json.loads(reasons_json) if reasons_json else []
+                    
+                    # Model Zehirleme Koruması (Anti-Poisoning Filter):
+                    if label_str == "Human":
+                        if threat_type and threat_type != "CLEAN_HUMAN":
+                            continue
+                        if any("farbling" in r.lower() or "capped at 34" in r.lower() for r in reasons):
+                            continue
+                        moves = telemetry.get("mouse_movements", [])
+                        if not isinstance(moves, list) or len(moves) < 5:
+                            continue
+                        Y_labels.append(0.0)
+                    else:
+                        if threat_type == "CLEAN_HUMAN":
+                            continue
+                        Y_labels.append(1.0)
 
-                X_telemetry.append(telemetry)
-            except Exception:
-                continue
-                
-        # Düşmansal Eğitim (Adversarial Training): Sentetik matematiksel bot telemetrileri enjekte et
-        if include_adversarial:
-            try:
-                from synapse_shield.adversarial import generate_adversarial_telemetry_batch
-                adv_samples = generate_adversarial_telemetry_batch(count=adversarial_count)
-                for sample in adv_samples:
-                    X_telemetry.append(sample)
-                    Y_labels.append(1.0)
-            except Exception as e:
-                logger.warning(f"Adversarial batch generation skipped: {e}")
-
-        return X_telemetry, Y_labels
+                    X_telemetry.append(telemetry)
+                except Exception:
+                    continue
     except Exception as e:
-        print(f"[Error] Failed to load training data from SQLite: {e}")
-        if include_adversarial:
-            try:
-                from synapse_shield.adversarial import generate_adversarial_telemetry_batch
-                adv_samples = generate_adversarial_telemetry_batch(count=adversarial_count)
-                return adv_samples, [1.0] * len(adv_samples)
-            except Exception:
-                pass
-        return [], []
+        logger.warning(f"Could not load historical telemetry from database: {e}")
+
+    num_humans = sum(1 for y in Y_labels if y == 0.0)
+
+    # Bootstrap Modu: Sıfır insan verisi veya explicit bootstrap varsa sentetik insan telemetrisi ekle
+    if bootstrap or num_humans == 0:
+        try:
+            from synapse_shield.adversarial import generate_synthetic_human_batch
+            count_to_add = max(bootstrap_count, 20)
+            human_synth = generate_synthetic_human_batch(count=count_to_add)
+            for sample in human_synth:
+                X_telemetry.append(sample)
+                Y_labels.append(0.0)
+            logger.info(f"Bootstrapped {len(human_synth)} synthetic human training samples.")
+        except Exception as e:
+            logger.warning(f"Synthetic human bootstrap failed: {e}")
+
+    # Düşmansal Eğitim (Adversarial Training): Sentetik matematiksel bot telemetrileri enjekte et
+    if include_adversarial or bootstrap:
+        try:
+            from synapse_shield.adversarial import generate_adversarial_telemetry_batch
+            adv_count = max(adversarial_count, bootstrap_count if bootstrap else 20)
+            adv_samples = generate_adversarial_telemetry_batch(count=adv_count)
+            for sample in adv_samples:
+                X_telemetry.append(sample)
+                Y_labels.append(1.0)
+            logger.info(f"Injected {len(adv_samples)} adversarial bot training samples.")
+        except Exception as e:
+            logger.warning(f"Adversarial batch generation skipped: {e}")
+
+    return X_telemetry, Y_labels
 
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
 
-def retrain_fc2(epochs=5, learning_rate=0.01, callback=None) -> dict:
+def retrain_fc2(
+    epochs: int = 5,
+    learning_rate: float = 0.01,
+    callback=None,
+    bootstrap: bool = False,
+    output_path: str | None = None,
+    overwrite_base: bool = False,
+) -> dict:
     """
     Fine-tunes the final FC layer (fc2_w, fc2_b) using Binary Cross Entropy (BCE)
     and Stochastic Gradient Descent (SGD) completely in NumPy.
+    Saves weights to ./synapse_weights.npz (or output_path) by default to prevent package pollution.
     """
     def notify(msg: str):
         print(msg)
@@ -113,26 +146,24 @@ def retrain_fc2(epochs=5, learning_rate=0.01, callback=None) -> dict:
 
     notify("[*] Synapse Shield Active Learning Pipeline Initiated...")
     
-    if not os.path.exists(WEIGHTS_PATH):
-        err = f"❌ Error: Model weights not found at {WEIGHTS_PATH}"
-        notify(err)
-        return {"success": False, "error": err}
-
-    # Load data
-    notify("[*] Loading high-confidence telemetry logs from database...")
-    X_telemetry, Y_labels = load_training_data(limit=1000)
+    # 1. Load data
+    X_telemetry, Y_labels = load_training_data(limit=500, include_adversarial=True, bootstrap=bootstrap)
     
-    if len(X_telemetry) < 10:
-        err = "[!] Not enough high-confidence data for retraining. At least 10 samples required."
-        notify(err)
-        return {"success": False, "error": err}
+    if len(X_telemetry) < 4:
+        notify(f"[-] Not enough training data ({len(X_telemetry)} samples). Need at least 4. Aborting.")
+        return {"success": False, "error": "Not enough samples"}
         
-    notify(f"[+] Found {len(X_telemetry)} valid samples ({int(sum(Y_labels))} Bots, {len(Y_labels) - int(sum(Y_labels))} Humans).")
+    num_bots = int(sum(Y_labels))
+    num_humans = len(Y_labels) - num_bots
+    notify(f"[+] Found {len(X_telemetry)} valid samples ({num_bots} Bots, {num_humans} Humans).")
     
     tokenizer = MultimodalTokenizer(max_mouse_steps=60)
     
+    input_weights = get_active_weights_path()
+    notify(f"[*] Loading base model weights from: {input_weights}")
+    
     # Load current weights safely with context manager
-    with np.load(WEIGHTS_PATH) as data:
+    with np.load(input_weights) as data:
         conv_w = np.array(data['conv_w'])
         conv_b = np.array(data['conv_b'])
         fc1_w = np.array(data['fc1_w'])
@@ -214,10 +245,18 @@ def retrain_fc2(epochs=5, learning_rate=0.01, callback=None) -> dict:
         accuracy = float((correct / n_samples) * 100.0)
         notify(f"   Epoch {epoch+1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
         
-    notify(f"[*] Saving updated weights to {WEIGHTS_PATH}...")
-    weights_dir = os.path.dirname(os.path.abspath(WEIGHTS_PATH))
-    
-    with tempfile.NamedTemporaryFile(dir=weights_dir, delete=False, suffix=".npz") as tmp_f:
+    target_weights_path = (
+        BASE_WEIGHTS_PATH if overwrite_base
+        else output_path if output_path
+        else os.environ.get("SYNAPSE_WEIGHTS_PATH", DEFAULT_LOCAL_WEIGHTS_PATH)
+    )
+
+    notify(f"[*] Saving updated weights to {target_weights_path}...")
+    weights_dir = os.path.dirname(os.path.abspath(target_weights_path))
+    if weights_dir and not os.path.exists(weights_dir):
+        os.makedirs(weights_dir, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(dir=weights_dir or None, delete=False, suffix=".npz") as tmp_f:
         tmp_name = tmp_f.name
         np.savez_compressed(
             tmp_f,
@@ -230,13 +269,13 @@ def retrain_fc2(epochs=5, learning_rate=0.01, callback=None) -> dict:
         )
     
     try:
-        os.replace(tmp_name, WEIGHTS_PATH)
+        os.replace(tmp_name, target_weights_path)
     except OSError:
         import shutil
         import time
         time.sleep(0.05)
         try:
-            shutil.copyfile(tmp_name, WEIGHTS_PATH)
+            shutil.copyfile(tmp_name, target_weights_path)
             os.remove(tmp_name)
         except Exception as copy_err:
             if os.path.exists(tmp_name):
@@ -247,7 +286,7 @@ def retrain_fc2(epochs=5, learning_rate=0.01, callback=None) -> dict:
             notify(f"❌ Error saving weights: {copy_err}")
             return {"success": False, "error": str(copy_err)}
 
-    notify("[+] Model successfully retrained and weights updated!")
+    notify(f"[+] Model successfully retrained and weights saved to {target_weights_path}!")
     return {
         "success": True,
         "samples": len(X_telemetry),

@@ -136,6 +136,102 @@ def generate_minimum_jerk_telemetry(
     }
 
 
+def generate_synthetic_human_telemetry(
+    start: tuple[float, float] = (120.0, 140.0),
+    end: tuple[float, float] = (680.0, 520.0),
+    steps: int = 55,
+    duration_ms: float = 1500.0,
+) -> dict[str, Any]:
+    """
+    Generates realistic biological human mouse telemetry based on:
+    - Multi-bell submovement decomposition with natural velocity valleys
+    - Natural wrist/elbow biomechanical arc
+    - Inertia-damped neuromuscular pink-noise micro-tremor
+    - Asynchronous human event sampling jitter (dt ~ 14-22ms)
+    """
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    dist = math.hypot(dx, dy) or 1.0
+    nx = -dy / dist
+    ny = dx / dist
+
+    arc_height = random.uniform(50.0, 90.0) * random.choice([-1.0, 1.0])
+
+    # Distinct biological submovements (primary ballistic + intermediate + terminal corrective)
+    raw_speeds = []
+    tau_p1 = random.uniform(0.22, 0.28)
+    tau_p2 = random.uniform(0.55, 0.63)
+    tau_p3 = random.uniform(0.82, 0.88)
+
+    for i in range(steps):
+        tau = i / max(steps - 1, 1)
+        b1 = math.exp(-((tau - tau_p1) ** 2) / 0.012) * 0.55
+        b2 = math.exp(-((tau - tau_p2) ** 2) / 0.010) * 0.35
+        b3 = math.exp(-((tau - tau_p3) ** 2) / 0.008) * 0.20
+        raw_speeds.append(b1 + b2 + b3 + random.uniform(0.04, 0.08))
+
+    cum_progress = [0.0]
+    for s in raw_speeds:
+        cum_progress.append(cum_progress[-1] + s)
+    total_cum = cum_progress[-1] or 1.0
+    progress = [c / total_cum for c in cum_progress[1:]]
+
+    final_moves = []
+    curr_t = 1000.0
+    tx, ty = 0.0, 0.0
+
+    for i, p in enumerate(progress):
+        tau = i / max(steps - 1, 1)
+        arc = math.sin(tau * math.pi) * arc_height
+
+        # Low-pass inertia filtered micro-tremor
+        tx = 0.80 * tx + 0.20 * random.gauss(0, 1.8)
+        ty = 0.80 * ty + 0.20 * random.gauss(0, 1.8)
+
+        x = start[0] + dx * p + nx * arc + tx
+        y = start[1] + dy * p + ny * arc + ty
+
+        dt = random.uniform(14.0, 22.0)
+        curr_t += dt
+        final_moves.append({"x": round(x, 2), "y": round(y, 2), "t": round(curr_t, 2)})
+
+    clicks = [
+        {
+            "x": round(end[0] + random.uniform(-1.5, 1.5), 2),
+            "y": round(end[1] + random.uniform(-1.5, 1.5), 2),
+            "t": round(curr_t + random.uniform(50.0, 110.0), 2),
+        }
+    ]
+
+    return {
+        "mouse_movements": final_moves,
+        "clicks": clicks,
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 1920,
+            "screen_height": 1080,
+            "plugins_length": 5,
+            "touch_supported": False,
+        },
+    }
+
+
+def generate_synthetic_human_batch(count: int = 30) -> list[dict[str, Any]]:
+    """Generates a diverse batch of realistic synthetic human telemetries."""
+    batch = []
+    for _ in range(count):
+        sx = random.uniform(60, 280)
+        sy = random.uniform(60, 280)
+        ex = random.uniform(450, 900)
+        ey = random.uniform(400, 800)
+        steps = random.randint(48, 62)
+        dur = random.uniform(1200.0, 1800.0)
+        batch.append(generate_synthetic_human_telemetry(start=(sx, sy), end=(ex, ey), steps=steps, duration_ms=dur))
+    return batch
+
+
 def generate_adversarial_telemetry_batch(count: int = 30) -> list[dict[str, Any]]:
     """Generates a diverse batch of adversarial synthetic bot telemetries."""
     batch = []
@@ -156,3 +252,4 @@ def generate_adversarial_telemetry_batch(count: int = 30) -> list[dict[str, Any]
         batch.append(gen(start=(sx, sy), end=(ex, ey), steps=steps, duration_ms=dur))
 
     return batch
+

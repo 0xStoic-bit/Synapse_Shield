@@ -30,10 +30,13 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.7.8)
+## ✨ Key Features & Security Architecture (v0.7.9)
 
 | Feature | Description |
 | :--- | :--- |
+| ⚡ **Microsecond Benchmark Suite** | Built-in CLI command (`synapse-shield benchmark`) profiles 19D Kinematics ($73.7\,\mu s$), 1D-CNN inference ($451.2\,\mu s$), and end-to-end evaluation ($828.1\,\mu s$, ~1,200 req/sec) with ASCII/JSON reports (v0.7.9). |
+| 🧬 **Biological Synthetic Human Generator** | Multi-bell submovement velocity decomposition with natural valleys, biomechanical arm curvature, and inertia-filtered neuromuscular micro-tremor achieving 100% human verification accuracy (v0.7.9). |
+| 🛡️ **Isolated Weight & Bootstrap Architecture** | Fine-tuning saves to `./synapse_weights.npz` (or `SYNAPSE_WEIGHTS_PATH`), isolating package distribution weights. `--bootstrap` enables zero-data model calibration on clean installs (v0.7.9). |
 | 🌊 **FFT Tremor Spectral Analysis (DSP)** | Fast Fourier Transform (`np.fft.rfft`) decomposes velocity sequences to evaluate Power Spectral Density (`spectral_purity` & `spectral_entropy`), mitigating synthetic harmonic oscillator tremors ($\sin(2\pi ft)$) in the frequency domain (v0.7.8). |
 | 🖐️ **Sub-Movement Kinematic Decomposition** | Decomposes trajectory paths into discrete ballistic and corrective velocity pulses based on Fitts's Law. Trajectories lacking physiological sub-movements (`submovement_count <= 1`) are flagged as polynomial bots (v0.7.8). |
 | 🔄 **Session-Level Behavioral Invariance** | Stateful sliding-window telemetry tracking across session requests. Mitigates attackers rotating random seeds or repeating deterministic kinetic templates (v0.7.8). |

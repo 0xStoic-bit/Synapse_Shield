@@ -5,6 +5,19 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9] - 2026-09-22
+### Added & Performance Benchmarking
+- **[P0] Microsecond Latency & Throughput Benchmark Suite (`synapse_shield.benchmark`):**
+  - Integrated high-precision microsecond ($\mu s$) timing harness profiling 19D Kinematics ($73.7\,\mu s$), 1D-CNN NumPy inference ($451.2\,\mu s$), HMAC crypto verification ($961.8\,\mu s$), and end-to-end evaluation pipeline ($828.1\,\mu s$).
+  - Produces formatted ASCII/Markdown console reports with Mean, P50, P95, P99, and single-core throughput (~$1,200$ req/sec).
+  - Added CLI command: `synapse-shield benchmark [--iterations N] [--export FILE]`.
+- **[P0] Biological Human Telemetry Generator (`synapse_shield.adversarial`):**
+  - Implemented `generate_synthetic_human_telemetry()` utilizing multi-bell submovement decomposition (ballistic primary burst + 2 corrective homing pulses with velocity valleys), wrist/elbow biomechanical curvature, and inertia-filtered low-pass neuromuscular pink-noise micro-tremor (100% human classification accuracy).
+- **[P0] Isolated Weights Architecture & Active Learning Bootstrap (`synapse_shield.train`):**
+  - Added `--bootstrap` training flag to synthesize balanced human and adversarial bot telemetry batches, enabling safe active learning calibration even in empty or newly deployed databases without class collapse.
+  - Implemented non-invasive weight saving: fine-tuning writes to local `./synapse_weights.npz` (or `SYNAPSE_WEIGHTS_PATH`) by default, completely isolating package distribution weights from test and retraining pollution.
+  - Upgraded `SynapseHybridModel` weight loading hierarchy: `SYNAPSE_WEIGHTS_PATH` $\rightarrow$ `./synapse_weights.npz` $\rightarrow$ default bundled `weights.npz`.
+
 ## [0.7.8] - 2026-09-21
 ### Security & Architectural Hardening
 - **[P0] FFT Tremor Spectral Analysis (DSP):** Integrated Fast Fourier Transform (`numpy.fft.rfft`) into kinematic feature extraction. Calculates Power Spectral Density (PSD), `spectral_purity`, and normalized `spectral_entropy` to distinguish biological stochastic tremor from artificial harmonic oscillators ($\sin(2\pi ft)$).

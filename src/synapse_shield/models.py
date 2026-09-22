@@ -11,12 +11,26 @@ import numpy as np
 class SynapseHybridModel:
     def __init__(self, weights_path=None):
         if weights_path is None:
-            # Otomatik olarak paket içindeki weights.npz'yi bulur
-            weights_path = os.path.join(os.path.dirname(__file__), "weights.npz")
-            
+            # Hierarchy:
+            # 1. Explicit SYNAPSE_WEIGHTS_PATH env var
+            # 2. Local ./synapse_weights.npz in current working directory
+            # 3. Default bundled base weights.npz in package
+            env_path = os.environ.get("SYNAPSE_WEIGHTS_PATH")
+            cwd_path = os.path.join(os.getcwd(), "synapse_weights.npz")
+            default_path = os.path.join(os.path.dirname(__file__), "weights.npz")
+
+            if env_path and os.path.exists(env_path):
+                weights_path = env_path
+            elif os.path.exists(cwd_path):
+                weights_path = cwd_path
+            else:
+                weights_path = default_path
+
         if not os.path.exists(weights_path):
             raise FileNotFoundError(f"[Synapse Shield] Model weights not found at: {weights_path}")
-            
+
+        self.weights_path = weights_path
+
         # Belleğe Yükleme (Isınma / Warmup)
         # Sadece 1 kez okunur (~0.05s)
         with np.load(weights_path) as data:
