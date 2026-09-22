@@ -31,8 +31,16 @@ def main():
     # Run Tests Command
     subparsers.add_parser("test", help="Run the 7-vector Red Team bot attack simulator")
     
+    # Benchmark Latency & Throughput Command
+    bench_parser = subparsers.add_parser("benchmark", help="Profile microsecond latency and throughput across pipeline stages")
+    bench_parser.add_argument("--iterations", "-n", type=int, default=500, help="Number of benchmark iterations (default: 500)")
+    bench_parser.add_argument("--export", "-e", type=str, default=None, help="Export benchmark metrics to JSON file")
+
     # Active Learning Retrain Command
-    subparsers.add_parser("retrain", help="Fine-tune the 1D-CNN using local SQLite telemetry logs (Active Learning)")
+    retrain_parser = subparsers.add_parser("retrain", help="Fine-tune the 1D-CNN using local SQLite telemetry logs (Active Learning)")
+    retrain_parser.add_argument("--bootstrap", action="store_true", help="Generate balanced synthetic human & bot samples if database is empty")
+    retrain_parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs (default: 5)")
+    retrain_parser.add_argument("--output", type=str, default=None, help="Custom output path for retrained weights (default: ./synapse_weights.npz)")
 
     args = parser.parse_args()
 
@@ -47,12 +55,18 @@ def main():
         except ImportError:
             from live_attacker import main as run_attack_suite
         run_attack_suite()
+    elif args.command == "benchmark":
+        try:
+            from .benchmark import run_micro_benchmarks
+        except ImportError:
+            from benchmark import run_micro_benchmarks
+        run_micro_benchmarks(iterations=args.iterations, export_path=args.export)
     elif args.command == "retrain":
         try:
             from .train import retrain_fc2
         except ImportError:
             from train import retrain_fc2
-        retrain_fc2()
+        retrain_fc2(epochs=args.epochs, bootstrap=args.bootstrap, output_path=args.output)
 
 if __name__ == "__main__":
     main()

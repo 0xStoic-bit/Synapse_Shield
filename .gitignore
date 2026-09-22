@@ -35,6 +35,7 @@ ENV/
 *.sqlite3-shm
 synapse_shield.db
 synapse_dataset.db
+synapse_weights.npz
 dump.rdb
 *.json
 !package.json
@@ -53,6 +54,9 @@ extract_zip.py
 .DS_Store
 Thumbs.db
 scratch/
+
+# Stratejik & Dahili Mimari Planları
+advanced_software_architectures.md
 
 # Node & Frontend Önbellekleri
 node_modules/

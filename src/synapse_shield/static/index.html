@@ -608,8 +608,24 @@
               REAL-TIME SQLITE SECURITY FEED
             </h2>
             <div class="flex items-center gap-2">
+              <a
+                href="/api/logs/export?format=txt"
+                download
+                class="px-2.5 py-1 text-[10px] font-mono bg-[#1c2433] hover:bg-[#253248] text-[#80d5ff] border border-[#80d5ff]/40 rounded-md transition-all duration-150 flex items-center gap-1 shadow-[0_0_8px_rgba(128,213,255,0.15)] hover:shadow-[0_0_12px_rgba(128,213,255,0.3)] cursor-pointer"
+                title="Download audit logs as formatted plain text"
+              >
+                <span>📄</span> Export .TXT
+              </a>
+              <a
+                href="/api/logs/export?format=md"
+                download
+                class="px-2.5 py-1 text-[10px] font-mono bg-[#1c2433] hover:bg-[#253248] text-[#4edea3] border border-[#4edea3]/40 rounded-md transition-all duration-150 flex items-center gap-1 shadow-[0_0_8px_rgba(78,222,163,0.15)] hover:shadow-[0_0_12px_rgba(78,222,163,0.3)] cursor-pointer"
+                title="Download security audit report as Markdown (.md)"
+              >
+                <span>📝</span> Export .MD
+              </a>
               <span
-                class="status-orb-live w-2 h-2 rounded-full bg-[#4edea3]"
+                class="status-orb-live w-2 h-2 rounded-full bg-[#4edea3] ml-1"
               ></span>
               <span class="font-mono text-[11px] text-[#4edea3]"
                 >Live Polling</span
@@ -642,11 +658,21 @@
       </div>
       <!-- Retro Cyber Terminal (Live TTY) -->
       <div class="mt-6 glass-panel rounded-xl overflow-hidden flex flex-col border border-[#4edea3]/40 shadow-[0_0_15px_rgba(78,222,163,0.15)] glow-green">
-        <div class="p-2 border-b border-[#4edea3]/40 bg-[#06090F] flex items-center gap-2">
-          <span class="w-3 h-3 rounded-full bg-[#ffb4ab]"></span>
-          <span class="w-3 h-3 rounded-full bg-[#f4d35e]"></span>
-          <span class="w-3 h-3 rounded-full bg-[#4edea3]"></span>
-          <span class="font-mono text-[10px] text-[#4edea3] ml-2 tracking-widest font-bold">SYNAPSE_SHIELD CYBER-CONSOLE // LIVE TELEMETRY</span>
+        <div class="p-2 border-b border-[#4edea3]/40 bg-[#06090F] flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-[#ffb4ab]"></span>
+            <span class="w-3 h-3 rounded-full bg-[#f4d35e]"></span>
+            <span class="w-3 h-3 rounded-full bg-[#4edea3]"></span>
+            <span class="font-mono text-[10px] text-[#4edea3] ml-2 tracking-widest font-bold">SYNAPSE_SHIELD CYBER-CONSOLE // LIVE TELEMETRY</span>
+          </div>
+          <button
+            type="button"
+            onclick="clearTerminalOutput()"
+            class="px-2 py-0.5 text-[10px] font-mono text-[#4edea3]/70 hover:text-[#4edea3] border border-[#4edea3]/30 hover:border-[#4edea3] rounded transition cursor-pointer"
+            title="Clear terminal screen"
+          >
+            [CLEAR]
+          </button>
         </div>
         <div class="p-4 bg-black min-h-[250px] max-h-[350px] overflow-y-auto font-mono text-xs text-[#4edea3] flex flex-col gap-1" id="retro-terminal-output">
           <div>[SYSTEM] Initializing secure WebSocket connection...</div>
@@ -732,11 +758,24 @@
         
         terminalWs = new WebSocket(wsUrl);
         
+        window.clearTerminalOutput = () => {
+          output.innerHTML = "";
+          appendLine("[SYSTEM] Cyber-console output cleared.");
+          if (terminalWs && terminalWs.readyState === WebSocket.OPEN) {
+            terminalWs.send("clear");
+          }
+        };
+        
         terminalWs.onopen = () => {
           appendLine("[SYSTEM] WebSocket connected to " + wsUrl);
         };
         
         terminalWs.onmessage = (event) => {
+          if (event.data === "[CLEAR]") {
+            output.innerHTML = "";
+            appendLine("[SYSTEM] Cyber-console output cleared.");
+            return;
+          }
           appendLine(event.data);
         };
         
@@ -752,10 +791,17 @@
         input.addEventListener("keydown", (e) => {
           if (e.key === "Enter") {
             const cmd = input.value.trim();
-            if (cmd && terminalWs.readyState === WebSocket.OPEN) {
-              appendLine(`> ${cmd}`);
-              terminalWs.send(cmd);
-              input.value = "";
+            if (cmd) {
+              if (cmd.toLowerCase() === "clear" || cmd.toLowerCase() === "cls") {
+                clearTerminalOutput();
+                input.value = "";
+                return;
+              }
+              if (terminalWs.readyState === WebSocket.OPEN) {
+                appendLine(`> ${cmd}`);
+                terminalWs.send(cmd);
+                input.value = "";
+              }
             }
           }
         });
