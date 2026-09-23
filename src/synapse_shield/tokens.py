@@ -78,12 +78,26 @@ def _ensure_table(conn):
     conn.commit()
 
 
+_last_cleanup_ts = 0.0
+
+
 def _cleanup_expired_nonces():
+    global _last_cleanup_ts
+    from synapse_shield.storage import HAS_RUST_CORE
+
+    if HAS_RUST_CORE:
+        return  # Rust Two-Bucket handles eviction in RAM automatically in O(1)
+
+    now = time.time()
+    if now - _last_cleanup_ts < 30.0:
+        return
+    _last_cleanup_ts = now
+
     try:
         conn = sqlite3.connect(DB_FILE, timeout=5.0)
         _ensure_table(conn)
-        now = int(time.time())
-        conn.execute("DELETE FROM used_nonces WHERE expires_at < ?", (now,))
+        now_int = int(now)
+        conn.execute("DELETE FROM used_nonces WHERE expires_at < ?", (now_int,))
         conn.commit()
         conn.close()
     except Exception as e:

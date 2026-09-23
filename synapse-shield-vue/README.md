@@ -95,7 +95,7 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.7.9)
+## Features (v0.8.0)
 
 - **Hardened Security Architecture:** Full alignment with Synapse Shield v0.7.7 core security patches (P0-P2).
 - **Transparent Token Expiration Refresh:** Seamlessly renegotiates expired tokens (`HTTP 400 EXPIRED`) without triggering IP quarantine or streak bans.

@@ -85,8 +85,8 @@ class SynapseHybridModel:
         x = np.dot(x, self.fc2_w) + self.fc2_b
 
         # 7. Sigmoid
-        # Sayısal stabilite için clip
-        x = np.clip(x, -500, 500)
+        # Sayısal stabilite için float32 uyumlu clip (-50, 50)
+        x = np.clip(x, -50.0, 50.0)
         prob = 1.0 / (1.0 + np.exp(-x[0]))
 
         return float(prob)

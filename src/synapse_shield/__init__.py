@@ -7,7 +7,7 @@ from .features import extract_features
 from .middleware import SynapseShieldMiddleware, shield_protect
 from .tokens import generate_challenge, verify_and_consume_token, verify_and_consume_pow
 
-__version__ = "0.7.9"
+__version__ = "0.8.0"
 __all__ = [
     "SynapseShieldMiddleware",
     "analyze_behavior",
