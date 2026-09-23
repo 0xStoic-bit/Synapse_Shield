@@ -8,12 +8,17 @@ from typing import Any
 import numpy as np
 
 try:
-    import synapse_core_rs
+    from . import synapse_core_rs
 
     HAS_RUST_CORE = bool(synapse_core_rs.is_rust_core_active())
 except (ImportError, AttributeError):
-    synapse_core_rs = None
-    HAS_RUST_CORE = False
+    try:
+        import synapse_core_rs
+
+        HAS_RUST_CORE = bool(synapse_core_rs.is_rust_core_active())
+    except (ImportError, AttributeError):
+        synapse_core_rs = None
+        HAS_RUST_CORE = False
 
 
 def is_rust_accelerated() -> bool:

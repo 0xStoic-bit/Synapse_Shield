@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "synapse-shield"
-version = "0.8.0"
+version = "0.8.2"
 authors = [
   { name="Mustafa Güngör", email="mustafagungor181881@gmail.com" },
 ]
@@ -38,16 +38,18 @@ dependencies = [
 frameworks = ["django>=3.2", "flask>=2.0"]
 metrics = ["prometheus-client>=0.19.0"]
 redis = ["redis>=5.0.0"]
-native = ["synapse-core-rs"]
 
 [project.scripts]
 synapse-shield = "synapse_shield.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-"synapse_shield" = ["static/*", "weights.npz"]
+[tool.maturin]
+manifest-path = "crates/synapse_core_rs/Cargo.toml"
+python-source = "src"
+module-name = "synapse_shield.synapse_core_rs"
+include = [
+    "src/synapse_shield/static/*",
+    "src/synapse_shield/weights.npz"
+]
 
 [project.urls]
 Homepage = "https://github.com/0xStoic-bit/Synapse_Shield"
