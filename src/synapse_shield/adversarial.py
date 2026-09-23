@@ -53,6 +53,43 @@ def generate_bezier_telemetry(
     }
 
 
+def generate_linear_telemetry(
+    start: tuple[float, float] = (100.0, 100.0),
+    end: tuple[float, float] = (500.0, 400.0),
+    steps: int = 50,
+    duration_ms: float = 1200.0,
+) -> dict[str, Any]:
+    """Generates a primitive mechanical bot trajectory: straight line, zero jerk, straightness=1.0."""
+    dx = (end[0] - start[0]) / max(steps - 1, 1)
+    dy = (end[1] - start[1]) / max(steps - 1, 1)
+    dt = duration_ms / max(steps, 1)
+    base_t = 1000.0
+
+    movements = []
+    for i in range(steps):
+        movements.append(
+            {
+                "x": round(start[0] + i * dx, 2),
+                "y": round(start[1] + i * dy, 2),
+                "t": round(base_t + i * dt, 2),
+            }
+        )
+
+    return {
+        "mouse_movements": movements,
+        "clicks": [{"x": end[0], "y": end[1], "t": round(base_t + duration_ms + 20.0, 2)}],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 1920,
+            "screen_height": 1080,
+            "plugins_length": 3,
+            "touch_supported": False,
+        },
+    }
+
+
 def generate_sine_oscillator_telemetry(
     start: tuple[float, float] = (150.0, 200.0),
     end: tuple[float, float] = (600.0, 500.0),

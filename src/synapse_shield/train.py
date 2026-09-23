@@ -129,7 +129,7 @@ def load_training_data(
 
 
 def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -50.0, 50.0)))
 
 
 def retrain_fc2(

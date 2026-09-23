@@ -8,6 +8,11 @@ build/
 *.whl
 *.tar.gz
 
+# Rust & Cargo Derleme Çıktıları
+target/
+**/target/
+Cargo.lock
+
 # Test & Coverage Önbellekleri
 .pytest_cache/
 .coverage

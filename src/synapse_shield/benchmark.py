@@ -10,6 +10,7 @@ Profiles microsecond-level execution times for:
 import argparse
 import json
 import platform
+import secrets
 import time
 from typing import Any
 
@@ -18,7 +19,7 @@ import numpy as np
 from synapse_shield import __version__
 from synapse_shield.adversarial import generate_synthetic_human_telemetry
 from synapse_shield.engine import analyze_behavior
-from synapse_shield.features import MultimodalTokenizer
+from synapse_shield.features import MultimodalTokenizer, extract_features, is_rust_accelerated
 from synapse_shield.models import SynapseHybridModel
 from synapse_shield.tokens import generate_challenge, verify_and_consume_token
 
@@ -73,9 +74,13 @@ def run_micro_benchmarks(iterations: int = 500, export_path: str | None = None) 
 
     model = SynapseHybridModel()
 
-    # Stage 1: Kinematics Feature Extraction
-    def bench_features():
-        tokenizer.fuse(sample_telemetry)
+    # Stage 1a: Native Rust Kinematic Feature Extraction
+    def bench_features_rust():
+        extract_features(sample_telemetry, force_python=False)
+
+    # Stage 1b: Pure Python / NumPy Fallback Feature Extraction
+    def bench_features_python():
+        extract_features(sample_telemetry, force_python=True)
 
     # Stage 2: 1D-CNN Pure NumPy Inference
     def bench_inference():
@@ -86,13 +91,22 @@ def run_micro_benchmarks(iterations: int = 500, export_path: str | None = None) 
         chal = generate_challenge(expires_in_sec=60)
         verify_and_consume_token(chal["challenge"])
 
+    # Stage 3b: In-Memory Two-Bucket Nonce Verification
+    from synapse_shield.storage import get_storage
+    storage = get_storage()
+
+    def bench_two_bucket():
+        storage.consume_nonce("bench_" + secrets.token_hex(12))
+
     # Stage 4: End-to-End Decision Pipeline
     def bench_e2e():
         analyze_behavior(sample_telemetry)
 
     stages = [
-        ("19D Kinematic Feature Extraction", bench_features),
+        ("Native Rust 19D Kinematics", bench_features_rust),
+        ("Python NumPy Fallback Kinematics", bench_features_python),
         ("1D-CNN Pure NumPy Inference", bench_inference),
+        ("Rust Two-Bucket Nonce Verification", bench_two_bucket),
         ("Crypto Token & Atomic Nonce", bench_crypto),
         ("Full End-to-End Pipeline", bench_e2e),
     ]
@@ -101,6 +115,11 @@ def run_micro_benchmarks(iterations: int = 500, export_path: str | None = None) 
     for name, fn in stages:
         raw = measure_latencies(fn, iterations=iterations, warmup=max(20, iterations // 10))
         results[name] = compute_statistics(raw)
+
+    # Backwards compatibility alias
+    results["19D Kinematic Feature Extraction"] = results.get(
+        "Native Rust 19D Kinematics", results.get("Python NumPy Fallback Kinematics")
+    )
 
     system_info = {
         "synapse_version": __version__,
@@ -130,16 +149,17 @@ def print_benchmark_report(report: dict[str, Any]) -> None:
     info = report["system_info"]
     benchmarks = report["benchmarks"]
 
-    width = 84
+    width = 92
     print("=" * width)
     print(f"  SYNAPSE SHIELD // DETERMINISTIC MICROSECOND BENCHMARK [v{info['synapse_version']}]")
     print("=" * width)
     print(f"  Host Platform : {info['platform']} ({info['processor']})")
-    print(f"  Runtime Env   : Python {info['python_version']} | NumPy {info['numpy_version']}")
+    core_status = "Native Rust Core (synapse_core_rs) [ACTIVE]" if is_rust_accelerated() else "Pure Python/NumPy (Fallback)"
+    print(f"  Runtime Env   : Python {info['python_version']} | NumPy {info['numpy_version']} | {core_status}")
     print(f"  Sample Size   : {info['iterations']} iterations per pipeline stage")
     print("-" * width)
     print(
-        f"  {'STAGE / PIPELINE MODULE':<34} | {'MEAN (us)':<10} | {'P50 (us)':<10} | {'P95 (us)':<10} | {'P99 (us)':<10} | {'THROUGHPUT':<12}"
+        f"  {'STAGE / PIPELINE MODULE':<35} | {'MEAN (us)':<10} | {'P50 (us)':<10} | {'P95 (us)':<10} | {'THROUGHPUT':<12}"
     )
     print("-" * width)
 
@@ -147,10 +167,9 @@ def print_benchmark_report(report: dict[str, Any]) -> None:
         mean_str = f"{stats['mean_us']:.1f} us"
         p50_str = f"{stats['p50_us']:.1f} us"
         p95_str = f"{stats['p95_us']:.1f} us"
-        p99_str = f"{stats['p99_us']:.1f} us"
         thru_str = f"{stats['throughput_ops_sec']:,.0f} ops/s"
 
-        print(f"  {stage_name:<34} | {mean_str:<10} | {p50_str:<10} | {p95_str:<10} | {p99_str:<10} | {thru_str:<12}")
+        print(f"  {stage_name:<35} | {mean_str:<10} | {p50_str:<10} | {p95_str:<10} | {thru_str:<12}")
 
     print("=" * width)
     e2e = benchmarks.get("Full End-to-End Pipeline", {})

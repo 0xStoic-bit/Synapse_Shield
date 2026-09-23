@@ -1,5 +1,5 @@
 """
-Synapse Shield - Kinematic Feature Extractor v0.4.1 (Anti-Bezier Hardened)
+Synapse Shield - Kinematic Feature Extractor v0.8.0 (Native Rust Core Accelerated)
 """
 
 import math
@@ -7,8 +7,28 @@ from typing import Any
 
 import numpy as np
 
+try:
+    import synapse_core_rs
 
-def extract_features(telemetry: dict[str, Any]) -> dict[str, Any]:
+    HAS_RUST_CORE = bool(synapse_core_rs.is_rust_core_active())
+except (ImportError, AttributeError):
+    synapse_core_rs = None
+    HAS_RUST_CORE = False
+
+
+def is_rust_accelerated() -> bool:
+    """Returns True if the native Rust core extension is loaded and active."""
+    return HAS_RUST_CORE
+
+
+def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> dict[str, Any]:
+    # 0. High-Performance Native Rust Core (v0.8.0)
+    if HAS_RUST_CORE and not force_python and isinstance(telemetry, dict) and synapse_core_rs is not None:
+        try:
+            return synapse_core_rs.extract_features_rs(telemetry)
+        except Exception:
+            pass  # Fail gracefully to pure Python/NumPy implementation
+
     features = {
         "mouse_points": 0,
         "total_distance": 0.0,
