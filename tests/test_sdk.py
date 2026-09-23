@@ -19,7 +19,7 @@ def test_sdk_static_serving():
     assert response.status_code == 200
     assert "application/javascript" in response.headers.get("content-type", "")
     content = response.text
-    assert "Synapse Shield SDK v0.8.0" in content
+    assert "Synapse Shield SDK v0.8.1" in content
     assert "safeBtoa" in content
     assert "solvePoW" in content
     assert "touchstart" in content

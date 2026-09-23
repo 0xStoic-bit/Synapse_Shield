@@ -7,6 +7,9 @@ Usage:
 import sys
 import re
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 if len(sys.argv) < 2:
     print("Kullanım: python bump_version.py <yeni_surum> (Örn: python bump_version.py 0.6.1)")
     sys.exit(1)

@@ -12,6 +12,9 @@ build/
 target/
 **/target/
 Cargo.lock
+*.pdb
+*.pyd
+*.so
 
 # Test & Coverage Önbellekleri
 .pytest_cache/

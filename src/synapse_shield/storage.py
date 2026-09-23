@@ -23,12 +23,17 @@ import time
 from typing import Optional
 
 try:
-    import synapse_core_rs
+    from . import synapse_core_rs
 
     HAS_RUST_CORE = bool(synapse_core_rs.is_rust_core_active())
 except (ImportError, AttributeError):
-    synapse_core_rs = None
-    HAS_RUST_CORE = False
+    try:
+        import synapse_core_rs
+
+        HAS_RUST_CORE = bool(synapse_core_rs.is_rust_core_active())
+    except (ImportError, AttributeError):
+        synapse_core_rs = None
+        HAS_RUST_CORE = False
 
 logger = logging.getLogger("synapse_shield.storage")
 

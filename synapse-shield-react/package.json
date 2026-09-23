@@ -1,6 +1,6 @@
 {
   "name": "synapse-shield-react",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "React and Next.js integration for Synapse Shield Behavioral Biometrics",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

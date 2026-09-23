@@ -7,7 +7,15 @@ from .features import extract_features
 from .middleware import SynapseShieldMiddleware, shield_protect
 from .tokens import generate_challenge, verify_and_consume_token, verify_and_consume_pow
 
-__version__ = "0.8.0"
+try:
+    from . import synapse_core_rs
+except ImportError:
+    try:
+        import synapse_core_rs
+    except ImportError:
+        synapse_core_rs = None
+
+__version__ = "0.8.2"
 __all__ = [
     "SynapseShieldMiddleware",
     "analyze_behavior",
@@ -17,4 +25,5 @@ __all__ = [
     "shield_protect",
     "verify_and_consume_token",
     "verify_and_consume_pow",
+    "synapse_core_rs",
 ]
