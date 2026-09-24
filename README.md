@@ -30,7 +30,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.8.1)
+## ✨ Key Features & Security Architecture (v0.8.2)
 
 | Feature | Description |
 | :--- | :--- |
