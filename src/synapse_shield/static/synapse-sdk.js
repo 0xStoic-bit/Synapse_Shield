@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.8.1 - Cryptographic Behavioral Telemetry Collector
+ * Synapse Shield SDK v0.9.0 - Cryptographic Behavioral Telemetry Collector
  * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine
  */
 
@@ -80,7 +80,15 @@
         if (!e.touches || e.touches.length === 0) return;
         const touch = e.touches[0];
         const now = Date.now();
-        this.mouseMovements.push({ x: touch.clientX, y: touch.clientY, t: now });
+        const r = touch.radiusX || touch.webkitRadiusX || 0;
+        const f = touch.force || 0;
+        this.mouseMovements.push({
+          x: touch.clientX,
+          y: touch.clientY,
+          t: now,
+          r: Math.round(r * 10) / 10,
+          f: Math.round(f * 100) / 100,
+        });
         this.lastMoveTime = now;
         if (this.mouseMovements.length > 500) this.mouseMovements.shift();
       }, { passive: true });
@@ -90,7 +98,15 @@
         const now = Date.now();
         if (now - this.lastMoveTime >= this.moveThrottleMs) {
           const touch = e.touches[0];
-          this.mouseMovements.push({ x: touch.clientX, y: touch.clientY, t: now });
+          const r = touch.radiusX || touch.webkitRadiusX || 0;
+          const f = touch.force || 0;
+          this.mouseMovements.push({
+            x: touch.clientX,
+            y: touch.clientY,
+            t: now,
+            r: Math.round(r * 10) / 10,
+            f: Math.round(f * 100) / 100,
+          });
           this.lastMoveTime = now;
           if (this.mouseMovements.length > 500) this.mouseMovements.shift();
         }
@@ -99,7 +115,13 @@
       window.addEventListener("touchend", (e) => {
         if (e.changedTouches && e.changedTouches.length > 0) {
           const touch = e.changedTouches[0];
-          this.clicks.push({ x: touch.clientX, y: touch.clientY, t: Date.now() });
+          const r = touch.radiusX || touch.webkitRadiusX || 0;
+          this.clicks.push({
+            x: touch.clientX,
+            y: touch.clientY,
+            t: Date.now(),
+            r: Math.round(r * 10) / 10,
+          });
           if (this.clicks.length > 50) this.clicks.shift();
         }
       }, { passive: true });
@@ -170,6 +192,7 @@
           screen_width: window.innerWidth || (window.screen ? window.screen.width : 0),
           screen_height: window.innerHeight || (window.screen ? window.screen.height : 0),
           touch_supported: ("ontouchstart" in window) || (navigator.maxTouchPoints > 0),
+          max_touch_points: navigator.maxTouchPoints || 0,
           plugins_length: navigator.plugins ? navigator.plugins.length : 0,
           languages: navigator.languages ? navigator.languages.join(",") : (navigator.language || ""),
           is_plugin_array_fake: (function () {

@@ -55,6 +55,11 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         "terminal_decel_ratio": 1.0,
         "plugins_length": 1,
         "touch_supported": False,
+        "max_touch_points": 0,
+        "avg_touch_radius": 0.0,
+        "touch_radius_var": 0.0,
+        "avg_touch_force": 0.0,
+        "touch_event_count": 0,
         "screen_width": 1024.0,
         "spectral_purity": 0.0,
         "spectral_entropy": 1.0,
@@ -78,6 +83,10 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
             features["screen_valid"] = False
 
         features["touch_supported"] = bool(browser.get("touch_supported", False))
+        try:
+            features["max_touch_points"] = int(browser.get("max_touch_points", 0))
+        except (ValueError, TypeError):
+            features["max_touch_points"] = 0
         try:
             features["plugins_length"] = int(browser.get("plugins_length", 1))
         except Exception:
@@ -125,6 +134,8 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     x = float(m["x"])
                     y = float(m["y"])
                     t = float(m["t"])
+                    r = float(m.get("r", 0.0)) if "r" in m else 0.0
+                    f = float(m.get("f", 0.0)) if "f" in m else 0.0
                     if not (
                         math.isnan(x)
                         or math.isnan(y)
@@ -133,11 +144,28 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                         or math.isinf(y)
                         or math.isinf(t)
                     ):
-                        valid_moves.append({"x": x, "y": y, "t": t})
+                        valid_moves.append({
+                            "x": x,
+                            "y": y,
+                            "t": t,
+                            "r": max(0.0, r) if not math.isnan(r) and not math.isinf(r) else 0.0,
+                            "f": max(0.0, f) if not math.isnan(f) and not math.isinf(f) else 0.0,
+                        })
                 except (ValueError, TypeError):
                     continue
 
         features["mouse_points"] = len(valid_moves)
+
+        # 4.1 Dokunmatik & Kapasitif Biyometri (Touch Biometrics)
+        radii = [m["r"] for m in valid_moves if m.get("r", 0.0) > 0.0]
+        forces = [m["f"] for m in valid_moves if m.get("f", 0.0) > 0.0]
+        features["touch_event_count"] = len(radii)
+        if radii:
+            avg_r = sum(radii) / len(radii)
+            features["avg_touch_radius"] = avg_r
+            features["touch_radius_var"] = sum((r_val - avg_r) ** 2 for r_val in radii) / len(radii)
+        if forces:
+            features["avg_touch_force"] = sum(forces) / len(forces)
 
         if len(valid_moves) >= 3:
             # En fazla 300 nokta işleyerek CPU darboğazını engelle

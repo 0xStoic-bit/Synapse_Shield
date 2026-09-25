@@ -24,6 +24,18 @@ with open("pyproject.toml", "w", encoding="utf-8") as f:
     f.write(content)
 print(f"✔ pyproject.toml -> {new_version}")
 
+# 1.1 crates/synapse_core_rs/Cargo.toml güncelle
+cargo_path = "crates/synapse_core_rs/Cargo.toml"
+try:
+    with open(cargo_path, "r", encoding="utf-8") as f:
+        cargo_content = f.read()
+    cargo_content = re.sub(r'version = "[^"]+"', f'version = "{new_version}"', cargo_content, count=1)
+    with open(cargo_path, "w", encoding="utf-8") as f:
+        f.write(cargo_content)
+    print(f"✔ {cargo_path} -> {new_version}")
+except FileNotFoundError:
+    pass
+
 # 2. __init__.py güncelle
 init_path = "src/synapse_shield/__init__.py"
 try:
