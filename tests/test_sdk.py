@@ -19,7 +19,7 @@ def test_sdk_static_serving():
     assert response.status_code == 200
     assert "application/javascript" in response.headers.get("content-type", "")
     content = response.text
-    assert "Synapse Shield SDK v0.8.1" in content
+    assert "Synapse Shield SDK v0.9.0" in content
     assert "safeBtoa" in content
     assert "solvePoW" in content
     assert "touchstart" in content
@@ -260,3 +260,59 @@ def test_dynamic_pow_difficulty_logic():
     # 5 zeros = 2 zero bytes + upper nibble 0 (0x00, 0x00, 0x0A)
     assert check_leading_zero_hex(bytes([0x00, 0x00, 0x0A, 0x34]), 5) is True
     assert check_leading_zero_hex(bytes([0x00, 0x00, 0xFA, 0x34]), 5) is False
+
+
+@patch.object(engine._ai_model, "predict", return_value=0.05)
+def test_capacitive_touch_radius_and_compliance(mock_predict):
+    """Verify that human touch events with physical contact radius and variance receive compliance verification."""
+    telemetry = {
+        "mouse_movements": [
+            {"x": 120, "y": 250, "t": 100, "r": 12.0, "f": 0.75},
+            {"x": 122, "y": 254, "t": 120, "r": 13.5, "f": 0.82},
+            {"x": 125, "y": 260, "t": 140, "r": 11.2, "f": 0.70},
+        ],
+        "clicks": [{"x": 125, "y": 260, "t": 150, "r": 12.5}],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 390,
+            "screen_height": 844,
+            "touch_supported": True,
+            "max_touch_points": 5,
+            "plugins_length": 0,
+            "languages": "en-US,en",
+        },
+    }
+
+    score, classification, reasons, details = analyze_behavior(telemetry)
+    assert classification == "Human"
+    assert any("Capacitive human touch contact verified" in r for r in reasons)
+    assert details["features"]["avg_touch_radius"] > 10.0
+    assert details["features"]["touch_radius_var"] > 0.5
+
+
+def test_synthetic_mobile_emulation_detection():
+    """Verify that headless/automated browsers claiming mobile viewport with maxTouchPoints=0 are flagged."""
+    telemetry = {
+        "mouse_movements": [
+            {"x": 100, "y": 200, "t": 1000},
+            {"x": 150, "y": 200, "t": 1100},
+        ],
+        "clicks": [{"x": 150, "y": 200, "t": 1110}],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 375,
+            "screen_height": 667,
+            "touch_supported": True,
+            "max_touch_points": 0,  # Emulated touch with 0 hardware digitizer points
+            "plugins_length": 0,
+            "languages": "en-US,en",
+        },
+    }
+
+    score, classification, reasons, details = analyze_behavior(telemetry)
+    assert any("Synthetic mobile emulation" in r for r in reasons)
+    assert score >= 60.0

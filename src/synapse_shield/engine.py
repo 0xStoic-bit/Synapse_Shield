@@ -117,6 +117,27 @@ def analyze_behavior(
         total_risk += 50.0
         reasons.append("Interactive events occurred without mouse movement telemetry.")
 
+    # 3.5 Mobil & Dokunmatik Biyometrik Doğrulama (Capacitive Touch Kinematics)
+    if is_touch:
+        screen_w = features.get("screen_width", 1024)
+        features.get("max_touch_points", 0)
+        touch_count = features.get("touch_event_count", 0)
+        avg_radius = features.get("avg_touch_radius", 0.0)
+        radius_var = features.get("touch_radius_var", 0.0)
+
+        # A. Sentetik Mobil Emülasyon Tespiti (Küçük ekran + touch_supported var ama maxTouchPoints açıkça 0)
+        if "max_touch_points" in browser_data and browser_data["max_touch_points"] == 0 and screen_w < 768:
+            total_risk += 60.0
+            reasons.append("Synthetic mobile emulation: touch_supported is true on mobile viewport but maxTouchPoints is 0.")
+
+        # B. Doğal Biyolojik Parmak Uyumu (Fleshy Finger Compliance & Area Bonus)
+        # Fiziksel kapasitif ekranda insan parmağı temas yüzeyinde mikro deformasyon üretir
+        if touch_count >= 2 and avg_radius >= 3.0:
+            total_risk = max(0.0, total_risk - 15.0)
+            reasons.append(
+                f"Capacitive human touch contact verified (avg_radius: {avg_radius:.1f}px, compliance_var: {radius_var:.3f})."
+            )
+
     # 4. Kinematik & Bézier Eğrisi Analizi
     if features["mouse_points"] > 5:
         # Erişilebilirlik modunda matematiksel katılık azaltılır (örn. Trackball kullanıcıları için)
@@ -212,12 +233,18 @@ def analyze_behavior(
     # 6. Poisson Frekans Analizi & Akıllı Biyometrik Füzyon
     freq_anomaly = poisson_anomaly_score(recent_request_count, lambda_val=2.0)
     if freq_anomaly >= 0.95:
-        is_human_telemetry = (
-            features["mouse_points"] > 5
-            and features["straightness"] < 0.96
-            and features["avg_jerk"] > 0.00010
-            and features["acceleration_var"] > 2e-5
-        )
+        if is_touch:
+            is_human_telemetry = (
+                (features.get("mouse_points", 0) > 0 or features.get("click_count", 0) > 0)
+                and (features.get("avg_touch_radius", 0.0) > 0.0 or features.get("touch_supported", False))
+            )
+        else:
+            is_human_telemetry = (
+                features["mouse_points"] > 5
+                and features["straightness"] < 0.96
+                and features["avg_jerk"] > 0.00010
+                and features["acceleration_var"] > 2e-5
+            )
         if is_human_telemetry:
             total_risk += 25.0 * freq_anomaly
             reasons.append(
@@ -371,7 +398,11 @@ def classify_threat(
 
     # 2. MINIMUM_JERK_BOT (Sentetik Biyolojik Eğri / Flash & Hogan / Bézier İvme / Fitts İhlali / Spektral Sinüs)
     # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler veya FFT sinüs osilatörü
-    if features.get("mouse_points", 0) > 5 and features.get("total_distance", 0) > 30:
+    if (
+        features.get("mouse_points", 0) > 5
+        and features.get("total_distance", 0) > 30
+        and not features.get("touch_supported", False)
+    ):
         is_min_jerk = (
             features.get("straightness", 0.0) <= 0.985
             and (
@@ -389,10 +420,12 @@ def classify_threat(
     is_linear = (
         features.get("mouse_points", 0) > 5
         and features.get("total_distance", 0) > 30
+        and not features.get("touch_supported", False)
         and (features.get("straightness", 0.0) > 0.985 or features.get("velocity_var", 1.0) < 1e-5)
     ) or (
         (features.get("click_count", 0) > 0 or features.get("key_count", 0) > 0)
         and features.get("mouse_points", 0) == 0
+        and not features.get("touch_supported", False)
     )
     if is_linear:
         return "LINEAR_MACRO"

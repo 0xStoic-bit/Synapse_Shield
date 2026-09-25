@@ -5,6 +5,8 @@ pub struct MousePoint {
     pub x: f64,
     pub y: f64,
     pub t: f64,
+    pub r: f64,
+    pub f: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +26,7 @@ pub struct RawTelemetry {
     pub screen_valid: bool,
     pub plugins_length: i64,
     pub touch_supported: bool,
+    pub max_touch_points: i64,
 }
 
 impl Default for RawTelemetry {
@@ -39,6 +42,7 @@ impl Default for RawTelemetry {
             screen_valid: true,
             plugins_length: 1,
             touch_supported: false,
+            max_touch_points: 0,
         }
     }
 }
@@ -69,6 +73,11 @@ pub struct ExtractedFeatures {
     pub spectral_purity: f64,
     pub spectral_entropy: f64,
     pub submovement_count: usize,
+    pub max_touch_points: i64,
+    pub avg_touch_radius: f64,
+    pub touch_radius_var: f64,
+    pub avg_touch_force: f64,
+    pub touch_event_count: usize,
 }
 
 impl Default for ExtractedFeatures {
@@ -98,6 +107,11 @@ impl Default for ExtractedFeatures {
             spectral_purity: 0.0,
             spectral_entropy: 1.0,
             submovement_count: 0,
+            max_touch_points: 0,
+            avg_touch_radius: 0.0,
+            touch_radius_var: 0.0,
+            avg_touch_force: 0.0,
+            touch_event_count: 0,
         }
     }
 }
@@ -111,6 +125,31 @@ pub fn compute_kinematics(raw: &RawTelemetry) -> ExtractedFeatures {
     feat.screen_valid = raw.screen_valid;
     feat.plugins_length = raw.plugins_length;
     feat.touch_supported = raw.touch_supported;
+    feat.max_touch_points = raw.max_touch_points;
+
+    // 1.5 Touch & Capacitive Biometrics
+    let mut touch_radii = Vec::new();
+    let mut touch_forces = Vec::new();
+    for m in &raw.mouse_movements {
+        if m.r > 0.0 {
+            touch_radii.push(m.r);
+        }
+        if m.f > 0.0 {
+            touch_forces.push(m.f);
+        }
+    }
+    feat.touch_event_count = touch_radii.len();
+    if !touch_radii.is_empty() {
+        let count = touch_radii.len() as f64;
+        let avg_r: f64 = touch_radii.iter().sum::<f64>() / count;
+        let var_r: f64 = touch_radii.iter().map(|&r| (r - avg_r).powi(2)).sum::<f64>() / count;
+        feat.avg_touch_radius = avg_r;
+        feat.touch_radius_var = var_r;
+    }
+    if !touch_forces.is_empty() {
+        let count = touch_forces.len() as f64;
+        feat.avg_touch_force = touch_forces.iter().sum::<f64>() / count;
+    }
 
     // 2. Event counters
     feat.click_count = raw.click_count;

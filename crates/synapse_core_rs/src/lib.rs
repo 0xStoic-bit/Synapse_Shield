@@ -35,6 +35,11 @@ fn features_to_pydict<'py>(py: Python<'py>, feat: &ExtractedFeatures) -> PyResul
     dict.set_item("spectral_purity", feat.spectral_purity)?;
     dict.set_item("spectral_entropy", feat.spectral_entropy)?;
     dict.set_item("submovement_count", feat.submovement_count)?;
+    dict.set_item("max_touch_points", feat.max_touch_points)?;
+    dict.set_item("avg_touch_radius", feat.avg_touch_radius)?;
+    dict.set_item("touch_radius_var", feat.touch_radius_var)?;
+    dict.set_item("avg_touch_force", feat.avg_touch_force)?;
+    dict.set_item("touch_event_count", feat.touch_event_count)?;
     Ok(dict)
 }
 
@@ -59,6 +64,11 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                 if let Ok(Some(ts)) = browser.get_item("touch_supported") {
                     if let Ok(t) = ts.extract::<bool>() {
                         raw.touch_supported = t;
+                    }
+                }
+                if let Ok(Some(mtp)) = browser.get_item("max_touch_points") {
+                    if let Ok(m) = mtp.extract::<i64>() {
+                        raw.max_touch_points = m;
                     }
                 }
                 if let Ok(Some(pl)) = browser.get_item("plugins_length") {
@@ -119,10 +129,12 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                             let x_res = m_dict.get_item("x").ok().flatten().and_then(|v| v.extract::<f64>().ok());
                             let y_res = m_dict.get_item("y").ok().flatten().and_then(|v| v.extract::<f64>().ok());
                             let t_res = m_dict.get_item("t").ok().flatten().and_then(|v| v.extract::<f64>().ok());
+                            let r_res = m_dict.get_item("r").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
+                            let f_res = m_dict.get_item("f").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
 
                             if let (Some(x), Some(y), Some(t)) = (x_res, y_res, t_res) {
                                 if !x.is_nan() && !x.is_infinite() && !y.is_nan() && !y.is_infinite() && !t.is_nan() && !t.is_infinite() {
-                                    raw.mouse_movements.push(MousePoint { x, y, t });
+                                    raw.mouse_movements.push(MousePoint { x, y, t, r: r_res, f: f_res });
                                 }
                             }
                         }
