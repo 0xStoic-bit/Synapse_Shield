@@ -34,6 +34,8 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 | Feature | Description |
 | :--- | :--- |
+| 📱 **Mobile Capacitive Touch Biometrics** | Multi-touch contact deformation physics: tracks `maxTouchPoints`, average touch radius ($\bar{r} \ge 3.0\text{ px}$), radius variance ($\sigma_r^2 > 0$), and pressure dynamics. Grants -15 Risk fleshy-finger compliance bonus while penalizing synthetic headless mobile emulators (+60 Risk) (v0.9.0). |
+| 🦀 **Native Rust SIMD Kinematic Core** | High-performance C-ABI FFI via PyO3 with single-pass AVX2/NEON SIMD vectorization across 24 kinematic dimensions ($212.7\,\mu s$ latency, ~4,700 ops/s) (v0.9.0). |
 | ⚡ **Microsecond Benchmark Suite** | Built-in CLI command (`synapse-shield benchmark`) profiles 19D Kinematics ($73.7\,\mu s$), 1D-CNN inference ($451.2\,\mu s$), and end-to-end evaluation ($828.1\,\mu s$, ~1,200 req/sec) with ASCII/JSON reports (v0.7.9). |
 | 🧬 **Biological Synthetic Human Generator** | Multi-bell submovement velocity decomposition with natural valleys, biomechanical arm curvature, and inertia-filtered neuromuscular micro-tremor achieving 100% human verification accuracy (v0.7.9). |
 | 🛡️ **Isolated Weight & Bootstrap Architecture** | Fine-tuning saves to `./synapse_weights.npz` (or `SYNAPSE_WEIGHTS_PATH`), isolating package distribution weights. `--bootstrap` enables zero-data model calibration on clean installs (v0.7.9). |
