@@ -1,6 +1,6 @@
 [package]
 name = "synapse_core_rs"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["Mustafa Gungor <0xStoic-bit>"]
 description = "High-performance native Rust core for Synapse Shield biometric & kinematic analysis"
