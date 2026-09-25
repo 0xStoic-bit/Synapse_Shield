@@ -33,8 +33,8 @@ function getCleanFunctionToString(): () => string {
 }
 
 export interface SynapseTelemetry {
-  mouse_movements: Array<{ x: number; y: number; t: number }>;
-  clicks: Array<{ x: number; y: number; t: number }>;
+  mouse_movements: Array<{ x: number; y: number; t: number; r?: number; f?: number }>;
+  clicks: Array<{ x: number; y: number; t: number; r?: number }>;
   keystrokes: Array<{ type: string; t: number }>;
   scrolls: Array<{ y: number; t: number }>;
   browser: {
@@ -42,6 +42,7 @@ export interface SynapseTelemetry {
     screen_width: number;
     screen_height: number;
     touch_supported: boolean;
+    max_touch_points?: number;
     is_plugin_array_fake?: boolean;
     has_webdriver_own_prop?: boolean;
     is_webgl_hooked?: boolean;
@@ -176,7 +177,15 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
     const now = Date.now();
-    telemetry.value.mouse_movements.push({ x: touch.clientX, y: touch.clientY, t: now });
+    const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
+    const f = touch.force || 0;
+    telemetry.value.mouse_movements.push({
+      x: touch.clientX,
+      y: touch.clientY,
+      t: now,
+      r: Math.round(r * 10) / 10,
+      f: Math.round(f * 100) / 100,
+    });
     lastMoveTime = now;
     if (telemetry.value.mouse_movements.length > 500) telemetry.value.mouse_movements.shift();
   };
@@ -186,7 +195,15 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     const now = Date.now();
     if (now - lastMoveTime >= moveThrottleMs) {
       const touch = e.touches[0];
-      telemetry.value.mouse_movements.push({ x: touch.clientX, y: touch.clientY, t: now });
+      const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
+      const f = touch.force || 0;
+      telemetry.value.mouse_movements.push({
+        x: touch.clientX,
+        y: touch.clientY,
+        t: now,
+        r: Math.round(r * 10) / 10,
+        f: Math.round(f * 100) / 100,
+      });
       lastMoveTime = now;
       if (telemetry.value.mouse_movements.length > 500) telemetry.value.mouse_movements.shift();
     }
@@ -195,7 +212,13 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
   const handleTouchEnd = (e: TouchEvent) => {
     if (e.changedTouches && e.changedTouches.length > 0) {
       const touch = e.changedTouches[0];
-      telemetry.value.clicks.push({ x: touch.clientX, y: touch.clientY, t: Date.now() });
+      const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
+      telemetry.value.clicks.push({
+        x: touch.clientX,
+        y: touch.clientY,
+        t: Date.now(),
+        r: Math.round(r * 10) / 10,
+      });
       if (telemetry.value.clicks.length > 50) telemetry.value.clicks.shift();
     }
   };
@@ -271,6 +294,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
       screen_width: window.innerWidth || window.screen.width,
       screen_height: window.innerHeight || window.screen.height,
       touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
+      max_touch_points: typeof navigator !== "undefined" ? navigator.maxTouchPoints || 0 : 0,
       is_plugin_array_fake: isPluginArrayFake(),
       has_webdriver_own_prop: Object.prototype.hasOwnProperty.call(navigator, "webdriver"),
       is_webgl_hooked: checkWebGLHook(),
