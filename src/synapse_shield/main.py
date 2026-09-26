@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import ipaddress
 import time
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 
 from synapse_shield import __version__
 from synapse_shield.engine import analyze_behavior
