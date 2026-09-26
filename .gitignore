@@ -80,8 +80,11 @@ out/
 .agents/
 *_report.md
 *report*.md
-* report*.md
+*_REPORT.md
+*REPORT*.md
 *roadmap*.md
+*ROADMAP*.md
+ROADMAP.md
 implementation_plan.md
 walkthrough.md
 task.md

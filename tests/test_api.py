@@ -70,7 +70,8 @@ def test_score_with_valid_token():
     assert res_data["status"] in ("success", "blocked", "challenge_required")
 
 
-def test_logs_endpoint():
+def test_logs_endpoint(monkeypatch):
+    monkeypatch.setenv("SYNAPSE_DEV_MODE", "1")
     response = client.get("/api/logs")
     assert response.status_code == 200
     data = response.json()

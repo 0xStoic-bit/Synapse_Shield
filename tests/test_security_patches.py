@@ -57,15 +57,15 @@ def test_websocket_terminal_auth(client, monkeypatch):
 
     # Connecting without token or with invalid token should be rejected (WS_1008_POLICY_VIOLATION)
     with pytest.raises(Exception):
-        with client.websocket_connect("/ws/terminal") as ws:
+        with client.websocket_connect("/ws/terminal", headers={"Origin": "http://testserver", "Host": "testserver"}) as ws:
             pass
 
     with pytest.raises(Exception):
-        with client.websocket_connect("/ws/terminal?token=wrong_secret") as ws:
+        with client.websocket_connect("/ws/terminal?token=wrong_secret", headers={"Origin": "http://testserver", "Host": "testserver"}) as ws:
             pass
 
     # Connecting with valid token succeeds
-    with client.websocket_connect("/ws/terminal?token=super_secret_123") as ws:
+    with client.websocket_connect("/ws/terminal?token=super_secret_123", headers={"Origin": "http://testserver", "Host": "testserver"}) as ws:
         msg1 = ws.receive_text()
         assert "Synapse Shield Cyber-Console" in msg1
 

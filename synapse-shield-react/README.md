@@ -105,7 +105,7 @@ export default function Page() {
 
 ---
 
-## Features (v0.9.0)
+## Features (v0.9.1)
 
 - **Hardened Security Architecture:** Full alignment with Synapse Shield v0.7.7 core security patches (P0-P2).
 - **Transparent Token Expiration Refresh:** Seamlessly renegotiates expired tokens (`HTTP 400 EXPIRED`) without triggering IP quarantine or streak bans.
