@@ -18,6 +18,9 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Web
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+import ipaddress
+import time
+from collections import defaultdict, OrderedDict
 
 from synapse_shield import __version__
 from synapse_shield.engine import analyze_behavior
@@ -209,14 +212,42 @@ if _cors_origins:
 TRUSTED_PROXIES = {"127.0.0.1", "::1"}
 
 
-def get_client_ip(request: Request) -> str:
+def get_client_ip(request: Request | WebSocket) -> str:
     client_ip = request.client.host if request.client else "127.0.0.1"
+    
     if client_ip in TRUSTED_PROXIES:
+        # X-Real-IP is usually safely overwritten by proxies
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+            
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            # X-Forwarded-For chain: client, proxy1, proxy2. Attackers can spoof left-most.
+            # Traverse from right to left to find the first untrusted IP.
+            ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+            for ip in reversed(ips):
+                if ip not in TRUSTED_PROXIES:
+                    return ip
+            if ips:
+                return ips[-1]
+                
     return client_ip
 
+def mask_ip(ip_str: str) -> str:
+    """GDPR/KVKK compliance: Mask the last octet of IPv4 or last 4 blocks of IPv6."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        if ip.version == 4:
+            network = ipaddress.ip_network(f"{ip_str}/24", strict=False)
+            return f"{network.network_address.exploded.rsplit('.', 1)[0]}.*"
+        else:
+            # /64 standart prefix maskelemesi
+            network = ipaddress.ip_network(f"{ip_str}/64", strict=False)
+            prefix = network.network_address.exploded.split(":")[:4]
+            return f"{':'.join(prefix)}:*:*:*:*"
+    except ValueError:
+        return "unknown"
 
 def get_recent_request_count(ip: str) -> int:
     conn = get_connection()
@@ -362,18 +393,22 @@ def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reas
 
 def verify_admin(request: Request):
     """Admin endpoint'leri için yetkilendirme doğrulaması."""
-    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
-    client_host = request.client.host if request.client else ""
-    is_localhost = client_host in ("127.0.0.1", "::1", "localhost", "testclient")
+    dev_mode = os.environ.get("SYNAPSE_DEV_MODE", "0") == "1"
+    # Proxy arkasından gelen spoofed istekleri engellemek için get_client_ip kullanılır
+    client_ip = get_client_ip(request)
+    is_localhost = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
 
-    if admin_secret:
-        provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace(
-            "Bearer ", ""
-        )
-        if not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
-            raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
-    elif not is_localhost and os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
-        raise HTTPException(status_code=403, detail="Forbidden: Admin operations disabled in production without secret")
+    # Sadece yerel geliştirme modunda localhost'a şifresiz izin ver.
+    if dev_mode and is_localhost:
+        print(f"WARNING: DEV_MODE is active. Bypassing auth for local IP: {client_ip}")
+        return True
+
+    # Üretimde (veya dev_mode olmayan durumlarda) IP'ye bakma, sadece secret doğrula.
+    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
+    provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    
+    if not admin_secret or not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
 
 
 ALLOWED_WEBHOOK_DOMAINS = {
@@ -399,9 +434,51 @@ def validate_webhook_url(url: str):
         )
 
 
+# In-memory Token Bucket for /api/challenge Rate Limiting
+_CHALLENGE_RATE_LIMIT = 30.0  # max requests per minute
+
+class LRUTokenBucket:
+    def __init__(self, maxsize=10000):
+        self.maxsize = maxsize
+        self.cache = OrderedDict()
+        
+    def get_bucket(self, ip: str) -> dict:
+        if ip in self.cache:
+            self.cache.move_to_end(ip)
+            return self.cache[ip]
+        
+        # Max kapasiteye ulaşılırsa en eski (least recently used) öğeyi sil (O(1) tahliye)
+        if len(self.cache) >= self.maxsize:
+            self.cache.popitem(last=False)
+            
+        bucket = {"tokens": _CHALLENGE_RATE_LIMIT, "last_update": time.time()}
+        self.cache[ip] = bucket
+        return bucket
+
+_challenge_limiter = LRUTokenBucket(maxsize=10000)
+
+def check_challenge_rate_limit(ip: str) -> bool:
+    """Returns True if allowed, False if rate limited."""
+    now = time.time()
+    bucket = _challenge_limiter.get_bucket(ip)
+    
+    elapsed = now - bucket["last_update"]
+    
+    # Refill tokens
+    bucket["tokens"] = min(_CHALLENGE_RATE_LIMIT, bucket["tokens"] + elapsed * (_CHALLENGE_RATE_LIMIT / 60.0))
+    bucket["last_update"] = now
+    
+    if bucket["tokens"] >= 1.0:
+        bucket["tokens"] -= 1.0
+        return True
+    return False
+
 # YENİ ENDPOINT: İstemciye tek kullanımlık challenge verir
 @app.get("/api/challenge")
-async def get_challenge():
+async def get_challenge(request: Request):
+    ip = get_client_ip(request)
+    if not check_challenge_rate_limit(ip):
+        raise HTTPException(status_code=429, detail="Too Many Requests. Please wait before requesting another challenge.")
     return generate_challenge()
 
 
@@ -513,17 +590,31 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
 
 @app.websocket("/ws/terminal")
 async def websocket_terminal(websocket: WebSocket, token: str | None = Query(None)):
-    admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
-    client_host = websocket.client.host if websocket.client else ""
-    is_localhost = client_host in ("127.0.0.1", "::1", "localhost", "testclient")
-
-    if admin_secret:
-        if not token or not hmac.compare_digest(token, admin_secret):
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-    elif not is_localhost and os.environ.get("SYNAPSE_DEV_MODE", "0") != "1":
+    # CSWSH (Cross-Site WebSocket Hijacking) koruması (Tam Eşleşme)
+    origin = websocket.headers.get("origin")
+    host = websocket.headers.get("host")
+    
+    if not origin or not host:
+        # Browser dışı veya origin göndermeyen istekleri reddet
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+        
+    parsed_origin = urllib.parse.urlparse(origin)
+    # Şema ve port dahil tam netloc eşleşmesi
+    if parsed_origin.netloc != host:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    dev_mode = os.environ.get("SYNAPSE_DEV_MODE", "0") == "1"
+    client_ip = get_client_ip(websocket)
+    is_localhost = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+
+    # Sadece yerel geliştirme modunda localhost'a şifresiz izin ver.
+    if not (dev_mode and is_localhost):
+        admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
+        if not admin_secret or not token or not hmac.compare_digest(token, admin_secret):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
     await manager.connect(websocket)
     await websocket.send_text(f"Synapse Shield Cyber-Console [Version {__version__}]")
@@ -601,7 +692,8 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
 
 
 @app.get("/api/logs")
-async def get_logs(limit: int = 50):
+async def get_logs(request: Request, limit: int = 50):
+    verify_admin(request)
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -617,7 +709,7 @@ async def get_logs(limit: int = 50):
             {
                 "id": r["id"],
                 "timestamp": r["timestamp"],
-                "ip": r["ip"],
+                "ip": mask_ip(r["ip"]),
                 "user_agent": r["user_agent"],
                 "bot_score": r["bot_score"],
                 "classification": r["classification"],
@@ -653,7 +745,8 @@ async def get_logs(limit: int = 50):
 
 
 @app.get("/api/logs/export")
-async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: int = Query(1000, ge=1, le=10000)):
+async def export_logs(request: Request, format: str = Query("txt", pattern="^(txt|md)$"), limit: int = Query(1000, ge=1, le=10000)):
+    verify_admin(request)
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -691,8 +784,9 @@ async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: i
             reasons_str = "; ".join(reasons[:2]) if reasons else "Yok"
             threat = r["threat_type"] if r["threat_type"] else "UNKNOWN"
             classification_badge = f"**{r['classification']}**"
+            masked_ip = mask_ip(r["ip"])
             lines.append(
-                f"| {r['id']} | `{r['timestamp']}` | `{r['ip']}` | {classification_badge} | `{threat}` | %{r['bot_score']:.1f} | {reasons_str} |"
+                f"| {r['id']} | `{r['timestamp']}` | `{masked_ip}` | {classification_badge} | `{threat}` | %{r['bot_score']:.1f} | {reasons_str} |"
             )
 
         content = "\n".join(lines)
@@ -714,8 +808,9 @@ async def export_logs(format: str = Query("txt", pattern="^(txt|md)$"), limit: i
             reasons = json.loads(r["reasons"]) if r["reasons"] else []
             reasons_str = " | ".join(reasons) if reasons else "Clean organic telemetry"
             threat = r["threat_type"] if r["threat_type"] else "UNKNOWN"
+            masked_ip = mask_ip(r["ip"])
             lines.append(
-                f"[{r['id']}] {r['timestamp']} | IP: {r['ip']} | Action: {r['classification']} | Risk: {r['bot_score']:.1f}%\n"
+                f"[{r['id']}] {r['timestamp']} | IP: {masked_ip} | Action: {r['classification']} | Risk: {r['bot_score']:.1f}%\n"
                 f"    Threat Type: {threat}\n"
                 f"    User-Agent:  {r['user_agent']}\n"
                 f"    Reasons:     {reasons_str}\n"
