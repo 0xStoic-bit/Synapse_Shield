@@ -48,7 +48,8 @@ python-source = "src"
 module-name = "synapse_shield.synapse_core_rs"
 include = [
     "src/synapse_shield/static/*",
-    "src/synapse_shield/weights.npz"
+    "src/synapse_shield/weights.npz",
+    "LICENSE"
 ]
 
 [project.urls]
