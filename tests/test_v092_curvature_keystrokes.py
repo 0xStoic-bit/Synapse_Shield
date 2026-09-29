@@ -2,16 +2,13 @@
 Synapse Shield v0.9.2 - Differential Curvature Analysis & Keystroke Dynamics Test Suite
 """
 
-import math
 import numpy as np
 import pytest
-import time
-from synapse_shield.features import extract_features, evaluate_curvature_zerocopy, is_rust_accelerated
+from synapse_shield.features import extract_features, evaluate_curvature_zerocopy
 from synapse_shield.engine import analyze_behavior
 from synapse_shield.adversarial import (
     generate_bezier_telemetry,
     generate_synthetic_human_telemetry,
-    generate_minimum_jerk_telemetry,
 )
 
 try:
