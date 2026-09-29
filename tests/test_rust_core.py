@@ -25,7 +25,7 @@ def test_rust_module_availability():
         pytest.skip("synapse_core_rs binary extension not installed in current environment.")
     
     assert synapse_core_rs.is_rust_core_active() is True
-    assert "0.8.0" in synapse_core_rs.get_core_version()
+    assert "native-rust" in synapse_core_rs.get_core_version()
     assert is_rust_accelerated() is True
 
 

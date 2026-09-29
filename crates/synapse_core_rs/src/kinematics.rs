@@ -1,4 +1,6 @@
 use std::f64;
+use crate::curvature::evaluate_curvature_naturalness;
+use crate::keystrokes::{evaluate_keystroke_dynamics, DetailedKeystroke};
 
 #[derive(Debug, Clone)]
 pub struct MousePoint {
@@ -20,6 +22,7 @@ pub struct RawTelemetry {
     pub click_count: usize,
     pub scroll_count: usize,
     pub keystrokes: Vec<KeyPoint>,
+    pub detailed_keystrokes: Vec<DetailedKeystroke>,
     pub webdriver: bool,
     pub screen_width: f64,
     pub screen_height: f64,
@@ -36,6 +39,7 @@ impl Default for RawTelemetry {
             click_count: 0,
             scroll_count: 0,
             keystrokes: Vec::new(),
+            detailed_keystrokes: Vec::new(),
             webdriver: false,
             screen_width: 1024.0,
             screen_height: 768.0,
@@ -78,6 +82,17 @@ pub struct ExtractedFeatures {
     pub touch_radius_var: f64,
     pub avg_touch_force: f64,
     pub touch_event_count: usize,
+    // --- v0.9.2 Upgrades ---
+    pub curvature_score: f64,
+    pub mean_curvature: f64,
+    pub curvature_var: f64,
+    pub curvature_rate_var: f64,
+    pub avg_dwell_time: f64,
+    pub dwell_time_var: f64,
+    pub avg_flight_time: f64,
+    pub flight_time_var: f64,
+    pub digraph_entropy: f64,
+    pub keystroke_score: f64,
 }
 
 impl Default for ExtractedFeatures {
@@ -112,6 +127,16 @@ impl Default for ExtractedFeatures {
             touch_radius_var: 0.0,
             avg_touch_force: 0.0,
             touch_event_count: 0,
+            curvature_score: 0.0,
+            mean_curvature: 0.0,
+            curvature_var: 0.0,
+            curvature_rate_var: 0.0,
+            avg_dwell_time: 0.0,
+            dwell_time_var: 0.0,
+            avg_flight_time: 0.0,
+            flight_time_var: 0.0,
+            digraph_entropy: 0.5,
+            keystroke_score: 0.0,
         }
     }
 }
@@ -155,28 +180,46 @@ pub fn compute_kinematics(raw: &RawTelemetry) -> ExtractedFeatures {
     feat.click_count = raw.click_count;
     feat.scroll_count = raw.scroll_count;
 
-    // 3. Keyboard Dynamics
-    let key_len = raw.keystrokes.len();
-    feat.key_count = key_len;
-    if key_len > 1 {
-        let mut sorted_keys = raw.keystrokes.clone();
-        sorted_keys.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(std::cmp::Ordering::Equal));
+    // 3. Keyboard Dynamics (Dwell & Flight Time & Digraph Entropy v0.9.2)
+    if !raw.detailed_keystrokes.is_empty() {
+        let km = evaluate_keystroke_dynamics(&raw.detailed_keystrokes);
+        feat.key_count = km.key_count;
+        feat.avg_dwell_time = km.avg_dwell_time;
+        feat.dwell_time_var = km.dwell_time_var;
+        feat.avg_flight_time = km.avg_flight_time;
+        feat.flight_time_var = km.flight_time_var;
+        feat.digraph_entropy = km.digraph_entropy;
+        feat.keystroke_score = km.keystroke_score;
+        feat.key_interval_avg = km.avg_flight_time;
+        feat.key_interval_var = km.flight_time_var;
+    } else {
+        let key_len = raw.keystrokes.len();
+        feat.key_count = key_len;
+        if key_len > 1 {
+            let mut sorted_keys = raw.keystrokes.clone();
+            sorted_keys.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(std::cmp::Ordering::Equal));
 
-        let mut intervals = Vec::with_capacity(sorted_keys.len() - 1);
-        for i in 1..sorted_keys.len() {
-            let t_curr = sorted_keys[i].t;
-            let t_prev = sorted_keys[i - 1].t;
-            if t_curr > t_prev {
-                intervals.push(t_curr - t_prev);
+            let mut intervals = Vec::with_capacity(sorted_keys.len() - 1);
+            for i in 1..sorted_keys.len() {
+                let t_curr = sorted_keys[i].t;
+                let t_prev = sorted_keys[i - 1].t;
+                if t_curr > t_prev {
+                    intervals.push(t_curr - t_prev);
+                }
             }
-        }
 
-        if !intervals.is_empty() {
-            let count = intervals.len() as f64;
-            let avg_int: f64 = intervals.iter().sum::<f64>() / count;
-            let var_int: f64 = intervals.iter().map(|&x| (x - avg_int).powi(2)).sum::<f64>() / count;
-            feat.key_interval_avg = avg_int;
-            feat.key_interval_var = var_int;
+            if !intervals.is_empty() {
+                let count = intervals.len() as f64;
+                let avg_int: f64 = intervals.iter().sum::<f64>() / count;
+                let var_int: f64 = intervals.iter().map(|&x| (x - avg_int).powi(2)).sum::<f64>() / count;
+                feat.key_interval_avg = avg_int;
+                feat.key_interval_var = var_int;
+                feat.avg_flight_time = avg_int;
+                feat.flight_time_var = var_int;
+                if var_int < 2.0 && intervals.len() >= 3 {
+                    feat.keystroke_score = 0.85;
+                }
+            }
         }
     }
 
@@ -193,6 +236,17 @@ pub fn compute_kinematics(raw: &RawTelemetry) -> ExtractedFeatures {
         }
 
         let n = moves.len();
+        if n >= 4 {
+            let xs: Vec<f64> = moves.iter().map(|m| m.x).collect();
+            let ys: Vec<f64> = moves.iter().map(|m| m.y).collect();
+            let ts: Vec<f64> = moves.iter().map(|m| m.t).collect();
+            let cm = evaluate_curvature_naturalness(&xs, &ys, &ts);
+            feat.curvature_score = cm.curvature_score;
+            feat.mean_curvature = cm.mean_curvature;
+            feat.curvature_var = cm.curvature_var;
+            feat.curvature_rate_var = cm.curvature_rate_var;
+        }
+
         let start_x = moves[0].x;
         let start_y = moves[0].y;
         let end_x = moves[n - 1].x;

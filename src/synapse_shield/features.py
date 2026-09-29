@@ -26,6 +26,62 @@ def is_rust_accelerated() -> bool:
     return HAS_RUST_CORE
 
 
+def evaluate_curvature_zerocopy(x: Any, y: Any, t: Any) -> dict[str, float]:
+    """Zero-copy evaluation of differential curvature directly from NumPy or contiguous buffers via Rust SIMD."""
+    if HAS_RUST_CORE and synapse_core_rs is not None:
+        try:
+            return synapse_core_rs.evaluate_curvature_zerocopy_rs(x, y, t)
+        except Exception:
+            pass
+
+    # NumPy fallback
+    try:
+        x_arr = np.asarray(x, dtype=np.float64)
+        y_arr = np.asarray(y, dtype=np.float64)
+        t_arr = np.asarray(t, dtype=np.float64)
+        n = min(len(x_arr), len(y_arr), len(t_arr))
+        if n < 4:
+            return {"curvature_score": 0.0, "mean_curvature": 0.0, "curvature_var": 0.0, "curvature_rate_var": 0.0}
+
+        dt = np.maximum(np.diff(t_arr[:n]), 0.1)
+        vx = np.diff(x_arr[:n]) / dt
+        vy = np.diff(y_arr[:n]) / dt
+
+        dt_a = (dt[1:] + dt[:-1]) * 0.5
+        ax = np.diff(vx) / np.maximum(dt_a, 0.1)
+        ay = np.diff(vy) / np.maximum(dt_a, 0.1)
+
+        vx_s = vx[1:]
+        vy_s = vy[1:]
+
+        num = np.abs(vx_s * ay - vy_s * ax)
+        v_sq = vx_s**2 + vy_s**2 + 1e-6
+        denom = v_sq * np.sqrt(v_sq)
+        kappa = num / denom
+
+        mean_k = float(np.mean(kappa))
+        var_k = float(np.var(kappa))
+        d_k = np.diff(kappa) / np.maximum(dt_a[1:], 0.1) if len(kappa) > 1 else np.array([0.0])
+        var_dk = float(np.var(d_k)) if len(d_k) > 0 else 0.0
+
+        score = 0.10
+        if mean_k < 1e-6 and var_k < 1e-7:
+            score = 0.95
+        elif var_dk < 1e-8 and var_k < 1e-4:
+            score = 0.90
+        elif var_dk > 5.0 or var_k > 10.0:
+            score = 0.85
+
+        return {
+            "curvature_score": score,
+            "mean_curvature": mean_k,
+            "curvature_var": var_k,
+            "curvature_rate_var": var_dk,
+        }
+    except Exception:
+        return {"curvature_score": 0.0, "mean_curvature": 0.0, "curvature_var": 0.0, "curvature_rate_var": 0.0}
+
+
 def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> dict[str, Any]:
     # 0. High-Performance Native Rust Core (v0.8.0)
     if HAS_RUST_CORE and not force_python and isinstance(telemetry, dict) and synapse_core_rs is not None:
@@ -64,6 +120,16 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         "spectral_purity": 0.0,
         "spectral_entropy": 1.0,
         "submovement_count": 0,
+        "curvature_score": 0.0,
+        "mean_curvature": 0.0,
+        "curvature_var": 0.0,
+        "curvature_rate_var": 0.0,
+        "avg_dwell_time": 0.0,
+        "dwell_time_var": 0.0,
+        "avg_flight_time": 0.0,
+        "flight_time_var": 0.0,
+        "digraph_entropy": 0.5,
+        "keystroke_score": 0.0,
     }
 
     if not isinstance(telemetry, dict):
@@ -121,8 +187,13 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
 
             if intervals:
                 avg_int = sum(intervals) / len(intervals)
+                var_int = sum((x - avg_int) ** 2 for x in intervals) / len(intervals)
                 features["key_interval_avg"] = avg_int
-                features["key_interval_var"] = sum((x - avg_int) ** 2 for x in intervals) / len(intervals)
+                features["key_interval_var"] = var_int
+                features["avg_flight_time"] = avg_int
+                features["flight_time_var"] = var_int
+                if var_int < 2.0 and len(intervals) >= 3:
+                    features["keystroke_score"] = 0.85
 
     # 4. Fare Kinematiği & Biyomekanik Titreme
     mouse_movements = telemetry.get("mouse_movements", [])
@@ -170,6 +241,68 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         if len(valid_moves) >= 3:
             # En fazla 300 nokta işleyerek CPU darboğazını engelle
             movements = sorted(valid_moves, key=lambda m: m["t"])[:300]
+
+            # 4.2 Diferansiyel Eğrilik Analizi (κ(t) - AI & Bézier Bot Avcısı v0.9.2)
+            if len(movements) >= 4:
+                n_m = len(movements)
+                vx_c, vy_c, dt_vc = [], [], []
+                for i in range(1, n_m):
+                    dt_c = max(0.1, movements[i]["t"] - movements[i - 1]["t"])
+                    dt_vc.append(dt_c)
+                    vx_c.append((movements[i]["x"] - movements[i - 1]["x"]) / dt_c)
+                    vy_c.append((movements[i]["y"] - movements[i - 1]["y"]) / dt_c)
+
+                dt_ac, ax_c, ay_c = [], [], []
+                for i in range(1, len(vx_c)):
+                    dta = (dt_vc[i] + dt_vc[i - 1]) * 0.5
+                    dt_ac.append(dta)
+                    ax_c.append((vx_c[i] - vx_c[i - 1]) / max(0.1, dta))
+                    ay_c.append((vy_c[i] - vy_c[i - 1]) / max(0.1, dta))
+
+                kappas = []
+                for i in range(len(ax_c)):
+                    vxs = vx_c[i + 1]
+                    vys = vy_c[i + 1]
+                    num = abs(vxs * ay_c[i] - vys * ax_c[i])
+                    denom = (vxs * vxs + vys * vys + 1e-6) ** 1.5
+                    kappas.append(num / denom)
+
+                if kappas:
+                    k_len = len(kappas)
+                    mean_k = sum(kappas) / k_len
+                    var_k = sum((k - mean_k) ** 2 for k in kappas) / k_len
+
+                    d_kappas = []
+                    for i in range(1, k_len):
+                        dt_k = max(0.1, dt_ac[i])
+                        d_kappas.append((kappas[i] - kappas[i - 1]) / dt_k)
+
+                    if d_kappas:
+                        dk_len = len(d_kappas)
+                        mean_dk = sum(d_kappas) / dk_len
+                        var_dk = sum((dk - mean_dk) ** 2 for dk in d_kappas) / dk_len
+                    else:
+                        var_dk = 0.0
+
+                    c_score = 0.10
+                    if mean_k < 1e-6 and var_k < 1e-7:
+                        c_score = 0.95
+                    elif var_dk < 1e-8 and var_k < 1e-4:
+                        c_score = 0.90
+                    elif var_dk > 5.0 or var_k > 10.0:
+                        c_score = 0.85
+                    else:
+                        high_peaks = sum(1 for k in kappas if k > 0.1)
+                        if high_peaks > (k_len // 2) and var_dk > 2.0:
+                            c_score = 0.75
+                        else:
+                            c_score = 0.10
+
+                    features["curvature_score"] = c_score
+                    features["mean_curvature"] = mean_k
+                    features["curvature_var"] = var_k
+                    features["curvature_rate_var"] = var_dk
+
             distances, dts, velocities = [], [], []
             start_x, start_y = movements[0]["x"], movements[0]["y"]
             end_x, end_y = movements[-1]["x"], movements[-1]["y"]
