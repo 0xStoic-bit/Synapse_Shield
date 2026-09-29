@@ -220,9 +220,23 @@ def analyze_behavior(
                     f"Superhuman artificial sub-movement stutter detected ({submoves} peaks) [+{risk_add:.1f}]."
                 )
 
-    # 5. Klavye Dinamikleri
+        # J. Diferansiyel Eğrilik Analizi (κ(t) - AI & Bézier Bot Avcısı v0.9.2)
+        curvature_score = features.get("curvature_score", 0.0)
+        if curvature_score >= 0.75 and features["total_distance"] > 30 and not is_touch:
+            risk_add = 65.0 * acc_multiplier
+            total_risk += risk_add
+            reasons.append(
+                f"Synthetic differential curvature profile detected (curvature_score: {curvature_score:.2f}, rate_var: {features.get('curvature_rate_var', 0.0):.6f}) [+{risk_add:.1f}]."
+            )
+
+    # 5. Klavye Dinamikleri (Dwell, Flight Time & Digraph Entropy v0.9.2)
     if features.get("key_count", 0) >= 3:
-        if features.get("key_interval_var", 50.0) < 2.0:
+        if features.get("keystroke_score", 0.0) >= 0.70:
+            total_risk += 60.0
+            reasons.append(
+                f"Abnormal keystroke biometrics detected (keystroke_score: {features.get('keystroke_score', 0.0):.2f}, dwell_var: {features.get('dwell_time_var', 0.0):.1f}, entropy: {features.get('digraph_entropy', 0.5):.2f})."
+            )
+        elif features.get("key_interval_var", 50.0) < 2.0:
             total_risk += 75.0
             reasons.append("Robotic constant-interval keystroke timing detected.")
 
