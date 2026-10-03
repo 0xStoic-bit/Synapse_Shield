@@ -164,36 +164,109 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
     features["scroll_count"] = len(scrolls) if isinstance(scrolls, list) else 0
     features["click_count"] = len(clicks) if isinstance(clicks, list) else 0
 
-    # 3. Klavye Dinamikleri
+    # 3. Klavye Dinamikleri (Dwell & Flight Time Parity v0.9.2)
     keystrokes = telemetry.get("keystrokes", [])
     if isinstance(keystrokes, list) and len(keystrokes) > 0:
         keystrokes = keystrokes[:150]  # DoS koruması: en fazla 150 tuş vuruşu işle
-        valid_keys = []
+        detailed = []
         for k in keystrokes:
             if isinstance(k, dict):
-                t_val = k.get("t") or k.get("down") or k.get("time")
-                if isinstance(t_val, (int, float)) and not math.isnan(t_val):
-                    valid_keys.append({"t": float(t_val)})
+                t_val = None
+                for kn in ["t", "down", "time"]:
+                    v = k.get(kn)
+                    if isinstance(v, (int, float)) and not math.isnan(v) and not math.isinf(v):
+                        t_val = float(v)
+                        break
+                if t_val is not None:
+                    key_str = str(k.get("key", "unknown"))
+                    up_val = k.get("up")
+                    if isinstance(up_val, (int, float)) and not math.isnan(up_val) and not math.isinf(up_val):
+                        up_val = float(up_val)
+                    elif "duration_ms" in k and isinstance(k["duration_ms"], (int, float)):
+                        up_val = t_val + float(k["duration_ms"])
+                    else:
+                        up_val = None
+                    detailed.append({"key": key_str, "down": t_val, "up": up_val})
 
-        features["key_count"] = len(valid_keys)
-        if len(valid_keys) > 1:
-            sorted_keys = sorted(valid_keys, key=lambda k: k["t"])
-            intervals = []
-            for i in range(1, len(sorted_keys)):
-                t_curr = sorted_keys[i]["t"]
-                t_prev = sorted_keys[i - 1]["t"]
-                if t_curr > t_prev:
-                    intervals.append(t_curr - t_prev)
+        features["key_count"] = len(detailed)
+        if len(detailed) > 0:
+            detailed.sort(key=lambda x: x["down"])
+            dwell_times = []
+            for d in detailed:
+                if d["up"] is not None:
+                    dwell = d["up"] - d["down"]
+                    if 0.0 < dwell < 5000.0:
+                        dwell_times.append(dwell)
 
-            if intervals:
-                avg_int = sum(intervals) / len(intervals)
-                var_int = sum((x - avg_int) ** 2 for x in intervals) / len(intervals)
-                features["key_interval_avg"] = avg_int
-                features["key_interval_var"] = var_int
-                features["avg_flight_time"] = avg_int
-                features["flight_time_var"] = var_int
-                if var_int < 2.0 and len(intervals) >= 3:
-                    features["keystroke_score"] = 0.85
+            if dwell_times:
+                avg_dwell = sum(dwell_times) / len(dwell_times)
+                var_dwell = sum((x - avg_dwell) ** 2 for x in dwell_times) / len(dwell_times)
+                features["avg_dwell_time"] = avg_dwell
+                features["dwell_time_var"] = var_dwell
+            else:
+                features["avg_dwell_time"] = 0.0
+                features["dwell_time_var"] = 0.0
+
+            flight_times = []
+            for i in range(1, len(detailed)):
+                prev = detailed[i - 1]
+                curr = detailed[i]
+                flight = (curr["down"] - prev["up"]) if prev["up"] is not None else (curr["down"] - prev["down"])
+                if -500.0 < flight < 5000.0:
+                    flight_times.append(flight)
+
+            if flight_times:
+                avg_flight = sum(flight_times) / len(flight_times)
+                var_flight = sum((x - avg_flight) ** 2 for x in flight_times) / len(flight_times)
+                features["avg_flight_time"] = avg_flight
+                features["flight_time_var"] = var_flight
+                features["key_interval_avg"] = avg_flight
+                features["key_interval_var"] = var_flight
+            else:
+                features["avg_flight_time"] = 0.0
+                features["flight_time_var"] = 0.0
+                features["key_interval_avg"] = 0.0
+                features["key_interval_var"] = 0.0
+
+            valid_flights = [f for f in flight_times if 0.0 <= f <= 800.0]
+            n_vf = len(valid_flights)
+            if n_vf >= 4:
+                bins = [0] * 8
+                for f in valid_flights:
+                    b = min(7, int(f / 50.0))
+                    bins[b] += 1
+                ent = 0.0
+                for c in bins:
+                    if c > 0:
+                        p = c / n_vf
+                        ent -= p * math.log2(p)
+                entropy = ent / 3.0
+            else:
+                entropy = 0.5
+            features["digraph_entropy"] = entropy
+
+            score = 0.0
+            if len(detailed) >= 3:
+                if features["flight_time_var"] < 2.0 and len(flight_times) >= 3:
+                    score += 0.85
+                elif features["flight_time_var"] < 15.0 and len(flight_times) >= 4:
+                    score += 0.60
+
+                if 0.0 < features["avg_flight_time"] < 25.0:
+                    score += 0.70
+
+                if dwell_times:
+                    if features["avg_dwell_time"] < 15.0:
+                        score += 0.75
+                    elif features["dwell_time_var"] < 2.0 and len(dwell_times) >= 3:
+                        score += 0.80
+
+                if entropy < 0.15 and len(flight_times) >= 5:
+                    score += 0.65
+                elif entropy > 0.98 and len(flight_times) >= 8:
+                    score += 0.40
+
+            features["keystroke_score"] = min(1.0, max(0.0, score))
 
     # 4. Fare Kinematiği & Biyomekanik Titreme
     mouse_movements = telemetry.get("mouse_movements", [])
