@@ -6,8 +6,6 @@
 
 **以隐私为先、零摩擦感知、自托管的 Cloudflare Turnstile 替代方案。**
 
-🌐 **[ English ](README.md)** | **[ 简体中文 ](README_ZH.md)**
-
 [![PyPI](https://img.shields.io/pypi/v/synapse-shield?color=00F0FF&label=pypi)](https://pypi.org/project/synapse-shield/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00F0FF.svg)](https://opensource.org/licenses/MIT)
 [![CI/CD](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
@@ -15,6 +13,10 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python)](https://python.org)
 [![Inference SLA](https://img.shields.io/badge/Latency-%3C0.5ms-10B981.svg)]()
 [![Zero-PII](https://img.shields.io/badge/Privacy-100%25%20Zero--PII-success.svg)]()
+
+<br/>
+
+🌐 [English](README.md) | [简体中文](README_ZH.md)
 
 <br/>
 
