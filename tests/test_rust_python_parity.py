@@ -3,11 +3,10 @@ Synapse Shield — Rust SIMD vs. Python Fallback Parity & Differential Fuzzing
 Validates mathematical and behavioral equivalence between Rust Core and Python Fallback.
 """
 
-import math
 import random
 import pytest
 
-from synapse_shield.features import extract_features, is_rust_accelerated
+from synapse_shield.features import extract_features
 try:
     from synapse_shield import synapse_core_rs
     HAS_RUST = True
@@ -50,7 +49,7 @@ def test_keystroke_dynamics_rust_python_parity():
         rust_metrics = synapse_core_rs.evaluate_keystroke_dynamics_rs(keystrokes)
 
         # 2. Python Fallback Evaluation (explicitly bypass Rust accelerator)
-        py_features = extract_features(telemetry)
+        py_features = extract_features(telemetry, force_python=True)
 
         assert py_features["avg_dwell_time"] == pytest.approx(rust_metrics["avg_dwell_time"], abs=1e-3)
         assert py_features["dwell_time_var"] == pytest.approx(rust_metrics["dwell_time_var"], abs=1e-3)
@@ -85,7 +84,7 @@ def test_kinematics_rust_python_parity():
         }
 
         rust_feat = synapse_core_rs.extract_features_rs(telemetry)
-        py_feat = extract_features(telemetry)
+        py_feat = extract_features(telemetry, force_python=True)
 
         assert py_feat["total_distance"] == pytest.approx(rust_feat["total_distance"], rel=1e-2)
         assert py_feat["straightness"] == pytest.approx(rust_feat["straightness"], rel=1e-2)

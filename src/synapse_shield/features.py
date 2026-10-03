@@ -261,10 +261,45 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     elif features["dwell_time_var"] < 2.0 and len(dwell_times) >= 3:
                         score += 0.80
 
+                # Digraph linguistic correlation check
+                frequent_digraphs = {
+                    "th", "er", "on", "an", "re", "he", "in", "ed", "nd", "ha",
+                    "at", "en", "es", "of", "or", "nt", "ea", "ti", "to", "it",
+                    "st", "io", "le", "is", "ou", "ar", "as", "de", "rt", "ve",
+                    "la", "le", "ik", "ak", "el", "al", "ma", "me", "ba", "ka",
+                }
+                digraph_flights = {}
+                for i in range(1, len(detailed)):
+                    prev_k = str(detailed[i - 1]["key"]).lower()
+                    curr_k = str(detailed[i]["key"]).lower()
+                    if len(prev_k) == 1 and len(curr_k) == 1:
+                        pair = prev_k + curr_k
+                        fl = detailed[i]["down"] - detailed[i - 1]["down"]
+                        if 0.0 < fl < 2000.0:
+                            digraph_flights.setdefault(pair, []).append(fl)
+
+                if digraph_flights:
+                    freq_avg = []
+                    non_freq_avg = []
+                    for pair, times in digraph_flights.items():
+                        m_t = sum(times) / len(times)
+                        if pair in frequent_digraphs:
+                            freq_avg.append(m_t)
+                        else:
+                            non_freq_avg.append(m_t)
+
+                    if freq_avg and non_freq_avg:
+                        f_mean = sum(freq_avg) / len(freq_avg)
+                        nf_mean = sum(non_freq_avg) / len(non_freq_avg)
+                        if f_mean >= nf_mean * 1.05 and len(detailed) >= 8:
+                            score += 0.40
+                        elif f_mean < nf_mean * 0.85:
+                            score = max(0.0, score - 0.25)
+
                 if entropy < 0.15 and len(flight_times) >= 5:
-                    score += 0.65
+                    score += 0.70
                 elif entropy > 0.98 and len(flight_times) >= 8:
-                    score += 0.40
+                    score += 0.50
 
             features["keystroke_score"] = min(1.0, max(0.0, score))
 
