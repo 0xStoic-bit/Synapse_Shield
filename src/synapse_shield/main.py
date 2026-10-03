@@ -542,7 +542,12 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     pow_nonce = body.get("pow_nonce")
     pow_salt = body.get("pow_salt")
 
-    bot_score, classification, reasons, details = await asyncio.to_thread(analyze_behavior, telemetry, recent_count)
+    session_id = request.cookies.get("synapse_session") or request.headers.get("x-session-id") or ip
+    session_history = await asyncio.to_thread(get_storage().get_session_telemetries, session_id, 300)
+
+    bot_score, classification, reasons, details = await asyncio.to_thread(
+        analyze_behavior, telemetry, recent_count, False, False, session_history
+    )
     threat_type = details.get("threat_type", "CLEAN_HUMAN" if classification == "Human" else "UNKNOWN_ANOMALY")
 
     # Proof of Work (Smart Challenge) for Gray Area - Tek kullanımlık Nonce Tüketimi
@@ -561,6 +566,16 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
 
     # Atomik ceza takibi
     record_ip_decision(ip, is_bot=(classification == "Bot"))
+
+    # Oturum düzeyinde telemetri geçmişini kaydet (Replay & Invariance Koruması)
+    feat = details.get("features", {})
+    background_tasks.add_task(
+        get_storage().record_session_telemetry,
+        session_id,
+        {"avg_jerk": feat.get("avg_jerk", 0.0), "straightness": feat.get("straightness", 0.0)},
+        10,
+        300,
+    )
 
     background_tasks.add_task(
         save_log,

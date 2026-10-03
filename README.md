@@ -16,7 +16,11 @@
 
 <br/>
 
-[Key Features](#-key-features--hardening-v050) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations)
+**[ English ](README.md)** | **[ 简体中文 ](README_ZH.md)**
+
+<br/>
+
+[Key Features](#-key-features--security-architecture-v091) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -344,6 +348,16 @@ Humans naturally decelerate ($< 0.40$) as they approach the target click point.
 ### 3. Cumulative Poisson Anomaly Distribution
 
 $$P(X < k) = \sum_{i=0}^{k-1} \frac{\lambda^i e^{-\lambda}}{i!}$$
+
+---
+
+## 🌐 Featured On & Community Coverage (媒体报道与社区分享)
+
+Synapse Shield is featured and discussed across global security and developer communities:
+
+| Platform / Source | Article / Coverage | Topic |
+| :--- | :--- | :--- |
+| **Mfuns (二次元与前沿科技社区)** | [Synapse Shield 架构深度解析与安全加固 (v0.5.0)](https://www.mfuns.net/article/123158#%E4%B8%BB%E8%A6%81%E7%89%B9%E6%80%A7%E4%B8%8E%E5%8A%A0%E5%9B%BA-v0-5-0) | In-depth architectural review of behavioral biometrics, zero-friction CAPTCHA alternatives, and bot mitigation engine hardening |
 
 ---
 
