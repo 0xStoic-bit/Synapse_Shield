@@ -9,7 +9,7 @@ import pytest
 from synapse_shield.features import extract_features
 try:
     from synapse_shield import synapse_core_rs
-    HAS_RUST = True
+    HAS_RUST = synapse_core_rs is not None
 except ImportError:
     HAS_RUST = False
 

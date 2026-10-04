@@ -20,7 +20,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v091) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v093) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -34,10 +34,17 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.9.2)
+## ✨ Key Features & Security Architecture (v0.9.3)
 
 | Feature | Description |
 | :--- | :--- |
+| 🛡️ **Algorithmic DoS & Poisson Stability** | Replaced factorial loops with $O(1)$ iterative multiplicative terms and $k \ge 30$ short-circuit cutoff ($<0.1\text{ ms}$ latency), completely neutralizing CPU exhaustion vectors during traffic spikes (v0.9.3). |
+| ⌨️ **Constant-Time $O(1)$ Deque Keystroke Pairing** | Migrated keydown/keyup matching from $O(N)$ list shifting to `collections.deque.popleft()`, preventing $O(N^2)$ asynchronous event loop starvation during long typing sequences (v0.9.3). |
+| 🌐 **Trusted Reverse Proxies & IPv6 Normalization** | Added `SYNAPSE_TRUSTED_PROXIES` validation and automatic IPv4-mapped IPv6 unwrapping (`::ffff:x.x.x.x`), guaranteeing strict subnet classification and KVKK/GDPR anonymization compliance (v0.9.3). |
+| 🔒 **RCE & Model Path Traversal Defense** | Enforced `allow_pickle=False` on NumPy neural weight loading and canonical `os.path.abspath` `.npz` extension validation on retrainer export targets (v0.9.3). |
+| 📐 **Differential Curvature Analysis ($\kappa(t)$)** | Vectorized 1st and 2nd order spatial-temporal derivatives $\kappa(t) = \frac{|\dot{x}\ddot{y} - \dot{y}\ddot{x}|}{(\dot{x}^2 + \dot{y}^2 + \epsilon)^{3/2}}$ via Rust AVX2 SIMD to detect hyper-smooth Bézier curves and artificial Gaussian jitter bots (v0.9.2). |
+| ⌨️ **Keystroke Dynamics & Digraph Shannon Entropy** | Deep dwell time ($T_d$), flight time ($T_f$), and digraph transition analysis with 8-bin histogram Shannon entropy, detecting synthetic fixed-interval keystroke injection (v0.9.2). |
+| ⚡ **PyO3 Zero-Copy Buffer** | Direct raw pointer transfers from contiguous NumPy `float64` buffers to Rust SIMD registers without cross-boundary memory copying (v0.9.2). |
 | 📱 **Mobile Capacitive Touch Biometrics** | Multi-touch contact deformation physics: tracks `maxTouchPoints`, average touch radius ($\bar{r} \ge 3.0\text{ px}$), radius variance ($\sigma_r^2 > 0$), and pressure dynamics. Grants -15 Risk fleshy-finger compliance bonus while penalizing synthetic headless mobile emulators (+60 Risk) (v0.9.0). |
 | 🦀 **Native Rust SIMD Kinematic Core** | High-performance C-ABI FFI via PyO3 with single-pass AVX2/NEON SIMD vectorization across 24 kinematic dimensions ($212.7\,\mu s$ latency, ~4,700 ops/s) (v0.9.0). |
 | ⚡ **Microsecond Benchmark Suite** | Built-in CLI command (`synapse-shield benchmark`) profiles 19D Kinematics ($73.7\,\mu s$), 1D-CNN inference ($451.2\,\mu s$), and end-to-end evaluation ($828.1\,\mu s$, ~1,200 req/sec) with ASCII/JSON reports (v0.7.9). |

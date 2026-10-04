@@ -209,7 +209,12 @@ if _cors_origins:
         allow_headers=["Content-Type", "Authorization"],
     )
 
-TRUSTED_PROXIES = {"127.0.0.1", "::1"}
+def _get_trusted_proxies() -> set[str]:
+    raw = os.environ.get("SYNAPSE_TRUSTED_PROXIES", "127.0.0.1,::1")
+    return {ip.strip() for ip in raw.split(",") if ip.strip()}
+
+
+TRUSTED_PROXIES = _get_trusted_proxies()
 
 
 def get_client_ip(request: Request | WebSocket) -> str:
@@ -238,12 +243,14 @@ def mask_ip(ip_str: str) -> str:
     """GDPR/KVKK compliance: Mask the last octet of IPv4 or last 4 blocks of IPv6."""
     try:
         ip = ipaddress.ip_address(ip_str)
+        if getattr(ip, "ipv4_mapped", None):
+            ip = ip.ipv4_mapped
         if ip.version == 4:
-            network = ipaddress.ip_network(f"{ip_str}/24", strict=False)
+            network = ipaddress.ip_network(f"{ip}/24", strict=False)
             return f"{network.network_address.exploded.rsplit('.', 1)[0]}.*"
         else:
             # /64 standart prefix maskelemesi
-            network = ipaddress.ip_network(f"{ip_str}/64", strict=False)
+            network = ipaddress.ip_network(f"{ip}/64", strict=False)
             prefix = network.network_address.exploded.split(":")[:4]
             return f"{':'.join(prefix)}:*:*:*:*"
     except ValueError:
@@ -707,7 +714,7 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
 
 
 @app.get("/api/logs")
-async def get_logs(request: Request, limit: int = 50):
+async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
     verify_admin(request)
     conn = get_connection()
     conn.row_factory = sqlite3.Row

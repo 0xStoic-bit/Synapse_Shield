@@ -311,3 +311,73 @@ def test_middleware_ip_ban_enforcement():
 
     assert storage.is_ip_banned("testclient") is True
     storage.unban_ip("testclient")
+
+
+# --- [v0.9.3] Poisson CPU Safety & Numerical Stability ---
+def test_poisson_anomaly_cpu_safety_and_clamping():
+    from synapse_shield.engine import poisson_anomaly_score
+
+    # Normal values
+    assert poisson_anomaly_score(0) == 0.0
+    assert poisson_anomaly_score(1) == 0.0
+    assert 0.0 < poisson_anomaly_score(5, lambda_val=2.0) < 1.0
+
+    # High frequency / DoS values: should return 1.0 instantly without factorial overflow
+    t0 = time.perf_counter()
+    score_huge = poisson_anomaly_score(100_000, lambda_val=2.0)
+    elapsed = time.perf_counter() - t0
+
+    assert score_huge == 1.0
+    assert elapsed < 0.001  # < 1 millisecond
+
+
+# --- [v0.9.3] IPv4-Mapped IPv6 Masking & Trusted Proxies Configuration ---
+def test_mask_ip_ipv4_mapped_and_trusted_proxies(monkeypatch):
+    from synapse_shield.main import mask_ip, _get_trusted_proxies
+
+    # IPv4 standard
+    assert mask_ip("192.168.1.45") == "192.168.1.*"
+
+    # IPv4-mapped IPv6 must unmap to IPv4 before masking
+    assert mask_ip("::ffff:192.168.1.45") == "192.168.1.*"
+    assert mask_ip("::ffff:10.0.0.12") == "10.0.0.*"
+
+    # Standard IPv6
+    masked_v6 = mask_ip("2001:0db8:85a3:0000:0000:8a2e:0370:7334")
+    assert masked_v6.startswith("2001:0db8:85a3:")
+
+    # SYNAPSE_TRUSTED_PROXIES configuration
+    monkeypatch.setenv("SYNAPSE_TRUSTED_PROXIES", "10.0.0.1, 192.168.1.1, 127.0.0.1")
+    proxies = _get_trusted_proxies()
+    assert "10.0.0.1" in proxies
+    assert "192.168.1.1" in proxies
+    assert "127.0.0.1" in proxies
+
+
+# --- [v0.9.3] API Logs Query Limit Bounds ---
+def test_api_logs_query_limit_bounded(client, monkeypatch):
+    monkeypatch.setenv("SYNAPSE_ADMIN_SECRET", "test_admin_key")
+
+    # Limit within allowed bounds (1 to 1000)
+    res = client.get("/api/logs?limit=50", headers={"X-Admin-Secret": "test_admin_key"})
+    assert res.status_code == 200
+
+    # Limit exceeding 1000 must be rejected with 422 Unprocessable Entity
+    res_huge = client.get("/api/logs?limit=1001", headers={"X-Admin-Secret": "test_admin_key"})
+    assert res_huge.status_code == 422
+
+    # Negative or 0 limit must also be rejected
+    res_zero = client.get("/api/logs?limit=0", headers={"X-Admin-Secret": "test_admin_key"})
+    assert res_zero.status_code == 422
+
+
+# --- [v0.9.3] Model Training Output Path Traversal Guard ---
+def test_train_path_traversal_guard():
+    from synapse_shield.train import retrain_fc2
+
+    with pytest.raises(ValueError, match="must be .npz"):
+        retrain_fc2(epochs=1, output_path="malicious_script.sh")
+
+    with pytest.raises(ValueError, match="must be .npz"):
+        retrain_fc2(epochs=1, output_path="/etc/passwd")
+

@@ -255,13 +255,15 @@ def retrain_fc2(
         accuracy = float((correct / n_samples) * 100.0)
         notify(f"   Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
 
-    target_weights_path = (
-        BASE_WEIGHTS_PATH
-        if overwrite_base
-        else output_path
-        if output_path
-        else os.environ.get("SYNAPSE_WEIGHTS_PATH", DEFAULT_LOCAL_WEIGHTS_PATH)
-    )
+    if output_path:
+        resolved = os.path.abspath(output_path)
+        if not resolved.endswith(".npz"):
+            raise ValueError(f"Invalid output weights file extension: {output_path} (must be .npz)")
+        target_weights_path = resolved
+    elif overwrite_base:
+        target_weights_path = os.path.abspath(BASE_WEIGHTS_PATH)
+    else:
+        target_weights_path = os.path.abspath(os.environ.get("SYNAPSE_WEIGHTS_PATH", DEFAULT_LOCAL_WEIGHTS_PATH))
 
     notify(f"[*] Saving updated weights to {target_weights_path}...")
     weights_dir = os.path.dirname(os.path.abspath(target_weights_path))

@@ -95,9 +95,9 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.9.1)
+## Features (v0.9.3)
 
-- **Hardened Security Architecture:** Full alignment with Synapse Shield v0.7.7 core security patches (P0-P2).
+- **Hardened Security Architecture:** Full alignment with Synapse Shield v0.9.3 production hardening (Algorithmic DoS mitigation, Rust SIMD differential curvature $\kappa(t)$, zero-copy buffers, and keystroke entropy analysis).
 - **Transparent Token Expiration Refresh:** Seamlessly renegotiates expired tokens (`HTTP 400 EXPIRED`) without triggering IP quarantine or streak bans.
 - **Distributed State & Redis Support:** Full compatibility with Synapse Shield multi-worker cluster deployments.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with `Function.prototype.toString`.

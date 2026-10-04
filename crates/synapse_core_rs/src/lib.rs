@@ -196,7 +196,7 @@ fn is_rust_core_active() -> bool {
 
 #[pyfunction]
 fn get_core_version() -> &'static str {
-    "0.9.2-native-rust"
+    "0.9.3-native-rust"
 }
 
 #[pyfunction]

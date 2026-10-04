@@ -62,6 +62,19 @@ extract_zip.py
 .DS_Store
 Thumbs.db
 scratch/
+.tempmediaStorage/
+*.swp
+*.swo
+*.bak
+*~
+
+# Geçici Notlar ve Açık Listeleri
+some_opens*.txt
+*opens*.txt
+notes*.txt
+*.local.txt
+devto_article.md
+*article*.md
 
 # Stratejik & Dahili Mimari Planları
 advanced_software_architectures.md

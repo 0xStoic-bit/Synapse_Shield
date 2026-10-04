@@ -33,8 +33,8 @@ class SynapseHybridModel:
         self.weights_path = weights_path
 
         # Belleğe Yükleme (Isınma / Warmup)
-        # Sadece 1 kez okunur (~0.05s)
-        with np.load(weights_path) as data:
+        # Sadece 1 kez okunur (~0.05s) - allow_pickle=False ile RCE saldırılarına karşı korunur
+        with np.load(weights_path, allow_pickle=False) as data:
             self.conv_w = np.array(data["conv_w"])  # shape: (16, 5, 3)
             self.conv_b = np.array(data["conv_b"])  # shape: (16,)
 

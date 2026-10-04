@@ -44,5 +44,16 @@ synapse-shield-vue/
 *.tmp
 temp_*
 scratch/
+.tempmediaStorage/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*.bak
+*~
+some_opens*.txt
+*opens*.txt
+notes*.txt
+*.local.txt
+devto_article.md
+*article*.md

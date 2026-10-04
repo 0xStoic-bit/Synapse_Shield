@@ -596,10 +596,10 @@ class MultimodalTokenizer:
         avg_interval = sum(intervals) / len(intervals) if intervals else 0.0
         interval_var = sum((x - avg_interval) ** 2 for x in intervals) / len(intervals) if intervals else 0.0
 
-        # O(N) hold_times eşleştirmesi (iç içe arama / O(N^2) CPU kilitlenmesini engelle)
-        from collections import defaultdict
+        # O(N) hold_times eşleştirmesi (deque.popleft() ile O(1) çıkarma, O(N^2) CPU kilitlenmesini engelle)
+        from collections import defaultdict, deque
 
-        pending_downs = defaultdict(list)
+        pending_downs = defaultdict(deque)
         hold_times = []
 
         for k in sorted_keys:
@@ -610,11 +610,11 @@ class MultimodalTokenizer:
                 pending_downs[k_code].append(t_val)
             elif k_type == "up":
                 if pending_downs[k_code]:
-                    down_t = pending_downs[k_code].pop(0)
+                    down_t = pending_downs[k_code].popleft()
                     if t_val >= down_t:
                         hold_times.append(t_val - down_t)
                 elif pending_downs["default"]:
-                    down_t = pending_downs["default"].pop(0)
+                    down_t = pending_downs["default"].popleft()
                     if t_val >= down_t:
                         hold_times.append(t_val - down_t)
 

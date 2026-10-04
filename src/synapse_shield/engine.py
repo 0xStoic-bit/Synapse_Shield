@@ -32,15 +32,25 @@ def reload_ai_model() -> bool:
 
 
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
+    """
+    Poisson dağılımı kümülatif anomali skoru (P(X < k)).
+    math.factorial yerine iteratif çarpım kullanarak CPU kilitlenmesini ve OverflowError'ı engeller.
+    k >= 30 durumunda kümülatif olasılık matematiksel olarak 1.0 mertebesindedir.
+    """
     if k <= 1:
         return 0.0
+    if k >= 30:
+        return 1.0
+    if lambda_val <= 0.0:
+        return 0.0
+
     cumulative_prob = 0.0
+    term = math.exp(-lambda_val)
     for i in range(k):
-        try:
-            term = (math.pow(lambda_val, i) * math.exp(-lambda_val)) / math.factorial(i)
-            cumulative_prob += term
-        except (OverflowError, ValueError):
-            break
+        if i > 0:
+            term = term * lambda_val / i
+        cumulative_prob += term
+
     return min(1.0, max(0.0, cumulative_prob))
 
 
