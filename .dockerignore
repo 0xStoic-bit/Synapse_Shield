@@ -57,3 +57,6 @@ notes*.txt
 *.local.txt
 devto_article.md
 *article*.md
+arena_*.md
+graphify-out/
+

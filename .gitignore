@@ -103,6 +103,8 @@ walkthrough.md
 task.md
 test_reports.md
 synapse_shield_code_review.md
+arena_*.md
+graphify-out/
 !.github/ISSUE_TEMPLATE/*.md
 
 # API Keys and Secrets
