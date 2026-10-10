@@ -34,10 +34,13 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.9.4)
+## ✨ Key Features & Security Architecture (v0.9.5)
 
 | Feature | Description |
 | :--- | :--- |
+| 🎯 **Built-in Red Team Orchestrator** | Yerleşik modüler saldırı bataryası (6 plugin) ve `synapse-shield redteam` CLI arayüzü ile doğrudan test imkanı (v0.9.5). |
+| 📦 **PyO3 Universal ABI3 Wheel** | `abi3-py310` kullanılarak Python 3.10+ (3.11, 3.12, 3.13 vb.) için tek bir pre-built binary wheel derlemesi, sıfır derleme süresi (v0.9.5). |
+| 📊 **Rust State Engine Telemetry** | `/metrics` endpoint'i ve `synapse-shield telemetry` komutu ile L1 Nonce bellek ve IP Ban verilerini anlık izleme (v0.9.5). |
 | 🛡️ **Algorithmic DoS & Poisson Stability** | Replaced factorial loops with $O(1)$ iterative multiplicative terms and $k \ge 30$ short-circuit cutoff ($<0.1\text{ ms}$ latency), completely neutralizing CPU exhaustion vectors during traffic spikes (v0.9.3). |
 | ⌨️ **Constant-Time $O(1)$ Deque Keystroke Pairing** | Migrated keydown/keyup matching from $O(N)$ list shifting to `collections.deque.popleft()`, preventing $O(N^2)$ asynchronous event loop starvation during long typing sequences (v0.9.3). |
 | 🌐 **Trusted Reverse Proxies & IPv6 Normalization** | Added `SYNAPSE_TRUSTED_PROXIES` validation and automatic IPv4-mapped IPv6 unwrapping (`::ffff:x.x.x.x`), guaranteeing strict subnet classification and KVKK/GDPR anonymization compliance (v0.9.3). |

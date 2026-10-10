@@ -1,4 +1,3 @@
-use pyo3::buffer::PyBuffer;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -229,11 +228,11 @@ fn evaluate_curvature_zerocopy_rs<'py>(
     y_obj: &Bound<'py, PyAny>,
     t_obj: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let x_buf = PyBuffer::<f64>::get_bound(x_obj)?;
-    let y_buf = PyBuffer::<f64>::get_bound(y_obj)?;
-    let t_buf = PyBuffer::<f64>::get_bound(t_obj)?;
+    let x_buf = x_obj.extract::<Vec<f64>>()?;
+    let y_buf = y_obj.extract::<Vec<f64>>()?;
+    let t_buf = t_obj.extract::<Vec<f64>>()?;
 
-    let len = x_buf.item_count().min(y_buf.item_count()).min(t_buf.item_count());
+    let len = x_buf.len().min(y_buf.len()).min(t_buf.len());
     let dict = PyDict::new_bound(py);
     if len < 4 {
         dict.set_item("curvature_score", 0.0)?;
@@ -243,9 +242,9 @@ fn evaluate_curvature_zerocopy_rs<'py>(
         return Ok(dict);
     }
 
-    let x_ptr = x_buf.buf_ptr() as *const f64;
-    let y_ptr = y_buf.buf_ptr() as *const f64;
-    let t_ptr = t_buf.buf_ptr() as *const f64;
+    let x_ptr = x_buf.as_ptr();
+    let y_ptr = y_buf.as_ptr();
+    let t_ptr = t_buf.as_ptr();
 
     let cm = unsafe { crate::curvature::evaluate_curvature_raw(x_ptr, y_ptr, t_ptr, len) };
 
