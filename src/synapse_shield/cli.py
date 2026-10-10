@@ -94,7 +94,7 @@ def main():
         async def run_redteam():
             orchestrator = SynapseRedTeamOrchestrator()
             if args.category:
-                res = await orchestrator.run_category(args.category)
+                await orchestrator.run_category(args.category)
             else:
                 await orchestrator.run_full_scenario()
                 

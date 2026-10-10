@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import pkgutil
+import time
 from typing import Callable, Dict, Any, List, Tuple
 
 # Central Registry
@@ -60,8 +61,6 @@ class SynapseRedTeamOrchestrator:
         await self.run_category("teardown")
         print("[Orchestrator] Scenario Complete")
 
-
-import time
 
 @redteam_attack(category="bot", weight=10)
 async def linear_bot_plugin(shared_state: Dict[str, Any]):
@@ -137,7 +136,8 @@ async def replay_attack_plugin(shared_state: Dict[str, Any]):
     except ImportError:
         return
     ch = await asyncio.to_thread(get_challenge)
-    if not ch: return
+    if not ch:
+        return
     await asyncio.sleep(1.6)
     envelope = {"challenge": ch, "telemetry": {}, "created_at": int(time.time() * 1000)}
     valid_token = base64.b64encode(json.dumps(envelope).encode()).decode()
