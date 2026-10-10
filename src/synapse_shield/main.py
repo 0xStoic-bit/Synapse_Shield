@@ -766,6 +766,24 @@ async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
     }
 
 
+@app.get("/metrics")
+async def get_metrics():
+    from . import synapse_core_rs
+    
+    metrics = {
+        "status": "ok",
+        "rust_engine": None
+    }
+    
+    if synapse_core_rs:
+        try:
+            metrics["rust_engine"] = synapse_core_rs.get_state_engine_stats_rs()
+        except Exception as e:
+            metrics["error"] = str(e)
+            
+    return metrics
+
+
 @app.get("/api/logs/export")
 async def export_logs(request: Request, format: str = Query("txt", pattern="^(txt|md)$"), limit: int = Query(1000, ge=1, le=10000)):
     verify_admin(request)

@@ -55,6 +55,13 @@ def main():
         help="Custom output path for retrained weights (default: ./synapse_weights.npz)",
     )
 
+    # Red Team Plugin Orchestrator Command
+    redteam_parser = subparsers.add_parser("redteam", help="Run the modular Red Team plugin orchestrator")
+    redteam_parser.add_argument("--category", type=str, default=None, help="Specific attack category to run (e.g. bot, tamper, crypto)")
+    
+    # Telemetry CLI command
+    subparsers.add_parser("telemetry", help="View Rust L1 Nonce & IP Ban cache metrics")
+
     args = parser.parse_args()
 
     if args.command == "run" or args.command is None:
@@ -80,6 +87,30 @@ def main():
         except ImportError:
             from train import retrain_fc2
         retrain_fc2(epochs=args.epochs, bootstrap=args.bootstrap, output_path=args.output)
+    elif args.command == "redteam":
+        import asyncio
+        from .redteam_plugin import SynapseRedTeamOrchestrator
+        
+        async def run_redteam():
+            orchestrator = SynapseRedTeamOrchestrator()
+            if args.category:
+                res = await orchestrator.run_category(args.category)
+            else:
+                await orchestrator.run_full_scenario()
+                
+        asyncio.run(run_redteam())
+    elif args.command == "telemetry":
+        try:
+            from . import synapse_core_rs
+            if synapse_core_rs:
+                stats = synapse_core_rs.get_state_engine_stats_rs()
+                import json
+                print("🛡️  Rust State Engine Telemetry:")
+                print(json.dumps(stats, indent=2))
+            else:
+                print("synapse_core_rs is not available.")
+        except Exception as e:
+            print(f"Error reading telemetry: {e}")
 
 
 if __name__ == "__main__":

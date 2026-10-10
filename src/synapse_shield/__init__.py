@@ -15,7 +15,7 @@ except ImportError:
     except ImportError:
         synapse_core_rs = None
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 __all__ = [
     "SynapseShieldMiddleware",
     "analyze_behavior",

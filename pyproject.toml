@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "synapse-shield"
-version = "0.9.4"
+version = "0.9.5"
 authors = [
   { name="Mustafa Güngör", email="" },
 ]
