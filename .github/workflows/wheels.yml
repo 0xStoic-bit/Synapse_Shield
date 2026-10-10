@@ -34,10 +34,10 @@ jobs:
           sccache: 'true'
           manylinux: auto
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
-          name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
-          path: dist
+          name: wheels
+          path: dist/*.whl
 
   windows:
     runs-on: windows-latest
@@ -58,10 +58,10 @@ jobs:
           args: --release --out dist
           sccache: 'true'
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
-          name: wheels-windows-${{ matrix.target }}-py${{ matrix.python-version }}
-          path: dist
+          name: wheels
+          path: dist/*.whl
 
   macos:
     runs-on: macos-latest
@@ -82,10 +82,10 @@ jobs:
           args: --release --out dist
           sccache: 'true'
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
-          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
-          path: dist
+          name: wheels
+          path: dist/*.whl
 
   release:
     name: Publish Native Wheels to PyPI
@@ -96,11 +96,10 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
-          pattern: wheels-*
+          name: wheels
           path: dist
-          merge-multiple: true
 
       - name: Publish all binary wheels to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
