@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # pyo3 0.22 officially supports up to 3.13; this flag allows building for 3.14.
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: '1'
+
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -20,12 +24,9 @@ jobs:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
       - name: Build Wheels (Linux manylinux)
         uses: PyO3/maturin-action@v1
         with:
@@ -34,9 +35,9 @@ jobs:
           sccache: 'true'
           manylinux: auto
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: wheels
+          name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist/*.whl
 
   windows:
@@ -45,22 +46,24 @@ jobs:
       fail-fast: false
       matrix:
         target: [x64]
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        id: py
         with:
           python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.target }}
       - name: Build Wheels (Windows x64)
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist -i ${{ steps.py.outputs.python-path }}
           sccache: 'true'
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: wheels
+          name: wheels-windows-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist/*.whl
 
   macos:
@@ -69,37 +72,57 @@ jobs:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        id: py
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build Wheels (macOS Intel & Apple Silicon)
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist -i ${{ steps.py.outputs.python-path }}
           sccache: 'true'
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: wheels
+          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist/*.tar.gz
 
   release:
     name: Publish Native Wheels to PyPI
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, macos]
+    needs: [linux, windows, macos, sdist]
     permissions:
       id-token: write
       contents: read
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          name: wheels
+          pattern: wheels-*
           path: dist
+          merge-multiple: true
+
+      - name: List wheels
+        run: ls -la dist
 
       - name: Publish all binary wheels to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
