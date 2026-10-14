@@ -7,6 +7,9 @@ from .features import evaluate_curvature_zerocopy, extract_features
 from .middleware import SynapseShieldMiddleware, shield_protect
 from .tokens import generate_challenge, verify_and_consume_token, verify_and_consume_pow
 
+from .asgi import SynapseShieldASGIMiddleware
+from .core import SynapseDecision, evaluate_synapse_request
+
 try:
     from . import synapse_core_rs
 except ImportError:
@@ -15,9 +18,12 @@ except ImportError:
     except ImportError:
         synapse_core_rs = None
 
-__version__ = "0.9.5"
+__version__ = "0.9.6"
 __all__ = [
     "SynapseShieldMiddleware",
+    "SynapseShieldASGIMiddleware",
+    "SynapseDecision",
+    "evaluate_synapse_request",
     "analyze_behavior",
     "extract_features",
     "evaluate_curvature_zerocopy",

@@ -5,6 +5,23 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2026-10-14
+### Added & Multi-Framework Support
+- **[P0] Universal ASGI 3.0 Middleware (`synapse_shield.asgi`):**
+  - High-performance, zero-framework-dependency ASGI 3.0 middleware (`SynapseShieldASGIMiddleware`).
+  - Implements stream replay safety via a closure-wrapped `replayable_receive` callable, allowing downstream handlers to parse request bodies without stream exhaustion or hanging.
+  - Enforces strict 256 KB memory DoS protection (`MAX_PAYLOAD_SIZE = 262_144` $\rightarrow$ HTTP 413 Payload Too Large) at stream-read time.
+  - Injects verified telemetry and decision context directly into `scope['state']['synapse_telemetry']`.
+- **[P0] Idiomatic Litestar Integration (`synapse_shield.litestar`):**
+  - Native Litestar route guard `synapse_guard` (`guards=[synapse_guard(max_risk_score=40.0)]`).
+  - Native Litestar application middleware `LitestarSynapseMiddleware`.
+- **[P0] Dual-Mode Sanic Integration (`synapse_shield.sanic`):**
+  - Native route decorator `@shield_protect_sanic(max_risk_score=50.0)`.
+  - Native Sanic request middleware `SynapseSanicMiddleware`.
+  - Works natively with both Sanic's custom HTTP engine and ASGI servers.
+- **[P1] Centralized Security Engine (`synapse_shield.core`):**
+  - Extracted framework-agnostic `evaluate_synapse_request` and `SynapseDecision` to provide a single, non-duplicative security source of truth.
+
 ## [0.8.0] - 2026-09-23
 ### Added & Performance Optimization (Native Rust Core & Distributed Defense)
 - **[P0] Native Rust Two-Bucket In-Memory Nonce Cache (`crates/synapse_core_rs`):**

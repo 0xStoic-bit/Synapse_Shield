@@ -34,10 +34,11 @@
 
 ---
 
-## ✨ 核心特性与安全架构 (v0.9.4)
+## ✨ 核心特性与安全架构 (v0.9.6)
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
+| 🚀 **Litestar, Sanic & ASGI 3.0 原生支持** | 提供 Litestar 路由守卫 (`synapse_guard`)、Sanic 双模装饰器 (`@shield_protect_sanic`) 以及零依赖的通用 ASGI 3.0 中间件，内置防挂起流重放 (`replayable_receive`) 与 256KB 内存 DoS 防御 (v0.9.6)。 |
 | 🛡️ **算法级 DoS 防御与泊松稳定性** | 将阶乘循环重构为 $O(1)$ 递推迭代乘法，并引入 $k \ge 30$ 快速截断机制（延迟 $<0.1\text{ ms}$），彻底消除突发流量下的 CPU 耗尽风险 (v0.9.3)。 |
 | ⌨️ **常量时间 $O(1)$ Deque 击键配对** | 将按键按下/释放匹配机制从 $O(N)$ 列表位移升级为 `collections.deque.popleft()`，杜绝长文本输入时异步事件循环发生 $O(N^2)$ 饿死 (v0.9.3)。 |
 | 🌐 **反向代理 IP 校验与 IPv6 归一化** | 引入 `SYNAPSE_TRUSTED_PROXIES` 白名单验证，并自动解包 IPv4 映射的 IPv6 地址（`::ffff:x.x.x.x`），确保子网精准分类及严格遵循 GDPR/KVKK 匿名化标准 (v0.9.3)。 |
@@ -248,7 +249,71 @@ def login():
 
 ---
 
-### 3. React / Next.js 接入
+### 3. Litestar 接入 (v0.9.6)
+
+提供符合 Litestar 惯例的原生路由守卫（Guard）与全局中间件：
+
+```python
+from litestar import Litestar, post
+from synapse_shield.litestar import synapse_guard, LitestarSynapseMiddleware
+
+# 接口级 Guard 路由守卫
+@post("/api/checkout", guards=[synapse_guard(max_risk_score=40.0)])
+async def checkout(data: dict) -> dict:
+    return {"status": "success"}
+
+# 或全局路径中间件
+app = Litestar(
+    route_handlers=[checkout],
+    middleware=[
+        LitestarSynapseMiddleware(protected_paths=["/api/auth"], max_risk_score=50.0)
+    ]
+)
+```
+
+---
+
+### 4. Sanic 接入 (v0.9.6)
+
+全面支持 Sanic 原生高性能 HTTP 服务器模式与 ASGI 模式：
+
+```python
+from sanic import Sanic, text
+from synapse_shield.sanic import shield_protect_sanic, SynapseSanicMiddleware
+
+app = Sanic("secure_app")
+
+# 路由装饰器
+@app.post("/api/login")
+@shield_protect_sanic(max_risk_score=50.0)
+async def login(request):
+    return text("Authenticated!")
+
+# 或请求中间件
+middleware = SynapseSanicMiddleware(protected_paths=["/api/auth"])
+app.register_middleware(middleware, "request")
+```
+
+---
+
+### 5. 通用 ASGI 3.0 中间件 (v0.9.6)
+
+纯原生、零外部依赖的 ASGI 3.0 标准中间件。具备流重放保护（`replayable_receive`）与严格的 256KB 内存 DoS 防御。无缝兼容 **Quart**、**BlackSheep**、**Falcon** 等任意 ASGI 框架：
+
+```python
+from synapse_shield import SynapseShieldASGIMiddleware
+
+# 包装任意 ASGI 3.0 应用程序
+app = SynapseShieldASGIMiddleware(
+    base_app,
+    protected_paths=["/api/auth", "/checkout"],
+    max_risk_score=50.0
+)
+```
+
+---
+
+### 6. React / Next.js 接入
 
 安装专属 npm 包，支持 App Router (`"use client"`)：
 
@@ -280,7 +345,7 @@ export default function LoginForm() {
 
 ---
 
-### 4. Vue 3 / Nuxt 3 接入
+### 7. Vue 3 / Nuxt 3 接入
 
 官方封装的 Vue 3 Composable 及组件（`synapse-shield-vue`），完全兼容 Nuxt 3 SSR：
 
@@ -316,7 +381,7 @@ const handleSubmit = async () => {
 
 ---
 
-### 5. 原生 JavaScript / HTML 接入
+### 8. 原生 JavaScript / HTML 接入
 
 在传统静态页面或前后端不分离项目中引入超轻量级 SDK（`<5 KB`）：
 
@@ -334,7 +399,7 @@ const handleSubmit = async () => {
 
 ---
 
-### 6. Prometheus 企业级可观测性
+### 9. Prometheus 企业级可观测性
 
 开箱即用的监控指标支持。服务通过 `/metrics` 端点自动暴露拦截率、平均推理延时及异常分布。在 Gunicorn/Uvicorn 多进程生产环境下，指定目录即可聚合：
 

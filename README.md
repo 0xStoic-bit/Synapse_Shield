@@ -20,7 +20,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v093) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v096) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -34,10 +34,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.9.5)
+## ✨ Key Features & Security Architecture (v0.9.6)
 
 | Feature | Description |
 | :--- | :--- |
+| 🚀 **Universal ASGI 3.0, Litestar & Sanic Support** | Drop-in support for Litestar route guards (`synapse_guard`), dual-mode Sanic decorator (`@shield_protect_sanic`), and zero-dependency ASGI 3.0 middleware with replayable receive safety and 256KB DoS limits (v0.9.6). |
 | 🎯 **Built-in Red Team Orchestrator** | Yerleşik modüler saldırı bataryası (6 plugin) ve `synapse-shield redteam` CLI arayüzü ile doğrudan test imkanı (v0.9.5). |
 | 📦 **PyO3 Universal ABI3 Wheel** | `abi3-py310` kullanılarak Python 3.10+ (3.11, 3.12, 3.13 vb.) için tek bir pre-built binary wheel derlemesi, sıfır derleme süresi (v0.9.5). |
 | 📊 **Rust State Engine Telemetry** | `/metrics` endpoint'i ve `synapse-shield telemetry` komutu ile L1 Nonce bellek ve IP Ban verilerini anlık izleme (v0.9.5). |
@@ -241,7 +242,65 @@ def login():
     return {"status": "authenticated"}
 ```
 
-### 3. React / Next.js Integration
+### 3. Litestar Integration (v0.9.6)
+
+Idiomatic route guards and application middleware for **Litestar**:
+
+```python
+from litestar import Litestar, post
+from synapse_shield.litestar import synapse_guard, LitestarSynapseMiddleware
+
+# Route-level Guard protection
+@post("/api/checkout", guards=[synapse_guard(max_risk_score=40.0)])
+async def checkout(data: dict) -> dict:
+    return {"status": "success"}
+
+# Or application-wide middleware
+app = Litestar(
+    route_handlers=[checkout],
+    middleware=[
+        LitestarSynapseMiddleware(protected_paths=["/api/auth"], max_risk_score=50.0)
+    ]
+)
+```
+
+### 4. Sanic Integration (v0.9.6)
+
+Dual-mode support for **Sanic** (Native HTTP Server & ASGI):
+
+```python
+from sanic import Sanic, text
+from synapse_shield.sanic import shield_protect_sanic, SynapseSanicMiddleware
+
+app = Sanic("secure_app")
+
+# Route Decorator
+@app.post("/api/login")
+@shield_protect_sanic(max_risk_score=50.0)
+async def login(request):
+    return text("Authenticated!")
+
+# Or Request Middleware
+middleware = SynapseSanicMiddleware(protected_paths=["/api/auth"])
+app.register_middleware(middleware, "request")
+```
+
+### 5. Universal ASGI 3.0 Middleware (v0.9.6)
+
+Zero-dependency standard ASGI 3.0 wrapper with stream replay protection (`replayable_receive`) and strict 256KB DoS limits. Works with **Quart**, **BlackSheep**, **Falcon**, or raw ASGI:
+
+```python
+from synapse_shield import SynapseShieldASGIMiddleware
+
+# Wrap any ASGI 3.0 application
+app = SynapseShieldASGIMiddleware(
+    base_app,
+    protected_paths=["/api/auth", "/checkout"],
+    max_risk_score=50.0
+)
+```
+
+### 6. React / Next.js Integration
 
 We provide a drop-in `"use client"` compatible React package.
 
@@ -266,7 +325,7 @@ export default function LoginForm() {
 }
 ```
 
-### 4. Vue 3 / Nuxt 3 Integration
+### 7. Vue 3 / Nuxt 3 Integration
 
 Official Vue 3 composable and component package (`synapse-shield-vue`). Fully SSR-safe for Nuxt 3.
 
@@ -295,16 +354,7 @@ const handleSubmit = async () => {
 </template>
 ```
 
-### 5. Prometheus Metrics
-
-Enterprise observability out of the box. Automatically exposes latency and block rates.
-To enable multi-process support (e.g., Gunicorn workers), set the environment variable:
-
-```bash
-export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
-```
-
-### 5. Vanilla JS / HTML SDK
+### 8. Vanilla JS / HTML SDK
 
 Add the lightweight SDK (`<5 KB`) to your vanilla project:
 
@@ -317,6 +367,15 @@ Add the lightweight SDK (`<5 KB`) to your vanilla project:
     // Submit payload
   }
 </script>
+```
+
+### 9. Prometheus Metrics
+
+Enterprise observability out of the box. Automatically exposes latency and block rates.
+To enable multi-process support (e.g., Gunicorn workers), set the environment variable:
+
+```bash
+export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 ```
 
 ---
@@ -377,11 +436,19 @@ Synapse Shield is featured and discussed across global security and developer co
 Synapse_Shield/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml             # Automated CI matrix (Python 3.10, 3.11, 3.12)
+│       ├── ci.yml             # Automated CI matrix (Python 3.10, 3.11, 3.12)
+│       └── wheels.yml         # Multi-Platform Native Binary Wheel Builder (Linux, macOS, Windows)
+├── crates/
+│   └── synapse_core_rs/       # High-Performance Native Rust Core (AVX2/NEON SIMD & PyO3)
 ├── src/
 │   └── synapse_shield/
 │       ├── __init__.py        # Public API exports
-│       ├── cli.py             # CLI Controller (run / test commands)
+│       ├── core.py            # Centralized Security Evaluator & Decision Model
+│       ├── asgi.py            # Universal Zero-Dependency ASGI 3.0 Middleware
+│       ├── litestar.py        # Litestar Route Guards & Middleware Adapter
+│       ├── sanic.py           # Sanic Native & ASGI Middleware/Decorator
+│       ├── cli.py             # CLI Controller (run / test / redteam commands)
+│       ├── redteam_plugin.py  # Modular Built-in Red Team Attack Battery
 │       ├── engine.py          # Real-time Decision & Poisson Engine
 │       ├── features.py        # 19D Kinematics, Fitts's Law & Multimodal Tokenizer
 │       ├── models.py          # Zero-Dependency NumPy 1D-CNN Inference Engine

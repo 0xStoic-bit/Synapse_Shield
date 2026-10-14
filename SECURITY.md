@@ -30,6 +30,7 @@ The following areas are of critical interest during security audits:
 - **Cryptographic Protocols:** HMAC-SHA256 signature forgery, nonce consumption order, and replay attack vectors.
 - **Biometric & Kinematic Bypasses:** Novel adversarial curve synthesis evading differential curvature ($\kappa(t)$) or keystroke dynamics.
 - **Algorithmic Complexity & DoS:** Resource exhaustion vectors in FastAPI, Event Loop blocking, or unbounded mathematical loops.
+- **ASGI & Async Stream Safety:** Channel starvation, request body desync, or memory exhaustion vectors in raw ASGI 3.0, Litestar, and Sanic middleware pipelines.
 - **Browser Anti-Tampering & Stealth:** Evasions bypassing WebGL, Canvas, and V8 native prototype integrity checks.
 - **Native Memory & FFI Safety:** Buffer boundaries, unaligned access, or memory safety in the Rust PyO3 core (`synapse_core_rs`).
 
