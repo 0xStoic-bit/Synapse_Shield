@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from synapse_shield import __version__
+from synapse_shield._version import __version__
 from synapse_shield.adversarial import generate_synthetic_human_telemetry
 from synapse_shield.engine import analyze_behavior
 from synapse_shield.features import MultimodalTokenizer, extract_features, is_rust_accelerated

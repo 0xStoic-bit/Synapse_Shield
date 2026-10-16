@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.9.4 - Cryptographic Behavioral Telemetry Collector
+ * Synapse Shield SDK v0.9.7 - Cryptographic Behavioral Telemetry Collector
  * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine
  */
 
@@ -351,6 +351,68 @@
         this.refreshChallenge();
         throw error;
       }
+    },
+
+    async getToken() {
+      if (!this.isInitialized) {
+        await this.init();
+      }
+      if (!this.currentChallenge) {
+        await this.refreshChallenge();
+      }
+      return this.getPayload().token;
+    },
+
+    protectFetch(urlPatterns) {
+      if (typeof window === "undefined" || !window.fetch) return;
+      const originalFetch = window.fetch;
+      const patterns = Array.isArray(urlPatterns) ? urlPatterns : [urlPatterns];
+
+      window.fetch = async (input, init = {}) => {
+        let url = typeof input === "string" ? input : (input && input.url ? input.url : "");
+        const shouldProtect = patterns.some((p) => {
+          if (p instanceof RegExp) return p.test(url);
+          return typeof p === "string" && url.includes(p);
+        });
+
+        if (shouldProtect) {
+          try {
+            const token = await this.getToken();
+            let headers = init.headers ? new Headers(init.headers) : (typeof input === "object" && input.headers ? new Headers(input.headers) : new Headers());
+            if (!headers.has("X-Synapse-Token")) {
+              headers.set("X-Synapse-Token", token);
+            }
+            init = { ...init, headers };
+          } catch (err) {
+            console.warn("[Synapse Shield] Failed to auto-attach X-Synapse-Token to fetch:", err);
+          }
+        }
+        return originalFetch(input, init);
+      };
+    },
+
+    protectAxios(axiosInstance, urlPatterns) {
+      if (!axiosInstance || !axiosInstance.interceptors) return;
+      const patterns = Array.isArray(urlPatterns) ? urlPatterns : [urlPatterns];
+
+      axiosInstance.interceptors.request.use(async (config) => {
+        const url = config.url || "";
+        const shouldProtect = patterns.some((p) => {
+          if (p instanceof RegExp) return p.test(url);
+          return typeof p === "string" && url.includes(p);
+        });
+
+        if (shouldProtect) {
+          try {
+            const token = await this.getToken();
+            config.headers = config.headers || {};
+            config.headers["X-Synapse-Token"] = token;
+          } catch (err) {
+            console.warn("[Synapse Shield] Failed to auto-attach X-Synapse-Token to Axios:", err);
+          }
+        }
+        return config;
+      });
     },
   };
 

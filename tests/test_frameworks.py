@@ -1,5 +1,8 @@
+import base64
 import json
 from unittest.mock import MagicMock
+
+from synapse_shield.tokens import generate_challenge
 
 
 def test_flask_middleware():
@@ -14,30 +17,68 @@ def test_flask_middleware():
     def test_route():
         return "OK"
 
+    @app.route("/api/shadow", methods=["POST"])
+    @shield_protect_flask(max_risk_score=50.0, mode="shadow")
+    def shadow_route():
+        return "SHADOW_OK"
+
     client = app.test_client()
 
-    # Invalid telemetry payload -> 403
-    res1 = client.post("/api/test", data="invalid json")
+    # 1. Missing Token -> 403
+    res1 = client.post("/api/test", json={"telemetry": {}})
     assert res1.status_code == 403
-    assert "Missing" in res1.json["error"]
+    assert "Missing token" in res1.json["error"]
 
-    # Clean Human -> 200 OK
-    res2 = client.post(
-        "/api/test",
-        json={
-            "telemetry": {
-                "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-                "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
-            }
+    # 2. Clean Human with Valid Token in JSON body -> 200 OK
+    ch_data = generate_challenge()
+    tok_envelope = {
+        "challenge": ch_data["challenge"],
+        "telemetry": {
+            "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
+            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
         },
-    )
+    }
+    tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
+    res2 = client.post("/api/test", json={"token": tok_b64})
     assert res2.status_code == 200
     assert res2.data == b"OK"
+    assert res2.headers.get("X-Synapse-Decision") == "allow"
 
-    # Bot (Webdriver) -> 403 Blocked
-    res3 = client.post("/api/test", json={"telemetry": {"browser": {"webdriver": True}}})
+    # 3. Clean Human with X-Synapse-Token Header -> 200 OK
+    ch_data_header = generate_challenge()
+    tok_envelope_header = {
+        "challenge": ch_data_header["challenge"],
+        "telemetry": {
+            "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
+            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+        },
+    }
+    tok_b64_header = base64.b64encode(json.dumps(tok_envelope_header).encode()).decode()
+    res_header = client.post("/api/test", json={"my_data": 123}, headers={"X-Synapse-Token": tok_b64_header})
+    assert res_header.status_code == 200
+
+    # 4. Bot (Webdriver) with Valid Token -> 403 Blocked
+    ch_data_bot = generate_challenge()
+    tok_envelope_bot = {
+        "challenge": ch_data_bot["challenge"],
+        "telemetry": {"browser": {"webdriver": True}},
+    }
+    tok_b64_bot = base64.b64encode(json.dumps(tok_envelope_bot).encode()).decode()
+    res3 = client.post("/api/test", json={"token": tok_b64_bot})
     assert res3.status_code == 403
     assert "Access Denied" in res3.json["error"]
+
+    # 5. Shadow Mode for Bot -> 200 OK (Allowed silently with shadow header)
+    ch_data_shadow = generate_challenge()
+    tok_envelope_shadow = {
+        "challenge": ch_data_shadow["challenge"],
+        "telemetry": {"browser": {"webdriver": True}},
+    }
+    tok_b64_shadow = base64.b64encode(json.dumps(tok_envelope_shadow).encode()).decode()
+    res_shadow = client.post("/api/shadow", json={"token": tok_b64_shadow})
+    assert res_shadow.status_code == 200
+    assert res_shadow.data == b"SHADOW_OK"
+    assert res_shadow.headers.get("X-Synapse-Decision") == "shadow-block"
 
 
 def test_django_middleware():
@@ -65,30 +106,39 @@ def test_django_middleware():
     req_post_unprotected.method = "POST"
     assert middleware.process_request(req_post_unprotected) is None
 
-    # Mock POST request (protected path, missing body)
+    # Mock POST request (missing token) -> 403
     req_post_protected = MagicMock()
     req_post_protected.path = "/api/protected"
     req_post_protected.method = "POST"
-    req_post_protected.body = b"invalid json"
+    req_post_protected.body = b'{"hello": "world"}'
+    req_post_protected.META = {"REMOTE_ADDR": "127.0.0.1"}
 
     response = middleware.process_request(req_post_protected)
     assert response.status_code == 403
-    assert b"Missing or invalid" in response.content
+    assert b"Missing token" in response.content
 
-    # Clean human payload
-    human_payload = {
+    # Clean human payload with signed token
+    ch_data = generate_challenge()
+    tok_envelope = {
+        "challenge": ch_data["challenge"],
         "telemetry": {
             "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
             "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
-        }
+        },
     }
-    req_post_protected.body = json.dumps(human_payload).encode()
+    tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
+    req_post_protected.body = json.dumps({"token": tok_b64}).encode()
     response2 = middleware.process_request(req_post_protected)
     assert response2 is None  # Allowed
 
-    # Bot payload
-    bot_payload = {"telemetry": {"browser": {"webdriver": True}}}
-    req_post_protected.body = json.dumps(bot_payload).encode()
+    # Bot payload with signed token -> 403
+    ch_data_bot = generate_challenge()
+    tok_envelope_bot = {
+        "challenge": ch_data_bot["challenge"],
+        "telemetry": {"browser": {"webdriver": True}},
+    }
+    tok_b64_bot = base64.b64encode(json.dumps(tok_envelope_bot).encode()).decode()
+    req_post_protected.body = json.dumps({"token": tok_b64_bot}).encode()
     response3 = middleware.process_request(req_post_protected)
     assert response3.status_code == 403
     assert b"Access Denied" in response3.content

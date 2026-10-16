@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "synapse-shield"
-version = "0.9.6"
+version = "0.9.7"
 authors = [
   { name="Mustafa Güngör", email="" },
 ]
@@ -28,18 +28,23 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware",
 ]
 dependencies = [
-    "fastapi>=0.110.0",
-    "uvicorn>=0.29.0",
     "numpy>=1.26.0",
-    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
+server = ["fastapi>=0.110.0", "uvicorn>=0.29.0", "websockets>=12.0"]
+cockpit = ["fastapi>=0.110.0", "uvicorn>=0.29.0", "websockets>=12.0"]
+fastapi = ["fastapi>=0.110.0", "uvicorn>=0.29.0", "websockets>=12.0"]
 frameworks = ["django>=3.2", "flask>=2.0", "litestar>=2.0.0", "sanic>=23.0.0"]
 litestar = ["litestar>=2.0.0"]
 sanic = ["sanic>=23.0.0"]
 metrics = ["prometheus-client>=0.19.0"]
 redis = ["redis>=5.0.0"]
+all = [
+    "fastapi>=0.110.0", "uvicorn>=0.29.0", "websockets>=12.0",
+    "django>=3.2", "flask>=2.0", "litestar>=2.0.0", "sanic>=23.0.0",
+    "prometheus-client>=0.19.0", "redis>=5.0.0"
+]
 
 [project.scripts]
 synapse-shield = "synapse_shield.cli:main"
@@ -51,8 +56,11 @@ module-name = "synapse_shield.synapse_core_rs"
 include = [
     "src/synapse_shield/static/*",
     "src/synapse_shield/weights.npz",
+    "src/synapse_shield/py.typed",
+    "src/synapse_shield/synapse_core_rs.pyi",
     "LICENSE"
 ]
+exclude = ["*.pdb", "*.log"]
 
 [project.urls]
 Homepage = "https://github.com/0xStoic-bit/Synapse_Shield"
