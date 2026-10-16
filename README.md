@@ -20,7 +20,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v096) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v097) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -34,10 +34,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.9.6)
+## ✨ Key Features & Security Architecture (v0.9.7)
 
 | Feature | Description |
 | :--- | :--- |
+| 🛡️ **Enterprise Hardening & Reverse Proxy Shield** | First-class `X-Synapse-Token` HTTP header, `SYNAPSE_TRUSTED_PROXIES` resolution (`CF-Connecting-IP` / `X-Forwarded-For`), non-blocking Shadow Mode (`mode="shadow"`), Smart Challenge PoW gray-area flow, and full cryptographic parity across Django and Flask (v0.9.7). |
 | 🚀 **Universal ASGI 3.0, Litestar & Sanic Support** | Drop-in support for Litestar route guards (`synapse_guard`), dual-mode Sanic decorator (`@shield_protect_sanic`), and zero-dependency ASGI 3.0 middleware with replayable receive safety and 256KB DoS limits (v0.9.6). |
 | 🎯 **Built-in Red Team Orchestrator** | Yerleşik modüler saldırı bataryası (6 plugin) ve `synapse-shield redteam` CLI arayüzü ile doğrudan test imkanı (v0.9.5). |
 | 📦 **PyO3 Universal ABI3 Wheel** | `abi3-py310` kullanılarak Python 3.10+ (3.11, 3.12, 3.13 vb.) için tek bir pre-built binary wheel derlemesi, sıfır derleme süresi (v0.9.5). |
