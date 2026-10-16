@@ -16,7 +16,6 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-import uvicorn
 
 
 def main():
@@ -68,6 +67,11 @@ def main():
         port = getattr(args, "port", 8000)
         host = getattr(args, "host", "0.0.0.0")
         print(f"🛡️  Starting Synapse Shield on http://{host}:{port} ...")
+        try:
+            import uvicorn
+        except ImportError:
+            print("❌ Uvicorn is required to run the cockpit server. Install via: pip install 'synapse-shield[server]'")
+            sys.exit(1)
         uvicorn.run("synapse_shield.main:app", host=host, port=port, reload=True)
     elif args.command == "test":
         try:

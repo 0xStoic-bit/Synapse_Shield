@@ -18,11 +18,11 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Web
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-import ipaddress
 import time
 from collections import OrderedDict
 
-from synapse_shield import __version__
+from synapse_shield._version import __version__
+from synapse_shield.core import anonymize_ip, get_trusted_proxies, resolve_client_ip
 from synapse_shield.engine import analyze_behavior
 from synapse_shield.storage import get_storage
 from synapse_shield.tokens import (
@@ -31,6 +31,9 @@ from synapse_shield.tokens import (
     verify_and_consume_token,
     verify_and_consume_pow,
 )
+
+_get_trusted_proxies = get_trusted_proxies
+TRUSTED_PROXIES = _get_trusted_proxies()
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
 
@@ -150,6 +153,44 @@ def init_dataset_db():
 
 init_dataset_db()
 
+
+def prune_old_records(retention_days: int | None = None) -> dict[str, int]:
+    """
+    Automatic Data Retention / TTL cleanup for logs and raw_telemetry tables.
+    Prunes records older than SYNAPSE_LOG_RETENTION_DAYS (default: 14 days).
+    """
+    if retention_days is None:
+        try:
+            retention_days = int(os.environ.get("SYNAPSE_LOG_RETENTION_DAYS", "14"))
+        except ValueError:
+            retention_days = 14
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    pruned = {"logs": 0, "raw_telemetry": 0}
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM logs WHERE timestamp < ?", (cutoff,))
+        pruned["logs"] = cursor.rowcount
+        conn.commit()
+    except Exception:
+        pass
+
+    try:
+        conn_ds = get_dataset_connection()
+        cursor_ds = conn_ds.cursor()
+        cursor_ds.execute("DELETE FROM raw_telemetry WHERE timestamp < ?", (cutoff,))
+        pruned["raw_telemetry"] = cursor_ds.rowcount
+        conn_ds.commit()
+    except Exception:
+        pass
+
+    return pruned
+
+
+prune_old_records()
+
 app = FastAPI(title="Synapse Shield - Behavioral Bot Detection Engine")
 
 
@@ -209,52 +250,13 @@ if _cors_origins:
         allow_headers=["Content-Type", "Authorization"],
     )
 
-def _get_trusted_proxies() -> set[str]:
-    raw = os.environ.get("SYNAPSE_TRUSTED_PROXIES", "127.0.0.1,::1")
-    return {ip.strip() for ip in raw.split(",") if ip.strip()}
-
-
-TRUSTED_PROXIES = _get_trusted_proxies()
-
-
 def get_client_ip(request: Request | WebSocket) -> str:
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    
-    if client_ip in TRUSTED_PROXIES:
-        # X-Real-IP is usually safely overwritten by proxies
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip.strip()
-            
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            # X-Forwarded-For chain: client, proxy1, proxy2. Attackers can spoof left-most.
-            # Traverse from right to left to find the first untrusted IP.
-            ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
-            for ip in reversed(ips):
-                if ip not in TRUSTED_PROXIES:
-                    return ip
-            if ips:
-                return ips[-1]
-                
-    return client_ip
+    raw_ip = request.client.host if request.client else "127.0.0.1"
+    return resolve_client_ip(raw_ip, request.headers)
+
 
 def mask_ip(ip_str: str) -> str:
-    """GDPR/KVKK compliance: Mask the last octet of IPv4 or last 4 blocks of IPv6."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        if getattr(ip, "ipv4_mapped", None):
-            ip = ip.ipv4_mapped
-        if ip.version == 4:
-            network = ipaddress.ip_network(f"{ip}/24", strict=False)
-            return f"{network.network_address.exploded.rsplit('.', 1)[0]}.*"
-        else:
-            # /64 standart prefix maskelemesi
-            network = ipaddress.ip_network(f"{ip}/64", strict=False)
-            prefix = network.network_address.exploded.split(":")[:4]
-            return f"{':'.join(prefix)}:*:*:*:*"
-    except ValueError:
-        return "unknown"
+    return anonymize_ip(ip_str)
 
 def get_recent_request_count(ip: str) -> int:
     conn = get_connection()

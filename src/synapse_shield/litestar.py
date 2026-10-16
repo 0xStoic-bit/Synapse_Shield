@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable
 
-from synapse_shield.core import evaluate_synapse_request
+from synapse_shield.core import evaluate_synapse_request, resolve_client_ip
 
 if TYPE_CHECKING:
     from litestar.connection import ASGIConnection
@@ -21,13 +21,21 @@ try:
 except ImportError:
     LITESTAR_AVAILABLE = False
     AbstractMiddleware = object
-    NotAuthorizedException = Exception
-    PermissionDeniedException = Exception
+    class NotAuthorizedException(Exception):
+        def __init__(self, detail: Any = None, *args: Any, **kwargs: Any) -> None:
+            super().__init__(detail, *args)
+            self.detail = detail
+
+    class PermissionDeniedException(Exception):
+        def __init__(self, detail: Any = None, *args: Any, **kwargs: Any) -> None:
+            super().__init__(detail, *args)
+            self.detail = detail
 
 
 def synapse_guard(
     max_risk_score: float = 50.0,
     accessibility_mode: bool = False,
+    mode: str = "enforce",
 ) -> Callable:
     """
     Idiomatic Litestar Guard to protect specific routes or controllers.
@@ -36,7 +44,7 @@ def synapse_guard(
         from litestar import post
         from synapse_shield.litestar import synapse_guard
 
-        @post("/api/checkout", guards=[synapse_guard(max_risk_score=40.0)])
+        @post("/api/checkout", guards=[synapse_guard(max_risk_score=40.0, mode="enforce")])
         async def checkout(data: dict) -> dict:
             return {"status": "success"}
     """
@@ -46,17 +54,26 @@ def synapse_guard(
         )
 
     async def guard(connection: ASGIConnection, route_handler: BaseRouteHandler) -> None:
-        client_ip = connection.client.host if connection.client else "127.0.0.1"
+        client_host = connection.client.host if connection.client else "127.0.0.1"
+        client_ip = resolve_client_ip(client_host, connection.headers)
         user_agent = connection.headers.get("user-agent", "unknown")
 
-        token = None
-        if hasattr(connection, "json") and callable(connection.json):
+        token = connection.headers.get("x-synapse-token")
+        pow_nonce = connection.headers.get("x-synapse-pow-nonce")
+        pow_salt = connection.headers.get("x-synapse-pow-salt")
+
+        if (not token or not pow_nonce) and hasattr(connection, "json") and callable(connection.json):
             try:
-                # Litestar Request caches the body internally when calling .json()
                 body = await connection.json()
+                if isinstance(body, dict):
+                    if not token:
+                        token = body.get("token")
+                    if not pow_nonce:
+                        pow_nonce = body.get("pow_nonce")
+                    if not pow_salt:
+                        pow_salt = body.get("pow_salt")
             except Exception:
-                raise NotAuthorizedException(detail="[Synapse Shield] Missing or invalid JSON body.")
-            token = body.get("token") if isinstance(body, dict) else None
+                pass
 
         decision = await evaluate_synapse_request(
             client_ip=client_ip,
@@ -64,6 +81,9 @@ def synapse_guard(
             token=token,
             max_risk_score=max_risk_score,
             accessibility_mode=accessibility_mode,
+            mode=mode,
+            pow_nonce=str(pow_nonce) if pow_nonce else None,
+            pow_salt=str(pow_salt) if pow_salt else None,
         )
 
         if not decision.allowed:
@@ -91,7 +111,8 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
                 DefineMiddleware(
                     LitestarSynapseMiddleware,
                     protected_paths=["/api/auth", "/checkout"],
-                    max_risk_score=50.0
+                    max_risk_score=50.0,
+                    mode="enforce"
                 )
             ]
         )
@@ -103,6 +124,7 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
         protected_paths: list[str] | None = None,
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
+        mode: str = "enforce",
     ) -> None:
         if not LITESTAR_AVAILABLE:
             raise ImportError(
@@ -112,6 +134,7 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
+        self.mode = mode
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -135,5 +158,6 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
             protected_paths=self.protected_paths,
             max_risk_score=self.max_risk_score,
             accessibility_mode=self.accessibility_mode,
+            mode=self.mode,
         )
         await asgi_handler(scope, receive, send)

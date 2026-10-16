@@ -5,6 +5,31 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7] - 2026-10-16
+### Security & Architectural Hardening
+- **[P0] Cryptographic Parity Across All Frameworks (Django & Flask Hardening):**
+  - Integrated `evaluate_synapse_request_sync` across both Django (`synapse_shield.django`) and Flask (`synapse_shield.flask`).
+  - Patched critical cryptographic bypass by enforcing HMAC token verification (`verify_and_consume_token`), Replay attack defense, IP ban checks, 256 KB memory DoS caps, and session behavioral history.
+- **[P0] Reverse Proxy & Load Balancer IP Resolution:**
+  - Implemented `resolve_client_ip` supporting `SYNAPSE_TRUSTED_PROXIES` environment configuration.
+  - Traverses `X-Forwarded-For` chains and validates `CF-Connecting-IP` / `X-Real-IP`, preventing proxy IP quarantine and ensuring legitimate users are never blocked behind Cloudflare, Nginx, or AWS ALB.
+- **[P0] First-Class `X-Synapse-Token` HTTP Header Support:**
+  - Added primary support for `X-Synapse-Token`, `X-Synapse-PoW-Nonce`, and `X-Synapse-PoW-Salt` headers across ASGI, FastAPI, Litestar, Sanic, Flask, and Django.
+  - Eliminates JSON body schema collisions (e.g. strict Pydantic `extra="forbid"`) and enables seamless protection for `multipart/form-data` file uploads.
+- **[P1] Enterprise Shadow Mode (`mode="shadow"` / `dry_run=True`):**
+  - Added non-blocking dry-run evaluation mode across all middlewares and guards.
+  - Silently evaluates incoming sessions, emits `X-Synapse-Decision: shadow-block` response headers and Prometheus telemetry without blocking users.
+- **[P1] Proof-of-Work (PoW) Gray Area Flow in Middleware:**
+  - Extended core evaluation engine to support Smart Challenge (PoW) on gray area classifications (`35 <= bot_score <= 65`), returning HTTP 429 Challenge Required and validating solved PoW nonces.
+- **[P1] Zero-PII Compliance & Automatic Data Retention TTL:**
+  - Added `SYNAPSE_PRIVACY_MODE=hash` (daily salt-rotated HMAC-SHA256) and `strict` (/24 truncate) IP anonymization.
+  - Added automatic database TTL pruning job (`prune_old_records`) purging records older than `SYNAPSE_LOG_RETENTION_DAYS` (default 14 days) to prevent disk inflation.
+- **[P2] Packaging, PEP 561 Typing & SDK Improvements:**
+  - Added `src/synapse_shield/py.typed` and comprehensive `synapse_core_rs.pyi` type stubs for native Rust functions.
+  - Decoupled `fastapi`, `uvicorn`, and `websockets` from core dependencies into optional `[server]` extra.
+  - Added `SynapseShield.protectFetch()` and `SynapseShield.protectAxios()` auto-interceptors in `synapse-sdk.js`.
+  - Upgraded React (`synapse-shield-react`) and Vue (`synapse-shield-vue`) SDKs to v0.9.7 with SSR-safe (`typeof window`) guards.
+
 ## [0.9.6] - 2026-10-14
 ### Added & Multi-Framework Support
 - **[P0] Universal ASGI 3.0 Middleware (`synapse_shield.asgi`):**

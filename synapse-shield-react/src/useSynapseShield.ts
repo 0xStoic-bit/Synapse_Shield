@@ -1,15 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-// Safe UTF-8 Base64 Encoder
+// Safe UTF-8 Base64 Encoder (SSR Safe)
 function safeBtoa(str: string): string {
   try {
-    return window.btoa(str);
+    if (typeof window !== "undefined" && typeof window.btoa === "function") {
+      return window.btoa(str);
+    }
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(str).toString("base64");
+    }
+    return "";
   } catch (e) {
-    return window.btoa(
-      encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (_, p1) {
-        return String.fromCharCode(parseInt(p1, 16));
-      })
-    );
+    if (typeof window !== "undefined" && typeof window.btoa === "function") {
+      return window.btoa(
+        encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (_, p1) {
+          return String.fromCharCode(parseInt(p1, 16));
+        })
+      );
+    }
+    return typeof Buffer !== "undefined" ? Buffer.from(str).toString("base64") : "";
   }
 }
 

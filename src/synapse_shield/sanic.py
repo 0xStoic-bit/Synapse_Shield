@@ -9,7 +9,11 @@ from __future__ import annotations
 from functools import wraps
 from typing import Any, Callable
 
-from synapse_shield.core import MAX_PAYLOAD_SIZE, evaluate_synapse_request
+from synapse_shield.core import (
+    MAX_PAYLOAD_SIZE,
+    evaluate_synapse_request,
+    resolve_client_ip,
+)
 
 try:
     from sanic import json as sanic_json
@@ -24,6 +28,7 @@ except ImportError:
 def shield_protect_sanic(
     max_risk_score: float = 50.0,
     accessibility_mode: bool = False,
+    mode: str = "enforce",
 ) -> Callable:
     """
     Decorator to protect Sanic endpoints with Synapse Shield behavioral biometrics.
@@ -35,7 +40,7 @@ def shield_protect_sanic(
         app = Sanic("my_app")
 
         @app.post("/api/login")
-        @shield_protect_sanic(max_risk_score=50.0)
+        @shield_protect_sanic(max_risk_score=50.0, mode="enforce")
         async def login(request):
             return text("Authenticated!")
     """
@@ -54,20 +59,28 @@ def shield_protect_sanic(
                     status=413,
                 )
 
-            # 2. Extract Client IP & User-Agent (native Sanic attributes)
-            client_ip = request.remote_addr or getattr(request, "ip", "127.0.0.1") or "127.0.0.1"
+            # 2. Extract Client IP & User-Agent with Proxy Support
+            raw_ip = request.remote_addr or getattr(request, "ip", "127.0.0.1") or "127.0.0.1"
+            client_ip = resolve_client_ip(raw_ip, request.headers)
             user_agent = request.headers.get("user-agent", "unknown")
 
-            # 3. Extract JSON Body & Token
+            # 3. Extract Token & PoW (Header priority, fallback to JSON body)
+            token = request.headers.get("x-synapse-token")
+            pow_nonce = request.headers.get("x-synapse-pow-nonce")
+            pow_salt = request.headers.get("x-synapse-pow-salt")
+
+            body: dict[str, Any] = {}
             try:
                 body = request.json or {}
             except Exception:
-                return sanic_json(
-                    {"error": "[Synapse Shield] Missing or invalid JSON body."},
-                    status=400,
-                )
+                pass
 
-            token = body.get("token") if isinstance(body, dict) else None
+            if not token and isinstance(body, dict):
+                token = body.get("token")
+            if not pow_nonce and isinstance(body, dict):
+                pow_nonce = body.get("pow_nonce")
+            if not pow_salt and isinstance(body, dict):
+                pow_salt = body.get("pow_salt")
 
             # 4. Centralized Evaluation
             decision = await evaluate_synapse_request(
@@ -76,17 +89,27 @@ def shield_protect_sanic(
                 token=token,
                 max_risk_score=max_risk_score,
                 accessibility_mode=accessibility_mode,
+                mode=mode,
+                pow_nonce=str(pow_nonce) if pow_nonce else None,
+                pow_salt=str(pow_salt) if pow_salt else None,
             )
 
             if not decision.allowed:
-                return sanic_json(decision.to_dict(), status=decision.status_code)
+                try:
+                    return sanic_json(decision.to_dict(), status=decision.status_code, headers=decision.headers)
+                except TypeError:
+                    return sanic_json(decision.to_dict(), status=decision.status_code)
 
             # 5. Inject Telemetry into Sanic request context
             if hasattr(request, "ctx"):
                 request.ctx.synapse_telemetry = decision.telemetry
                 request.ctx.synapse_decision = decision
 
-            return await func(request, *args, **kwargs)
+            response = await func(request, *args, **kwargs)
+            if hasattr(response, "headers") and decision.headers:
+                for hk, hv in decision.headers.items():
+                    response.headers[hk] = hv
+            return response
 
         return wrapper
 
@@ -104,7 +127,8 @@ class SynapseSanicMiddleware:
         app = Sanic("my_app")
         middleware = SynapseSanicMiddleware(
             protected_paths=["/api/auth", "/checkout"],
-            max_risk_score=50.0
+            max_risk_score=50.0,
+            mode="enforce"
         )
         app.register_middleware(middleware, "request")
     """
@@ -114,6 +138,7 @@ class SynapseSanicMiddleware:
         protected_paths: list[str] | None = None,
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
+        mode: str = "enforce",
     ) -> None:
         if not SANIC_AVAILABLE:
             raise ImportError(
@@ -122,6 +147,7 @@ class SynapseSanicMiddleware:
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
+        self.mode = mode
 
     async def __call__(self, request: SanicRequest) -> Any:
         path = getattr(request, "path", "")
@@ -139,18 +165,26 @@ class SynapseSanicMiddleware:
                 status=413,
             )
 
-        client_ip = request.remote_addr or getattr(request, "ip", "127.0.0.1") or "127.0.0.1"
+        raw_ip = request.remote_addr or getattr(request, "ip", "127.0.0.1") or "127.0.0.1"
+        client_ip = resolve_client_ip(raw_ip, request.headers)
         user_agent = request.headers.get("user-agent", "unknown")
 
+        token = request.headers.get("x-synapse-token")
+        pow_nonce = request.headers.get("x-synapse-pow-nonce")
+        pow_salt = request.headers.get("x-synapse-pow-salt")
+
+        body: dict[str, Any] = {}
         try:
             body = request.json or {}
         except Exception:
-            return sanic_json(
-                {"error": "[Synapse Shield] Missing or invalid JSON body."},
-                status=400,
-            )
+            pass
 
-        token = body.get("token") if isinstance(body, dict) else None
+        if not token and isinstance(body, dict):
+            token = body.get("token")
+        if not pow_nonce and isinstance(body, dict):
+            pow_nonce = body.get("pow_nonce")
+        if not pow_salt and isinstance(body, dict):
+            pow_salt = body.get("pow_salt")
 
         decision = await evaluate_synapse_request(
             client_ip=client_ip,
@@ -158,10 +192,16 @@ class SynapseSanicMiddleware:
             token=token,
             max_risk_score=self.max_risk_score,
             accessibility_mode=self.accessibility_mode,
+            mode=self.mode,
+            pow_nonce=str(pow_nonce) if pow_nonce else None,
+            pow_salt=str(pow_salt) if pow_salt else None,
         )
 
         if not decision.allowed:
-            return sanic_json(decision.to_dict(), status=decision.status_code)
+            try:
+                return sanic_json(decision.to_dict(), status=decision.status_code, headers=decision.headers)
+            except TypeError:
+                return sanic_json(decision.to_dict(), status=decision.status_code)
 
         if hasattr(request, "ctx"):
             request.ctx.synapse_telemetry = decision.telemetry
