@@ -6,7 +6,6 @@ and supplementary stability/security fixes (Ek-1, Ek-2).
 import base64
 import json
 import math
-import os
 import random
 import time
 import pytest
@@ -14,7 +13,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
-from synapse_shield.core import evaluate_synapse_request_sync
 from synapse_shield.engine import analyze_behavior
 from synapse_shield.features import extract_features
 from synapse_shield.main import fetch_logs_summary, init_db

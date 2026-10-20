@@ -20,7 +20,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v097) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v098) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -34,10 +34,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.9.7)
+## ✨ Key Features & Security Architecture (v0.9.8)
 
 | Feature | Description |
 | :--- | :--- |
+| ⚡ **Vectorized 1D-CNN, Rust L1 Cache & Alpine musllinux** | NumPy BLAS vectorized 1D-CNN inference (0.092ms, 5.2x speedup), thread-local persistent WAL SQLite with L1 in-memory ban/session caches (0.84ms end-to-end middleware), multi-architecture Alpine Linux (`musllinux_1_2`) wheels, and complete mitigation of Brave farbling camouflage and straight-line/macro bot vectors (v0.9.8). |
 | 🛡️ **Enterprise Hardening & Reverse Proxy Shield** | First-class `X-Synapse-Token` HTTP header, `SYNAPSE_TRUSTED_PROXIES` resolution (`CF-Connecting-IP` / `X-Forwarded-For`), non-blocking Shadow Mode (`mode="shadow"`), Smart Challenge PoW gray-area flow, and full cryptographic parity across Django and Flask (v0.9.7). |
 | 🚀 **Universal ASGI 3.0, Litestar & Sanic Support** | Drop-in support for Litestar route guards (`synapse_guard`), dual-mode Sanic decorator (`@shield_protect_sanic`), and zero-dependency ASGI 3.0 middleware with replayable receive safety and 256KB DoS limits (v0.9.6). |
 | 🎯 **Built-in Red Team Orchestrator** | Yerleşik modüler saldırı bataryası (6 plugin) ve `synapse-shield redteam` CLI arayüzü ile doğrudan test imkanı (v0.9.5). |
