@@ -69,18 +69,20 @@ class SynapseShieldMiddleware(MiddlewareMixin):
         token = request.META.get("HTTP_X_SYNAPSE_TOKEN")
         pow_nonce = request.META.get("HTTP_X_SYNAPSE_POW_NONCE")
         pow_salt = request.META.get("HTTP_X_SYNAPSE_POW_SALT")
+        content_type = request.META.get("CONTENT_TYPE", "").lower()
 
         body_json: dict[str, Any] = {}
-        if request.body:
+        if request.body and ("application/json" in content_type or (not token and request.body.strip().startswith(b"{"))):
             try:
                 parsed = json.loads(request.body)
                 if isinstance(parsed, dict):
                     body_json = parsed
             except Exception:
-                return JsonResponse(
-                    {"error": "[Synapse Shield] Missing or invalid behavioral telemetry payload."},
-                    status=403,
-                )
+                if not token:
+                    return JsonResponse(
+                        {"error": "[Synapse Shield] Missing or invalid behavioral telemetry payload."},
+                        status=400,
+                    )
 
         if not token:
             token = body_json.get("token")

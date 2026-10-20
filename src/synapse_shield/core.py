@@ -289,14 +289,30 @@ def evaluate_synapse_request_sync(
         )
 
     # 4. Multi-turn Session Identification & History
-    session_id = f"{client_ip}:{hashlib.md5(user_agent.encode('utf-8', errors='ignore')).hexdigest()[:8]}"
+    # Tie session to client_ip to prevent spoofing / rotating User-Agent to bypass session invariance
+    session_id = f"ip_{client_ip}"
     session_history = storage.get_session_telemetries(session_id, window_sec=300)
+
+    # 4.5 Sliding-Window Request Frequency (Poisson Anomaly & DoS protection)
+    recent_request_count = storage.record_and_get_request_count(client_ip, window_sec=10)
+    if recent_request_count > 100:
+        storage.ban_ip(client_ip, duration_sec=900, reason="Extreme request frequency (DoS protection: >100 req/10s)")
+        return SynapseDecision(
+            allowed=False,
+            status_code=403,
+            error_message="[Synapse Shield] Extreme request frequency detected. IP temporarily banned.",
+            classification="Bot",
+            bot_score=100.0,
+            reasons=["Extreme request frequency (>100 req/10s)"],
+            action="block",
+            headers={"X-Synapse-Decision": "block", "X-Synapse-Risk-Score": "100.0%"},
+        )
 
     # 5. Biometric Kinematics & AI Inference
     is_penalized = storage.is_ip_banned(client_ip)
     start_time = time.perf_counter()
     bot_score, classification, reasons, details = analyze_behavior(
-        telemetry, 1, is_penalized, accessibility_mode, session_history
+        telemetry, recent_request_count, is_penalized, accessibility_mode, session_history
     )
     latency = time.perf_counter() - start_time
 

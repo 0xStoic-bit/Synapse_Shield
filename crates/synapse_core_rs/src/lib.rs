@@ -112,6 +112,8 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
         if let Ok(Some(keystrokes)) = dict.get_item("keystrokes") {
             if let Ok(list) = keystrokes.downcast::<PyList>() {
                 let limit = list.len().min(150);
+                let mut pending_downs: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+
                 for i in 0..limit {
                     if let Ok(item) = list.get_item(i) {
                         if let Ok(k_dict) = item.downcast::<PyDict>() {
@@ -127,36 +129,83 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                                 }
                             }
                             if let Some(t) = t_opt {
-                                raw.keystrokes.push(KeyPoint { t });
-
-                                // v0.9.2 Rich Keystroke extraction
                                 let key_str = k_dict
                                     .get_item("key")
                                     .ok()
                                     .flatten()
                                     .and_then(|v| v.extract::<String>().ok())
                                     .unwrap_or_else(|| "unknown".to_string());
-                                let up_opt = k_dict
-                                    .get_item("up")
+
+                                let event_type = k_dict
+                                    .get_item("type")
                                     .ok()
                                     .flatten()
-                                    .and_then(|v| v.extract::<f64>().ok())
-                                    .or_else(|| {
-                                        k_dict
-                                            .get_item("duration_ms")
-                                            .ok()
-                                            .flatten()
-                                            .and_then(|v| v.extract::<f64>().ok())
-                                            .map(|d| t + d)
-                                    });
+                                    .and_then(|v| v.extract::<String>().ok());
 
-                                raw.detailed_keystrokes.push(DetailedKeystroke {
-                                    key: key_str,
-                                    down: t,
-                                    up: up_opt,
-                                });
+                                if event_type.as_deref() == Some("up") {
+                                    let down_t = if let Some(queue) = pending_downs.get_mut(&key_str) {
+                                        if !queue.is_empty() {
+                                            Some(queue.remove(0))
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+
+                                    let duration = k_dict
+                                        .get_item("duration_ms")
+                                        .ok()
+                                        .flatten()
+                                        .and_then(|v| v.extract::<f64>().ok());
+
+                                    let final_down = down_t.or_else(|| duration.map(|d| t - d));
+                                    if let Some(d_val) = final_down {
+                                        raw.keystrokes.push(KeyPoint { t: d_val });
+                                        raw.detailed_keystrokes.push(DetailedKeystroke {
+                                            key: key_str,
+                                            down: d_val,
+                                            up: Some(t),
+                                        });
+                                    }
+                                } else if event_type.as_deref() == Some("down") {
+                                    pending_downs.entry(key_str).or_default().push(t);
+                                } else {
+                                    raw.keystrokes.push(KeyPoint { t });
+                                    let up_opt = k_dict
+                                        .get_item("up")
+                                        .ok()
+                                        .flatten()
+                                        .and_then(|v| v.extract::<f64>().ok())
+                                        .or_else(|| {
+                                            k_dict
+                                                .get_item("duration_ms")
+                                                .ok()
+                                                .flatten()
+                                                .and_then(|v| v.extract::<f64>().ok())
+                                                .map(|d| t + d)
+                                        });
+
+                                    raw.detailed_keystrokes.push(DetailedKeystroke {
+                                        key: key_str,
+                                        down: t,
+                                        up: up_opt,
+                                    });
+                                }
                             }
                         }
+                    }
+                }
+
+                // Push any remaining unmatched keydowns
+                for (key_str, downs) in pending_downs {
+                    for d_val in downs {
+                        raw.keystrokes.push(KeyPoint { t: d_val });
+                        raw.detailed_keystrokes.push(DetailedKeystroke {
+                            key: key_str.clone(),
+                            down: d_val,
+                            up: None,
+                        });
                     }
                 }
             }
@@ -195,7 +244,7 @@ fn is_rust_core_active() -> bool {
 
 #[pyfunction]
 fn get_core_version() -> &'static str {
-    "0.9.4-native-rust"
+    "0.9.8-native-rust"
 }
 
 #[pyfunction]

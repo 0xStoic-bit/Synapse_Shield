@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import secrets
 import sqlite3
@@ -37,13 +38,14 @@ def _load_or_generate_secret_key() -> bytes:
     # 2. Öncelik: Kalıcı dosya fallback
     key_dir = Path.home() / ".synapse_shield"
     key_file = key_dir / "secret.key"
-    if key_file.exists():
-        logger.info("SECRET_KEY dosyadan okunuyor: %s", key_file)
-        return key_file.read_bytes()
-
-    # 3. Yeni key oluştur ve dosyaya yaz
     new_key = secrets.token_hex(32)
+
     try:
+        if key_file.exists():
+            logger.info("SECRET_KEY dosyadan okunuyor: %s", key_file)
+            return key_file.read_bytes()
+
+        # 3. Yeni key oluştur ve dosyaya yaz
         key_dir.mkdir(parents=True, exist_ok=True)
         key_file.write_text(new_key)
         # Windows'da chmod 0o600 desteklenmeyebilir, hata yutulur
@@ -53,7 +55,7 @@ def _load_or_generate_secret_key() -> bytes:
             pass
         logger.info("Yeni SECRET_KEY oluşturuldu ve kaydedildi: %s", key_file)
     except OSError as e:
-        logger.warning("SECRET_KEY dosyaya yazılamadı (%s). Geçici key kullanılıyor.", e)
+        logger.warning("SECRET_KEY dosyasına erişilemedi/yazılamadı (%s). Geçici key kullanılıyor.", e)
 
     warnings.warn(
         "SYNAPSE_SECRET_KEY env variable tanımlı değil! "
@@ -126,6 +128,10 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     İstemciden gelen token'ı çözer; imza, zaman aşımı ve Replay Attack kontrolü yapar.
     Returns: (is_valid: bool, reason: str, telemetry: dict)
     """
+    # 0. DoS & CPU Koruma: Token Uzunluk Sınırı (Max 64 KB)
+    if not isinstance(token_str, str) or len(token_str) > 65536:
+        return False, "Geçersiz token boyutu (Payload too large)", {}
+
     try:
         raw_json = base64.b64decode(token_str.encode("utf-8")).decode("utf-8")
         payload = json.loads(raw_json)
@@ -169,29 +175,51 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     if elapsed_ms < min_elapsed:
         return False, f"Zaman manipülasyonu (Humanly Impossible Speed): elapsed={elapsed_sec:.2f}s", {}
 
-    # 4. Time Travel Kontrolü (DeepSeek Advanced Bypass Koruması)
-    # Eğer bot 1.6 saniye bekleyip, içine 3 saniyelik telemetri sığdırmaya çalışırsa yakalanır!
+    # 4. Time Travel & Telemetri Tazelik Kontrolü (Stale & Time Travel Bypass Koruması)
     elapsed_time = elapsed_sec
-    try:
-        events = (
-            telemetry.get("mouse_movements", [])
-            + telemetry.get("keystrokes", [])
-            + telemetry.get("clicks", [])
-            + telemetry.get("scrolls", [])
-        )
-        if events:
-            timestamps = [e.get("t", 0) for e in events if isinstance(e, dict) and "t" in e]
-            if timestamps:
-                telemetry_duration_sec = (max(timestamps) - min(timestamps)) / 1000.0
-                # Telemetrideki olayların süresi, dünyadaki geçen süreden büyük olamaz (0.5s network gecikme payı)
-                if min_elapsed > 0 and telemetry_duration_sec > elapsed_time + 0.5:
+    events = (
+        telemetry.get("mouse_movements", [])
+        + telemetry.get("keystrokes", [])
+        + telemetry.get("clicks", [])
+        + telemetry.get("scrolls", [])
+    )
+    if events:
+        timestamps: list[float] = []
+        for e in events:
+            if isinstance(e, dict):
+                t_val = e.get("t")
+                if t_val is not None:
+                    if isinstance(t_val, (int, float)) and not math.isnan(t_val) and not math.isinf(t_val):
+                        timestamps.append(float(t_val))
+                    else:
+                        return (
+                            False,
+                            "Zaman yolculuğu kontrolü hatası: Geçersiz zaman damgası veri tipi (TypeError)",
+                            {},
+                        )
+
+        if timestamps:
+            min_t = min(timestamps)
+            max_t = max(timestamps)
+            telemetry_duration_sec = (max_t - min_t) / 1000.0
+
+            # A. Telemetri Süre Uyuşmazlığı (Time Travel Bot)
+            if min_elapsed > 0 and telemetry_duration_sec > elapsed_time + 0.5:
+                return (
+                    False,
+                    f"Zaman yolculuğu tespit edildi (Time Travel Bot): Telemetri {telemetry_duration_sec:.1f}s sürüyor ancak token {elapsed_time:.1f}s önce alındı!",
+                    {},
+                )
+
+            # B. Bayat Telemetri (Stale Telemetry Replay Check):
+            # Eğer zaman damgaları epoch ms ise, challenge_ts ile uyumlu olmalıdır
+            if min_t > 10_000_000_000:
+                if min_t < (ts - 5000) or max_t > (now_ms + 2000):
                     return (
                         False,
-                        f"Zaman yolculuğu tespit edildi (Time Travel Bot): Telemetri {telemetry_duration_sec:.1f}s sürüyor ancak token {elapsed_time:.1f}s önce alındı!",
+                        f"Bayat veya manipüle edilmiş telemetri zaman damgası (Stale Telemetry): min_t={min_t}, challenge_ts={ts}",
                         {},
                     )
-    except Exception as e:
-        logger.warning(f"Telemetry time travel check failed: {e}")
 
     # 5. Süresi Dolan Nonce'ları Temizle
     _cleanup_expired_nonces()

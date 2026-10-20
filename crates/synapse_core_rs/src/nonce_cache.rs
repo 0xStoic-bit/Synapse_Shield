@@ -39,6 +39,13 @@ impl StateEngine {
                 HashSet::with_capacity(8192),
             );
             self.last_rotation = Instant::now();
+
+            // Evict expired IP bans from memory to prevent memory bloat / OOM
+            let now_epoch = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            self.ip_bans.retain(|_, &mut exp| exp > now_epoch);
         }
     }
 

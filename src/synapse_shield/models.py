@@ -44,27 +44,28 @@ class SynapseHybridModel:
             self.fc2_w = np.array(data["fc2_w"])  # shape: (16, 1)
             self.fc2_b = np.array(data["fc2_b"])  # shape: (1,)
 
+            # Vektörel matris çarpımı için düzleştirilmiş ağırlıklar (5x+ hızlanma)
+            self.conv_w_flat = self.conv_w.reshape(16, 15)  # shape: (16, 15)
+            self.conv_b_col = self.conv_b[:, None]  # shape: (16, 1)
+
     def predict(self, mouse_tensor, static_vector) -> float:
         """
-        mouse_tensor: list of lists (60x5)
-        static_vector: list (8)
+        mouse_tensor: list of lists (60x5) or np.ndarray
+        static_vector: list (8) or np.ndarray
         """
+        mouse = np.asarray(mouse_tensor, dtype=np.float32)
+        if mouse.ndim == 3 and mouse.shape[0] == 1:
+            mouse = mouse[0]
         # (60, 5) olan matrisi (5, 60) şekline getir (PyTorch uyumlu)
-        mouse = np.array(mouse_tensor, dtype=np.float32).T
-        static = np.array(static_vector, dtype=np.float32)
+        mouse = mouse.T
+        static = np.asarray(static_vector, dtype=np.float32).ravel()
 
-        # 1. 1D Convolution (Sliding Window, padding=1)
+        # 1. 1D Convolution (Vektörel Sliding Window & BLAS Matris Çarpımı)
         # Input: (5, 60), Output: (16, 60)
         padded_mouse = np.pad(mouse, ((0, 0), (1, 1)), mode="constant", constant_values=0.0)
-        c_out = np.zeros((16, 60), dtype=np.float32)
-
-        # Manuel Konvolüsyon (Hızlandırılmış döngü)
-        for j in range(60):
-            # Window shape: (5, 3)
-            window = padded_mouse[:, j : j + 3]
-            # (16, 5, 3) ile (5, 3) tensör çarpımı
-            # sum over axes 1 and 2
-            c_out[:, j] = np.sum(self.conv_w * window, axis=(1, 2)) + self.conv_b
+        windows = np.lib.stride_tricks.sliding_window_view(padded_mouse, window_shape=3, axis=1)  # (5, 60, 3)
+        windows_flat = windows.transpose(1, 0, 2).reshape(60, 15)  # (60, 15)
+        c_out = np.dot(self.conv_w_flat, windows_flat.T) + self.conv_b_col
 
         # 2. ReLU
         c_out = np.maximum(0, c_out)

@@ -168,25 +168,69 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
     keystrokes = telemetry.get("keystrokes", [])
     if isinstance(keystrokes, list) and len(keystrokes) > 0:
         keystrokes = keystrokes[:150]  # DoS koruması: en fazla 150 tuş vuruşu işle
-        detailed = []
-        for k in keystrokes:
-            if isinstance(k, dict):
+
+        # A. SDK'dan gelen down/up olay akışını eşleştir (Dwell Time & Key Count Parity)
+        has_event_types = any(isinstance(k, dict) and k.get("type") in ("down", "up") for k in keystrokes)
+
+        if has_event_types:
+            detailed = []
+            pending_downs: dict[str, list[float]] = {}
+            for k in keystrokes:
+                if not isinstance(k, dict):
+                    continue
+                k_type = k.get("type", "down")
+                k_key = str(k.get("key", "unknown"))
                 t_val = None
                 for kn in ["t", "down", "time"]:
                     v = k.get(kn)
                     if isinstance(v, (int, float)) and not math.isnan(v) and not math.isinf(v):
                         t_val = float(v)
                         break
-                if t_val is not None:
-                    key_str = str(k.get("key", "unknown"))
+                if t_val is None:
+                    continue
+
+                if k_type == "down":
+                    pending_downs.setdefault(k_key, []).append(t_val)
+                elif k_type == "up":
                     up_val = k.get("up")
                     if isinstance(up_val, (int, float)) and not math.isnan(up_val) and not math.isinf(up_val):
-                        up_val = float(up_val)
-                    elif "duration_ms" in k and isinstance(k["duration_ms"], (int, float)):
-                        up_val = t_val + float(k["duration_ms"])
+                        up_t = float(up_val)
                     else:
-                        up_val = None
-                    detailed.append({"key": key_str, "down": t_val, "up": up_val})
+                        up_t = t_val
+
+                    if pending_downs.get(k_key):
+                        down_t = pending_downs[k_key].pop(0)
+                        detailed.append({"key": k_key, "down": down_t, "up": up_t})
+                    elif "duration_ms" in k and isinstance(k["duration_ms"], (int, float)):
+                        dur = float(k["duration_ms"])
+                        detailed.append({"key": k_key, "down": up_t - dur, "up": up_t})
+                    elif "down" in k and isinstance(k["down"], (int, float)):
+                        detailed.append({"key": k_key, "down": float(k["down"]), "up": up_t})
+
+            # Kalan eşleşmemiş keydown'ları ekle
+            for k_key, down_list in pending_downs.items():
+                for down_t in down_list:
+                    detailed.append({"key": k_key, "down": down_t, "up": None})
+        else:
+            detailed = []
+            for k in keystrokes:
+                if isinstance(k, dict):
+                    t_val = None
+                    for kn in ["t", "down", "time"]:
+                        v = k.get(kn)
+                        if isinstance(v, (int, float)) and not math.isnan(v) and not math.isinf(v):
+                            t_val = float(v)
+                            break
+                    if t_val is not None:
+                        key_str = str(k.get("key", "unknown"))
+                        up_val = k.get("up")
+                        if isinstance(up_val, (int, float)) and not math.isnan(up_val) and not math.isinf(up_val):
+                            up_val = float(up_val)
+                        elif "duration_ms" in k and isinstance(k["duration_ms"], (int, float)):
+                            up_val = t_val + float(k["duration_ms"])
+                        else:
+                            up_val = None
+                        detailed.append({"key": key_str, "down": t_val, "up": up_val})
 
         features["key_count"] = len(detailed)
         if len(detailed) > 0:

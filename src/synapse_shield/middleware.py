@@ -72,18 +72,24 @@ def shield_protect(
             pow_salt = request.headers.get("x-synapse-pow-salt")
 
             body_json: dict[str, Any] = {}
+            content_type = request.headers.get("content-type", "").lower()
             try:
                 body_bytes = await request.body()
                 if len(body_bytes) > MAX_PAYLOAD_SIZE:
                     raise HTTPException(
                         status_code=413, detail={"error": "Payload Too Large: Maximum allowed size is 256 KB"}
                     )
-                if body_bytes:
-                    body_json = json.loads(body_bytes)
+                if body_bytes and ("application/json" in content_type or (not token and body_bytes.strip().startswith(b"{"))):
+                    try:
+                        body_json = json.loads(body_bytes)
+                    except Exception:
+                        if not token:
+                            raise HTTPException(status_code=400, detail="Invalid JSON body")
             except HTTPException:
                 raise
             except Exception:
-                raise HTTPException(status_code=400, detail="Invalid JSON body")
+                if not token:
+                    raise HTTPException(status_code=400, detail="Invalid JSON body")
 
             if not token and isinstance(body_json, dict):
                 token = body_json.get("token")
@@ -160,7 +166,14 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         if request.method not in ("POST", "PUT", "PATCH"):
             return await call_next(request)
 
-        # 1. 256 KB Memory Cap
+        # 1. Extract Token & Headers
+        token = request.headers.get("x-synapse-token")
+        pow_nonce = request.headers.get("x-synapse-pow-nonce")
+        pow_salt = request.headers.get("x-synapse-pow-salt")
+        content_type = request.headers.get("content-type", "").lower()
+
+        # 2. 256 KB Memory Cap & Body parsing (Only when JSON or token fallback is needed)
+        body_json: dict[str, Any] = {}
         try:
             body_bytes = await request.body()
             if len(body_bytes) > MAX_PAYLOAD_SIZE:
@@ -168,18 +181,19 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
                     status_code=413,
                     content={"error": "Payload Too Large: Maximum allowed size is 256 KB"},
                 )
-            body_json = json.loads(body_bytes) if body_bytes else {}
+            if body_bytes and ("application/json" in content_type or (not token and body_bytes.strip().startswith(b"{"))):
+                try:
+                    body_json = json.loads(body_bytes)
+                except Exception:
+                    if not token:
+                        return JSONResponse(status_code=400, content={"error": "[Synapse Shield] Invalid JSON payload."})
         except Exception:
-            return JSONResponse(status_code=400, content={"error": "[Synapse Shield] Invalid JSON payload."})
+            if not token:
+                return JSONResponse(status_code=400, content={"error": "[Synapse Shield] Invalid JSON payload."})
 
-        # 2. Extract Client IP with Reverse Proxy Support
+        # 3. Extract Client IP with Reverse Proxy Support
         client_ip = resolve_client_ip(request.client.host if request.client else "127.0.0.1", request.headers)
         user_agent = request.headers.get("user-agent", "unknown")
-
-        # 3. Extract Token & PoW (Header priority, fallback to JSON body)
-        token = request.headers.get("x-synapse-token")
-        pow_nonce = request.headers.get("x-synapse-pow-nonce")
-        pow_salt = request.headers.get("x-synapse-pow-salt")
 
         if not token and isinstance(body_json, dict):
             token = body_json.get("token")

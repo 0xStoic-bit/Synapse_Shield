@@ -95,6 +95,11 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    def record_and_get_request_count(self, ip: str, window_sec: int = 10) -> int:
+        """Record an incoming request and return total requests from this IP within window_sec."""
+        pass
+
+    @abstractmethod
     def get_session_telemetries(self, session_id: str, window_sec: int = 300) -> list[dict]:
         """Fetch recent kinetic summaries for a session within window_sec."""
         pass
@@ -105,7 +110,12 @@ class SQLiteStorageBackend(StorageBackend):
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or DB_FILE
+        self._local = threading.local()
         self._ip_history: dict[str, deque] = {}
+        self._ip_strikes_l1: dict[str, deque] = {}
+        self._ip_ban_cache: dict[str, tuple[bool, float]] = {}
+        self._session_telemetry_l1: dict[str, deque] = {}
+        self._last_nonce_cleanup = 0.0
         self._lock = threading.Lock()
         self._ensure_tables()
         if HAS_RUST_CORE and synapse_core_rs is not None:
@@ -139,8 +149,39 @@ class SQLiteStorageBackend(StorageBackend):
             logger.warning("Failed to hydrate IP bans from SQLite to Rust L1: %s", e)
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=5.0)
+        """
+        Thread-local kalıcı SQLite bağlantısı + WAL Modu.
+        Her thread kendi açık bağlantısını yeniden kullanır; her çağrıda yeni bağlantı maliyetini önler.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10.0)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
+                conn.execute("PRAGMA wal_autocheckpoint=1000;")
+                conn.execute("PRAGMA temp_store=MEMORY;")
+            except Exception as e:
+                logger.debug("SQLite PRAGMA setup warning: %s", e)
+            self._local.conn = conn
         return conn
+
+    def close(self) -> None:
+        """Çağıran thread için açık olan SQLite bağlantısını kapatır."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _ensure_tables(self):
         try:
@@ -182,23 +223,27 @@ class SQLiteStorageBackend(StorageBackend):
             logger.warning(f"SQLite table initialization warning: {e}")
 
     def _cleanup_expired_nonces(self):
+        now = time.time()
+        if now - getattr(self, "_last_nonce_cleanup", 0.0) < 60.0:
+            return
+        self._last_nonce_cleanup = now
         try:
-            now = int(time.time())
             with self._get_connection() as conn:
-                conn.execute("DELETE FROM used_nonces WHERE expires_at < ?", (now,))
+                conn.execute("DELETE FROM used_nonces WHERE expires_at < ?", (int(now),))
                 conn.commit()
         except Exception as e:
             logger.warning(f"SQLite nonce cleanup failed: {e}")
 
     def consume_nonce(self, nonce: str, ttl_sec: int = 120) -> bool:
-        # L1 Accelerated: Two-Bucket In-Memory Rust Cache (< 1 us)
+        # L1 Accelerated: Check local worker's Rust cache first (Fast Reject)
         if HAS_RUST_CORE and synapse_core_rs is not None:
             try:
-                return bool(synapse_core_rs.consume_nonce_rs(nonce))
+                if not bool(synapse_core_rs.consume_nonce_rs(nonce)):
+                    return False
             except Exception as e:
                 logger.warning("Rust consume_nonce_rs failed (%s), falling back to SQLite", e)
 
-        # Fallback to local SQLite disk
+        # Write-through to SQLite disk to prevent multi-worker (split-brain) Replay Attacks
         self._cleanup_expired_nonces()
         now_sec = int(time.time())
         try:
@@ -219,11 +264,19 @@ class SQLiteStorageBackend(StorageBackend):
         # L1 Accelerated: Nanosecond Rust Hash Lookup (~15 ns)
         if HAS_RUST_CORE and synapse_core_rs is not None:
             try:
-                return bool(synapse_core_rs.is_ip_banned_rs(ip))
+                if bool(synapse_core_rs.is_ip_banned_rs(ip)):
+                    return True
             except Exception as e:
                 logger.warning("Rust is_ip_banned_rs failed (%s), falling back to SQLite", e)
 
-        # Fallback to local SQLite disk
+        # L1 Fast Negative/Positive Cache (İkincil disk okumalarını önler)
+        now = time.time()
+        with self._lock:
+            cached = self._ip_ban_cache.get(ip)
+            if cached and (now < cached[1]):
+                return cached[0]
+
+        # Check SQLite disk to sync across multiple worker processes
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -236,16 +289,37 @@ class SQLiteStorageBackend(StorageBackend):
                     else:
                         banned_until = banned_until.astimezone(timezone.utc)
 
-                    if datetime.now(timezone.utc) < banned_until:
+                    now_utc = datetime.now(timezone.utc)
+                    if now_utc < banned_until:
+                        # Hydrate this ban into local Rust L1 cache
+                        remaining = int((banned_until - now_utc).total_seconds())
+                        if remaining > 0 and HAS_RUST_CORE and synapse_core_rs is not None:
+                            try:
+                                synapse_core_rs.ban_ip_rs(ip, remaining)
+                            except Exception:
+                                pass
+                        with self._lock:
+                            self._ip_ban_cache[ip] = (True, now + remaining)
                         return True
                     else:
                         cursor.execute("DELETE FROM banned_ips WHERE ip = ?", (ip,))
                         conn.commit()
+                        with self._lock:
+                            self._ip_ban_cache[ip] = (False, now + 5.0)
+                        return False
+                else:
+                    with self._lock:
+                        self._ip_ban_cache[ip] = (False, now + 2.0)
+                    return False
         except Exception as e:
             logger.error(f"SQLite is_ip_banned check error: {e}")
         return False
 
     def ban_ip(self, ip: str, duration_sec: int = 60, reason: str = "4 ardışık bot kararı") -> None:
+        now = time.time()
+        with self._lock:
+            self._ip_ban_cache[ip] = (True, now + duration_sec)
+
         # 1. Update L1 In-Memory Cache (Instant Write-Through)
         if HAS_RUST_CORE and synapse_core_rs is not None:
             try:
@@ -268,6 +342,10 @@ class SQLiteStorageBackend(StorageBackend):
             logger.error(f"SQLite ban_ip error: {e}")
 
     def unban_ip(self, ip: str) -> None:
+        now = time.time()
+        with self._lock:
+            self._ip_ban_cache[ip] = (False, now + 5.0)
+
         # 1. Remove from L1 In-Memory Cache
         if HAS_RUST_CORE and synapse_core_rs is not None:
             try:
@@ -292,8 +370,28 @@ class SQLiteStorageBackend(StorageBackend):
         ban_duration_sec: int = 60,
         reason: str = "4 ardışık bot kararı",
     ) -> bool:
+        now = time.time()
+        # 1. L1 Bellek İçi Kayan Pencere Önbelleği (~30 ns kontrol)
+        with self._lock:
+            if len(self._ip_strikes_l1) > 5000:
+                cutoff_purge = now - window_sec
+                expired = [k for k, dq in self._ip_strikes_l1.items() if not dq or dq[-1] < cutoff_purge]
+                for k in expired:
+                    del self._ip_strikes_l1[k]
+
+            if ip not in self._ip_strikes_l1:
+                self._ip_strikes_l1[ip] = deque()
+            q = self._ip_strikes_l1[ip]
+            q.append(now)
+            cutoff = now - window_sec
+            while q and q[0] < cutoff:
+                q.popleft()
+            l1_count = len(q)
+            if l1_count >= threshold:
+                q.clear()
+
+        # 2. Kalıcı SQLite ve Multi-Worker Disk Senkronizasyonu
         try:
-            now = time.time()
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 # 1. Pencere dışındaki eski vuruşları temizle
@@ -311,17 +409,24 @@ class SQLiteStorageBackend(StorageBackend):
                     "SELECT COUNT(*) FROM ip_strikes WHERE ip = ? AND timestamp >= ?",
                     (ip, now - window_sec),
                 )
-                count = cursor.fetchone()[0]
+                db_count = cursor.fetchone()[0]
                 conn.commit()
 
+                count = max(l1_count, db_count)
                 if count >= threshold:
                     self.ban_ip(ip, duration_sec=ban_duration_sec, reason=reason)
                     cursor.execute("DELETE FROM ip_strikes WHERE ip = ?", (ip,))
                     conn.commit()
+                    with self._lock:
+                        if ip in self._ip_strikes_l1:
+                            self._ip_strikes_l1[ip].clear()
                     return True
                 return False
         except Exception as e:
             logger.error(f"SQLite record_bot_strike error: {e}")
+            if l1_count >= threshold:
+                self.ban_ip(ip, duration_sec=ban_duration_sec, reason=reason)
+                return True
             return False
 
     def clear_all(self) -> None:
@@ -341,52 +446,100 @@ class SQLiteStorageBackend(StorageBackend):
         except Exception as e:
             logger.warning(f"SQLite clear_all error: {e}")
 
+        with self._lock:
+            self._ip_history.clear()
+            self._ip_strikes_l1.clear()
+            self._ip_ban_cache.clear()
+            self._session_telemetry_l1.clear()
+
+    def record_and_get_request_count(self, ip: str, window_sec: int = 10) -> int:
+        now = time.time()
+        with self._lock:
+            # L1 bellek şişmesini önleme (Unbounded growth koruması)
+            if len(self._ip_history) > 5000:
+                cutoff_purge = now - window_sec
+                expired = [k for k, dq in self._ip_history.items() if not dq or dq[-1] < cutoff_purge]
+                for k in expired:
+                    del self._ip_history[k]
+
+            if ip not in self._ip_history:
+                self._ip_history[ip] = deque()
+            q = self._ip_history[ip]
+            q.append(now)
+            cutoff = now - window_sec
+            while q and q[0] < cutoff:
+                q.popleft()
+            return len(q)
+
     def record_session_telemetry(
         self, session_id: str, metrics: dict, max_history: int = 10, window_sec: int = 300
     ) -> None:
+        now = time.time()
+        # 1. Update L1 In-Memory Cache (Instant ~20 ns)
+        with self._lock:
+            if len(self._session_telemetry_l1) > 5000:
+                cutoff_purge = now - window_sec
+                expired = [
+                    k for k, dq in self._session_telemetry_l1.items()
+                    if not dq or dq[-1][0] < cutoff_purge
+                ]
+                for k in expired:
+                    del self._session_telemetry_l1[k]
+
+            if session_id not in self._session_telemetry_l1:
+                self._session_telemetry_l1[session_id] = deque(maxlen=max_history)
+
+            q = self._session_telemetry_l1[session_id]
+            q.append((now, metrics))
+            cutoff = now - window_sec
+            while q and q[0][0] < cutoff:
+                q.popleft()
+
+        # 2. Write-through to SQLite disk
         try:
-            now = time.time()
             data_str = json.dumps(metrics)
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM session_telemetry WHERE session_id = ? AND timestamp < ?",
-                    (session_id, now - window_sec),
-                )
                 cursor.execute(
                     "INSERT INTO session_telemetry (session_id, timestamp, data_json) VALUES (?, ?, ?)",
                     (session_id, now, data_str),
                 )
                 cursor.execute(
-                    """DELETE FROM session_telemetry 
-                       WHERE session_id = ? 
-                         AND rowid NOT IN (
-                             SELECT rowid FROM session_telemetry 
-                             WHERE session_id = ? 
-                             ORDER BY timestamp DESC LIMIT ?
-                         )""",
-                    (session_id, session_id, max_history),
+                    "DELETE FROM session_telemetry WHERE session_id = ? AND timestamp < ?",
+                    (session_id, now - window_sec),
                 )
                 conn.commit()
         except Exception as e:
             logger.error(f"SQLite record_session_telemetry error: {e}")
 
     def get_session_telemetries(self, session_id: str, window_sec: int = 300) -> list[dict]:
+        now = time.time()
+        # 1. L1 Cache Check (~20 ns)
+        with self._lock:
+            if session_id in self._session_telemetry_l1:
+                cutoff = now - window_sec
+                return [m for ts, m in self._session_telemetry_l1[session_id] if ts >= cutoff]
+
+        # 2. Fallback to SQLite (e.g. across process workers or on cold restart)
         try:
-            now = time.time()
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT data_json FROM session_telemetry WHERE session_id = ? AND timestamp >= ? ORDER BY timestamp ASC",
+                    "SELECT timestamp, data_json FROM session_telemetry WHERE session_id = ? AND timestamp >= ? ORDER BY timestamp ASC",
                     (session_id, now - window_sec),
                 )
                 rows = cursor.fetchall()
                 results = []
-                for (row,) in rows:
+                cached_items = deque(maxlen=10)
+                for ts_val, row in rows:
                     try:
-                        results.append(json.loads(row))
+                        parsed = json.loads(row)
+                        results.append(parsed)
+                        cached_items.append((float(ts_val), parsed))
                     except Exception:
                         pass
+                with self._lock:
+                    self._session_telemetry_l1[session_id] = cached_items
                 return results
         except Exception as e:
             logger.error(f"SQLite get_session_telemetries error: {e}")
@@ -496,6 +649,22 @@ class RedisStorageBackend(StorageBackend):
         except Exception as e:
             logger.warning("Redis clear_all failed (%s), falling back to SQLite", e)
             self.fallback.clear_all()
+
+    def record_and_get_request_count(self, ip: str, window_sec: int = 10) -> int:
+        try:
+            key = f"synapse:req_count:{ip}"
+            now = time.time()
+            now_ns = time.time_ns()
+            pipeline = self.client.pipeline()
+            pipeline.zremrangebyscore(key, 0, now - window_sec)
+            pipeline.zadd(key, {f"{now}:{now_ns}": now})
+            pipeline.zcard(key)
+            pipeline.expire(key, window_sec * 2)
+            results = pipeline.execute()
+            return int(results[2])
+        except Exception as e:
+            logger.warning("Redis record_and_get_request_count failed (%s), falling back to SQLite", e)
+            return self.fallback.record_and_get_request_count(ip, window_sec)
 
     def record_session_telemetry(
         self, session_id: str, metrics: dict, max_history: int = 10, window_sec: int = 300

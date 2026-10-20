@@ -121,11 +121,35 @@ def analyze_behavior(
         total_risk += 50.0
         reasons.append("Missing browser plugins in desktop environment (Possible headless/stealth bot).")
 
-    # 3. Faresiz Form Etkileşimi
+    # 2.9 Sıfır Etkileşim Kontrolü (Zero-Event Detection)
+    # Gerçek bir kullanıcının fare, dokunma, tuş, kaydırma veya tıklama olmadan istek üretmesi imkansızdır
+    total_interactive_events = (
+        features.get("mouse_points", 0)
+        + features.get("click_count", 0)
+        + features.get("key_count", 0)
+        + features.get("scroll_count", 0)
+        + features.get("touch_event_count", 0)
+    )
+    if total_interactive_events == 0:
+        if total_risk == 0.0:
+            total_risk += 60.0
+            reasons.append(
+                "Zero user interaction telemetry detected: Request submitted without any mouse, keyboard, touch, or click events (Automated Bot)."
+            )
+        else:
+            reasons.append("Zero user interaction telemetry detected.")
+
+    # 3. Faresiz veya Yetersiz Masaüstü Hareketi (Teleport / Macro Click)
     is_touch = browser_data.get("touch_supported", False)
-    if (features["click_count"] > 0 or features["key_count"] > 0) and features["mouse_points"] == 0:
-        total_risk += 50.0
-        reasons.append("Interactive events occurred without mouse movement telemetry.")
+    if (features["click_count"] > 0 or features["key_count"] > 0) and not is_touch:
+        if features["mouse_points"] == 0:
+            total_risk += 50.0
+            reasons.append("Interactive events occurred without mouse movement telemetry.")
+        elif 1 <= features["mouse_points"] <= 2:
+            total_risk += 60.0
+            reasons.append(
+                f"Instantaneous cursor teleportation: Only {features['mouse_points']} mouse point(s) recorded before interaction (Macro Bot)."
+            )
 
     # 3.5 Mobil & Dokunmatik Biyometrik Doğrulama (Capacitive Touch Kinematics)
     if is_touch:
@@ -149,7 +173,7 @@ def analyze_behavior(
             )
 
     # 4. Kinematik & Bézier Eğrisi Analizi
-    if features["mouse_points"] > 5:
+    if features["mouse_points"] >= 3:
         # Erişilebilirlik modunda matematiksel katılık azaltılır (örn. Trackball kullanıcıları için)
         acc_multiplier = 0.3 if accessibility_mode else 1.0
 
@@ -338,6 +362,13 @@ def analyze_behavior(
         or fitts_violation
         or (recent_request_count > 5 and freq_anomaly >= 0.95)
         or (features.get("max_velocity", 0.0) > 15.0)
+        or (ai_score >= 50.0)  # 1D-CNN AI bot kararı Brave ile bypass edilemez
+        or (heuristic_score >= 70.0)  # Yüksek bot anomalisi Brave ile bypass edilemez
+        or (features.get("dt_var", 1.0) < 0.01 and features.get("mouse_points", 0) >= 10)
+        or any("Session Behavioral Invariance" in r for r in reasons)
+        or any("Synthetic harmonic oscillator tremor" in r for r in reasons)
+        or any("Unnatural polynomial acceleration curve" in r for r in reasons)
+        or any("Synthetic differential curvature" in r for r in reasons)
     )
 
     is_brave_like = is_dual_hook or browser_data.get("is_webgl_hooked") or browser_data.get("is_canvas_hooked")
@@ -423,7 +454,7 @@ def classify_threat(
     # 2. MINIMUM_JERK_BOT (Sentetik Biyolojik Eğri / Flash & Hogan / Bézier İvme / Fitts İhlali / Spektral Sinüs)
     # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler veya FFT sinüs osilatörü
     if (
-        features.get("mouse_points", 0) > 5
+        features.get("mouse_points", 0) >= 3
         and features.get("total_distance", 0) > 30
         and not features.get("touch_supported", False)
     ):
@@ -442,13 +473,13 @@ def classify_threat(
 
     # 3. LINEAR_MACRO (Doğrusal Hareket / Sıfır Hız Varyansı / Teleport Fare)
     is_linear = (
-        features.get("mouse_points", 0) > 5
+        features.get("mouse_points", 0) >= 3
         and features.get("total_distance", 0) > 30
         and not features.get("touch_supported", False)
         and (features.get("straightness", 0.0) > 0.985 or features.get("velocity_var", 1.0) < 1e-5)
     ) or (
         (features.get("click_count", 0) > 0 or features.get("key_count", 0) > 0)
-        and features.get("mouse_points", 0) == 0
+        and features.get("mouse_points", 0) <= 2
         and not features.get("touch_supported", False)
     )
     if is_linear:

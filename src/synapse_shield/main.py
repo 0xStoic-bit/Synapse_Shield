@@ -551,7 +551,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     pow_nonce = body.get("pow_nonce")
     pow_salt = body.get("pow_salt")
 
-    session_id = request.cookies.get("synapse_session") or request.headers.get("x-session-id") or ip
+    session_id = f"ip_{ip}"
     session_history = await asyncio.to_thread(get_storage().get_session_telemetries, session_id, 300)
 
     bot_score, classification, reasons, details = await asyncio.to_thread(
@@ -665,7 +665,7 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
                     await websocket.send_text(f"[ERROR] Could not clear logs: {e}")
             elif cmd == "status":
                 try:
-                    stats = await get_logs(limit=1)
+                    stats = await asyncio.to_thread(fetch_logs_summary, 1)
                     await websocket.send_text(
                         f"[STATUS] Total Req: {stats['total_requests']}, Bots: {stats['bot_requests']} ({stats['bot_ratio']:.1f}%)"
                     )
@@ -715,9 +715,7 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
         manager.disconnect(websocket)
 
 
-@app.get("/api/logs")
-async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
-    verify_admin(request)
+def fetch_logs_summary(limit: int = 50) -> dict[str, Any]:
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -766,6 +764,12 @@ async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
         "threat_distribution": threat_distribution,
         "logs": recent_logs,
     }
+
+
+@app.get("/api/logs")
+async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
+    verify_admin(request)
+    return await asyncio.to_thread(fetch_logs_summary, limit)
 
 
 @app.get("/metrics")

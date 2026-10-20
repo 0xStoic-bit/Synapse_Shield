@@ -132,14 +132,32 @@
         if (this.clicks.length > 50) this.clicks.shift();
       }, { passive: true });
 
-      // Keyboard dynamics
-      window.addEventListener("keydown", () => {
-        this.keystrokes.push({ type: "down", t: Date.now() });
+      // Keyboard dynamics (Dwell & Flight Time Tracking)
+      const activeKeys = {};
+      window.addEventListener("keydown", (e) => {
+        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.code || "unknown") : "unknown";
+        const now = Date.now();
+        if (!activeKeys[keyName]) {
+          activeKeys[keyName] = now;
+        }
+        this.keystrokes.push({ type: "down", key: keyName, t: now });
         if (this.keystrokes.length > 50) this.keystrokes.shift();
       }, { passive: true });
 
-      window.addEventListener("keyup", () => {
-        this.keystrokes.push({ type: "up", t: Date.now() });
+      window.addEventListener("keyup", (e) => {
+        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.code || "unknown") : "unknown";
+        const now = Date.now();
+        const downTime = activeKeys[keyName];
+        delete activeKeys[keyName];
+        const duration = downTime ? (now - downTime) : 0;
+        this.keystrokes.push({
+          type: "up",
+          key: keyName,
+          t: now,
+          down: downTime || now,
+          up: now,
+          duration_ms: duration,
+        });
         if (this.keystrokes.length > 50) this.keystrokes.shift();
       }, { passive: true });
 

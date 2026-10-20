@@ -158,3 +158,48 @@ def test_get_storage_fallback():
         assert isinstance(storage, SQLiteStorageBackend)
 
     set_storage(None)
+
+
+def test_sqlite_thread_local_connection_reuse_and_wal(tmp_path):
+    """Verify thread-local connection persistence, WAL mode, and L1 sliding-window behavior."""
+    import concurrent.futures
+    db_file = str(tmp_path / "test_thread_local.db")
+    backend = SQLiteStorageBackend(db_path=db_file)
+
+    # 1. Aynı thread içinde _get_connection çağrıları aynı sqlite3.Connection nesnesini dönmeli
+    conn1 = backend._get_connection()
+    conn2 = backend._get_connection()
+    assert conn1 is conn2, "Thread-local failed: Expected identical connection instance for same thread"
+
+    # 2. WAL modu doğrulanmalı
+    cur = conn1.cursor()
+    cur.execute("PRAGMA journal_mode;")
+    mode = cur.fetchone()[0]
+    assert mode.lower() == "wal", f"Expected WAL journal mode, got {mode}"
+
+    # 3. Farklı bir thread çağrıldığında farklı bir connection nesnesi almalı
+    other_conn = None
+
+    def worker():
+        nonlocal other_conn
+        other_conn = backend._get_connection()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        ex.submit(worker).result()
+
+    assert other_conn is not None
+    assert other_conn is not conn1, "Thread isolation failed: Different threads must not share SQLite connection instance"
+
+    # 4. L1 Kayan pencere bellek içi vuruş takibi ve temizliği
+    test_ip = "192.168.10.55"
+    assert backend.record_bot_strike(test_ip, threshold=3, window_sec=60) is False
+    assert backend.record_bot_strike(test_ip, threshold=3, window_sec=60) is False
+    assert backend.record_bot_strike(test_ip, threshold=3, window_sec=60) is True  # Ban
+    assert backend.is_ip_banned(test_ip) is True
+
+    # clear_all L1 ve diski temizlemeli
+    backend.clear_all()
+    assert backend.is_ip_banned(test_ip) is False
+    assert len(backend._ip_strikes_l1) == 0
+    assert len(backend._ip_history) == 0
+

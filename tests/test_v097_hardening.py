@@ -26,7 +26,7 @@ from synapse_shield.tokens import generate_challenge
 
 
 def test_version_and_type_stubs():
-    assert __version__ == "0.9.7"
+    assert __version__ == "0.9.8"
     pkg_dir = Path(__file__).resolve().parent.parent / "src" / "synapse_shield"
     assert (pkg_dir / "py.typed").exists(), "py.typed file is missing"
     assert (pkg_dir / "synapse_core_rs.pyi").exists(), "synapse_core_rs.pyi type stub is missing"

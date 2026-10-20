@@ -5,6 +5,7 @@ Validates the mitigation of all 11 reported vulnerabilities (P0, P1, P2).
 
 import base64
 import json
+import math
 import sqlite3
 import time
 import pytest
@@ -108,17 +109,29 @@ def test_webhook_ssrf_and_dns_rebinding(client, monkeypatch):
 
 # --- [AÇIK-04] Brave Farbling Override Logic Flaw ---
 def test_brave_farbling_override_with_anomalies():
-    # Human mouse movements (straightness < 0.99, avg_jerk > 0.00008)
-    mouse_movements = [{"x": 100 + i * 2, "y": 100 + (i % 3) * 5, "t": i * 30} for i in range(25)]
+    # Human mouse movements (straightness < 0.99, avg_jerk > 0.00008, organic dt variation)
+    import random
+    random.seed(42)
+    mouse_movements = []
+    t_curr = 1000
+    for i in range(35):
+        t_curr += random.randint(18, 32)
+        mouse_movements.append(
+            {
+                "x": round(50 + i * 12 + random.gauss(0, 1.8)),
+                "y": round(100 + math.sin(i / 3.0) * 18.0 + random.gauss(0, 1.8)),
+                "t": t_curr,
+            }
+        )
 
     # Case A: Pure organic user with Brave canvas farbling -> Capped at 34% (Human)
     clean_brave_telemetry = {
         "browser": {"is_canvas_hooked": True, "webdriver": False, "screen_width": 1920, "screen_height": 1080},
         "mouse_movements": mouse_movements,
-        "clicks": [{"x": 140, "y": 110, "t": 750}],
+        "clicks": [{"x": 140, "y": 110, "t": t_curr}],
         "keystrokes": [],
     }
-    score_a, cls_a, reasons_a, _ = analyze_behavior(clean_brave_telemetry)
+    score_a, cls_a, reasons_a, details_a = analyze_behavior(clean_brave_telemetry)
     assert score_a <= 34.0
     assert cls_a == "Human"
     assert any("capped at 34.0" in r for r in reasons_a)

@@ -74,8 +74,9 @@ class SynapseShieldASGIMiddleware:
         client_host = client[0] if client else "127.0.0.1"
         client_ip = resolve_client_ip(client_host, scope.get("headers", []))
 
-        # Extract Headers (User-Agent, X-Synapse-Token, PoW)
+        # Extract Headers (User-Agent, Content-Type, X-Synapse-Token, PoW)
         user_agent = "unknown"
+        content_type = ""
         token = None
         pow_nonce = None
         pow_salt = None
@@ -84,6 +85,8 @@ class SynapseShieldASGIMiddleware:
             h_name = header_name.lower()
             if h_name == b"user-agent":
                 user_agent = header_val.decode("utf-8", errors="ignore")
+            elif h_name == b"content-type":
+                content_type = header_val.decode("utf-8", errors="ignore").lower()
             elif h_name == b"x-synapse-token":
                 token = header_val.decode("utf-8", errors="ignore")
             elif h_name == b"x-synapse-pow-nonce":
@@ -127,14 +130,15 @@ class SynapseShieldASGIMiddleware:
             return await receive()
 
         body_json: dict[str, Any] = {}
-        if body_bytes:
+        if body_bytes and ("application/json" in content_type or (not token and body_bytes.strip().startswith(b"{"))):
             try:
                 parsed = json.loads(body_bytes.decode("utf-8"))
                 if isinstance(parsed, dict):
                     body_json = parsed
             except Exception:
-                await self._send_json_error(send, 400, {"error": "Invalid JSON body format."})
-                return
+                if not token:
+                    await self._send_json_error(send, 400, {"error": "Invalid JSON body format."})
+                    return
 
         # Fallback to JSON body if not present in headers
         if not token:
