@@ -5,6 +5,26 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9] - 2026-10-21
+### Security & Kinematic Hardening
+- **[P0] Mobile Capacitive Touch & Swipe Kinematic Defense:**
+  - **Effective Capacitive Proof Validation (`effective_is_touch`):** Patched bypass where desktop bots claimed `"touch_supported": true` to skip all 6 desktop kinematic filters. Enforced strict proof-of-touch requirement: if `mouse_points >= 3` but no capacitive contact data (`touch_event_count == 0`) exists, flagged with +75 Risk (`"Spoofed touch_supported flag on non-capacitive desktop pointer trajectory"`) and forced all desktop kinematic filters to execute.
+  - **Synthetic Constant Touch Radius Trap:** Enforced multi-point contact deformation physics. Flagged artificial touch trajectories with zero radius variance (`touch_radius_variance == 0.0` over $\ge 4$ points) with +55 Risk (`"Synthetic touch profile: zero radius variance"`), neutralizing headless mobile emulators.
+  - **Mobile Thumb Swipe Curvature & Velocity Dynamics:** Constrained swipe straightness and velocity variance to enforce natural physiological biomechanics during touch interactions.
+- **[P0] Proof-of-Work (PoW) Hardening & Challenge Farm Veto:**
+  - **Hard Bot Violation Veto:** Strictly denied PoW challenges and immediate bypass to requests triggering critical bot anomalies (zero interaction, instantaneous teleportation, stealth tampering, macro straight lines, and deterministic replay templates). Critical bots receive immediate HTTP 403 blocks with zero PoW escape route.
+  - **Narrowed Gray Area Window:** Narrowed PoW challenge issuance strictly to borderline ambiguous scores (`35.0 <= score < 55.0`), eliminating bot exploitation of the previously wider challenge margin.
+  - **Cryptographic Client-IP Binding:** Bound PoW challenge HMAC salt directly to the client's resolved IP address, preventing distributed challenge relays, cross-IP replay, and proxy solver farm exploitation.
+- **[P0] Golden Trajectory Replay & Spatial Alignment Defense:**
+  - **Multi-Dimensional Fuzzy Trajectory Similarity:** Implemented sliding-window trajectory hash and fuzzy kinematic delta matching ($\delta < 0.015$), detecting sophisticated replay attacks using minor perturbation or timestamp shifts across sessions.
+  - **Click-to-Cursor Spatial Misalignment Detection:** Enforced coordinate consistency between click events and the final recorded pointer trajectory point ($\Delta d > 50\text{ px}$ flags detached synthetic click injection with +50 Risk).
+  - **Monotonic Relative Timestamp & Jitter Validation:** Enforced strict relative timestamp progression to neutralize synthetic batch-injected points.
+- **[P0] Secret-Keyed Dynamic Threshold Jitter:**
+  - **White-Box Boundary Jitter ($\pm 5\%$):** Implemented deterministic dynamic threshold modulation derived from HMAC-SHA256 of the server's `SECRET_KEY` and epoch window, preventing attackers from probing static decision boundaries (e.g. riding exactly at 34.9 / 49.9).
+- **[P0] Storage & Active Learning Anti-Poisoning Architecture:**
+  - **Atomic SQLite Sliding-Window Accounting:** Enhanced SQLite storage with atomic transaction boundaries and sliding window queries for request tracking and persistent bot strike accumulation.
+  - **Active Learning Training Quota (`train.py`):** Added strict per-IP sample capping ($\le 3$ samples per IP) in the model fine-tuning pipeline, neutralizing adversarial data poisoning attacks designed to distort the 1D-CNN decision manifold.
+
 ## [0.9.8] - 2026-10-20
 ### Security & Performance Overhaul
 - **[P0] Comprehensive Cryptographic & Biometric Vulnerability Patches:**

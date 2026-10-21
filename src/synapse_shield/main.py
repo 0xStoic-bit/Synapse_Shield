@@ -543,7 +543,8 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             "details": {"threat_type": threat_type},
         }
 
-    recent_count = await asyncio.to_thread(get_recent_request_count, ip)
+    # Atomik kayan pencere istek sayımı (Race condition koruması)
+    recent_count = await asyncio.to_thread(get_storage().record_and_get_request_count, ip, 10)
     if recent_count > 100:
         ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
         raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
@@ -551,19 +552,38 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     pow_nonce = body.get("pow_nonce")
     pow_salt = body.get("pow_salt")
 
+    # Son 60 saniyedeki bot vuruşlarını kontrol et ve is_ip_penalized durumunu aktifleştir
+    strike_count = await asyncio.to_thread(get_storage().get_bot_strike_count, ip, 60)
+    is_ip_penalized = strike_count >= 1
+
     session_id = f"ip_{ip}"
     session_history = await asyncio.to_thread(get_storage().get_session_telemetries, session_id, 300)
 
     bot_score, classification, reasons, details = await asyncio.to_thread(
-        analyze_behavior, telemetry, recent_count, False, False, session_history
+        analyze_behavior, telemetry, recent_count, is_ip_penalized, False, session_history
     )
     threat_type = details.get("threat_type", "CLEAN_HUMAN" if classification == "Human" else "UNKNOWN_ANOMALY")
 
-    # Proof of Work (Smart Challenge) for Gray Area - Tek kullanımlık Nonce Tüketimi
-    if 35.0 <= bot_score <= 65.0:
+    feat = details.get("features", {}) if isinstance(details, dict) else {}
+    total_interactive_events = feat.get("total_interactive_events",
+        feat.get("mouse_points", 0) + feat.get("key_count", 0) + feat.get("touch_event_count", 0) + feat.get("click_count", 0)
+    )
+    mouse_points = feat.get("mouse_points", 0)
+    is_stealth = feat.get("is_stealth_automation", False) or (threat_type == "STEALTH_AUTOMATION")
+    has_invariance = any("Session Behavioral Invariance" in r for r in reasons) or (threat_type == "SESSION_INVARIANCE_BOT")
+
+    hard_bot_violation = (
+        total_interactive_events == 0
+        or (1 <= mouse_points <= 2)
+        or is_stealth
+        or has_invariance
+    )
+
+    # Proof of Work (Smart Challenge) for Gray Area - Daraltılmış aralık ve Sert İhlal Vetosu
+    if (35.0 <= bot_score < 55.0) and not hard_bot_violation:
         is_pow_valid = False
         if pow_nonce and pow_salt:
-            is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce))
+            is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce), client_ip=ip)
 
         if is_pow_valid:
             bot_score = max(0.0, bot_score - 20.0)
@@ -571,17 +591,20 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             threat_type = "CLEAN_HUMAN"
             reasons.append("Gray area PoW Challenge successfully solved (Risk reduced).")
         else:
-            return {"status": "challenge_required", "pow_difficulty": 4, "pow_salt": generate_pow_salt()}
+            return {"status": "challenge_required", "pow_difficulty": 4, "pow_salt": generate_pow_salt(client_ip=ip)}
 
     # Atomik ceza takibi
     record_ip_decision(ip, is_bot=(classification == "Bot"))
 
     # Oturum düzeyinde telemetri geçmişini kaydet (Replay & Invariance Koruması)
-    feat = details.get("features", {})
     background_tasks.add_task(
         get_storage().record_session_telemetry,
         session_id,
-        {"avg_jerk": feat.get("avg_jerk", 0.0), "straightness": feat.get("straightness", 0.0)},
+        {
+            "avg_jerk": feat.get("avg_jerk", 0.0),
+            "straightness": feat.get("straightness", 0.0),
+            "total_distance": feat.get("total_distance", 0.0),
+        },
         10,
         300,
     )

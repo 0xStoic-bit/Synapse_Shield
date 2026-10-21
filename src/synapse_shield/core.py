@@ -323,6 +323,7 @@ def evaluate_synapse_request_sync(
         {
             "avg_jerk": features.get("avg_jerk", 0.0),
             "straightness": features.get("straightness", 1.0),
+            "total_distance": features.get("total_distance", 0.0),
             "submovement_count": features.get("submovement_count", 0),
             "spectral_purity": features.get("spectral_purity", 0.0),
         },
@@ -334,10 +335,25 @@ def evaluate_synapse_request_sync(
         synapse_inference_latency_seconds.observe(latency)
 
     # 6. Gray Area Proof-of-Work (Smart Challenge) Flow
-    if enable_pow and (35.0 <= bot_score <= 65.0):
+    feat = details.get("features", {}) if isinstance(details, dict) else {}
+    total_interactive_events = feat.get("total_interactive_events",
+        feat.get("mouse_points", 0) + feat.get("key_count", 0) + feat.get("touch_event_count", 0) + feat.get("click_count", 0)
+    )
+    mouse_points = feat.get("mouse_points", 0)
+    is_stealth = feat.get("is_stealth_automation", False) or (details.get("threat_type") == "STEALTH_AUTOMATION")
+    has_invariance = any("Session Behavioral Invariance" in r for r in reasons) or (details.get("threat_type") == "SESSION_INVARIANCE_BOT")
+
+    hard_bot_violation = (
+        total_interactive_events == 0
+        or (1 <= mouse_points <= 2)
+        or is_stealth
+        or has_invariance
+    )
+
+    if enable_pow and (35.0 <= bot_score < 55.0) and not hard_bot_violation:
         is_pow_valid = False
         if pow_nonce and pow_salt:
-            is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce))
+            is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce), client_ip=client_ip)
 
         if is_pow_valid:
             bot_score = max(0.0, bot_score - 20.0)
@@ -347,7 +363,7 @@ def evaluate_synapse_request_sync(
                 synapse_pow_solved_total.inc()
         elif not is_shadow:
             # Emit challenge request
-            challenge_salt = generate_pow_salt()
+            challenge_salt = generate_pow_salt(client_ip=client_ip)
             return SynapseDecision(
                 allowed=False,
                 status_code=429,

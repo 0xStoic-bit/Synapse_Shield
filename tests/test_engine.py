@@ -50,7 +50,7 @@ def test_human_verification():
 
     human_payload = {
         "mouse_movements": human_movements,
-        "clicks": [{"x": 400, "y": 200, "t": t_h}],
+        "clicks": [{"x": human_movements[-1]["x"], "y": human_movements[-1]["y"], "t": t_h}],
         "keystrokes": [],
         "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080},
     }

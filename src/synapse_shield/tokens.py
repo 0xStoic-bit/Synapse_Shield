@@ -220,6 +220,14 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
                         f"Bayat veya manipüle edilmiş telemetri zaman damgası (Stale Telemetry): min_t={min_t}, challenge_ts={ts}",
                         {},
                     )
+            else:
+                # Bağıl zaman kontrolü (Relative Timestamp Anomaly)
+                if min_t < 0 or (min_elapsed > 0 and max_t > (elapsed_ms + 500)):
+                    return (
+                        False,
+                        f"Manipüle edilmiş bağıl telemetri zaman damgası (Relative Timestamp Anomaly): min_t={min_t}, max_t={max_t}, elapsed_ms={elapsed_ms}",
+                        {},
+                    )
 
     # 5. Süresi Dolan Nonce'ları Temizle
     _cleanup_expired_nonces()
@@ -227,20 +235,23 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     return True, "Geçerli", telemetry
 
 
-def generate_pow_salt() -> str:
+def generate_pow_salt(client_ip: str | None = None) -> str:
     """
     PoW (Proof of Work) için HMAC imzalı salt üretir.
     Format: salt_hex.timestamp.signature
+    Eğer client_ip verilmişse HMAC imzasına client_ip dahil edilir.
     """
     salt_hex = secrets.token_hex(8)
     ts = int(time.time() * 1000)
-    signature = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
+    ip_part = f":{client_ip.strip()}" if client_ip else ""
+    signature = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
     return f"{salt_hex}.{ts}.{signature}"
 
 
-def verify_pow_salt(signed_salt: str) -> bool:
+def verify_pow_salt(signed_salt: str, client_ip: str | None = None) -> bool:
     """
     İstemciden gelen imzalı salt'ın geçerliliğini ve süresini kontrol eder (Son 60 saniye).
+    Eğer IP koruması varsa client_ip ile eşleşmelidir.
     """
     parts = signed_salt.split(".")
     if len(parts) != 3:
@@ -252,17 +263,17 @@ def verify_pow_salt(signed_salt: str) -> bool:
     except ValueError:
         return False
 
-    expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
+    ip_part = f":{client_ip.strip()}" if client_ip else ""
+    expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected_sig):
         return False
 
     now_ms = int(time.time() * 1000)
     elapsed_sec = (now_ms - ts) / 1000.0
-    # 60 saniyeden eskiyse veya gelecek zamandaysa reddet
     return not (elapsed_sec > 60.0 or elapsed_sec < -5.0)
 
 
-def verify_and_consume_pow(salt: str, nonce: str) -> bool:
+def verify_and_consume_pow(salt: str, nonce: str, client_ip: str | None = None) -> bool:
     """
     PoW (Proof of Work) çözümünün geçerliliğini kontrol eder ve salt:nonce ikilisini
     tek kullanımlık olarak depolama katmanında tüketir (Replay koruması).
@@ -270,7 +281,7 @@ def verify_and_consume_pow(salt: str, nonce: str) -> bool:
     if not salt or not nonce:
         return False
 
-    if not verify_pow_salt(salt):
+    if not verify_pow_salt(salt, client_ip=client_ip):
         return False
 
     hash_res = hashlib.sha256((salt + nonce).encode()).hexdigest()

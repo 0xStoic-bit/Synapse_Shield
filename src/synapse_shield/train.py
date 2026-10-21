@@ -56,7 +56,7 @@ def load_training_data(
 
             cursor.execute(
                 """
-                SELECT classification, telemetry, threat_type, reasons, features 
+                SELECT classification, telemetry, threat_type, reasons, features, ip 
                 FROM logs 
                 WHERE telemetry IS NOT NULL 
                   AND (bot_score >= 90 OR bot_score <= 10)
@@ -68,8 +68,11 @@ def load_training_data(
             rows = cursor.fetchall()
             conn.close()
 
+            per_ip_counts: dict[str, int] = {}
             for row in rows:
-                label_str, telemetry_json, threat_type, reasons_json, features_json = row
+                label_str, telemetry_json, threat_type, reasons_json, features_json, ip = row
+                if ip and per_ip_counts.get(ip, 0) >= 3:
+                    continue
                 try:
                     telemetry = json.loads(telemetry_json)
                     reasons = json.loads(reasons_json) if reasons_json else []
@@ -90,6 +93,8 @@ def load_training_data(
                         Y_labels.append(1.0)
 
                     X_telemetry.append(telemetry)
+                    if ip:
+                        per_ip_counts[ip] = per_ip_counts.get(ip, 0) + 1
                 except Exception:
                     continue
     except Exception as e:

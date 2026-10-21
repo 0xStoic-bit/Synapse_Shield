@@ -2,11 +2,27 @@
 Synapse Shield - Core Behavioral Decision Engine v0.4.1 (Anti-Bezier Hardened)
 """
 
+import hashlib
 import math
 from typing import Any
 
 from .features import MultimodalTokenizer, extract_features
 from .models import SynapseHybridModel
+from .tokens import SECRET_KEY
+
+
+def _get_dynamic_threshold(base_value: float, key_tag: str, spread_pct: float = 0.05) -> float:
+    """
+    SECRET_KEY'e bağlı deterministik eşik kaydırma (Secret-Keyed Dynamic Threshold Jitter).
+    Açık kaynak kodlu statik eşikleri (0.985, 0.00008, 0.65, 0.75 vb.) sunucu bazında
+    ±%spread_pct (varsayılan ±%5) aralığında gizlice kaydırarak white-box
+    boundary-riding (sınırda gezinme) saldırılarını engeller.
+    """
+    seed_bytes = SECRET_KEY + f":threshold_jitter:{key_tag}".encode()
+    digest = hashlib.sha256(seed_bytes).digest()
+    val_int = int.from_bytes(digest[:4], "big") % 10000
+    jitter = ((val_int / 10000.0) * 2.0 - 1.0) * spread_pct
+    return base_value * (1.0 + jitter)
 
 # --- GLOBAL WARMUP ---
 # FastAPI (Uvicorn) worker başına sadece 1 kez yüklenir, RAM'de kalır.
@@ -82,6 +98,7 @@ def analyze_behavior(
         or browser_data.get("is_plugin_array_fake")
         or browser_data.get("has_webdriver_own_prop")
     )
+    features["is_stealth_automation"] = bool(is_stealth_automation)
 
     if browser_data.get("is_plugin_array_fake") or browser_data.get("has_webdriver_own_prop"):
         total_risk += 100.0
@@ -130,6 +147,7 @@ def analyze_behavior(
         + features.get("scroll_count", 0)
         + features.get("touch_event_count", 0)
     )
+    features["total_interactive_events"] = total_interactive_events
     if total_interactive_events == 0:
         if total_risk == 0.0:
             total_risk += 60.0
@@ -141,6 +159,17 @@ def analyze_behavior(
 
     # 3. Faresiz veya Yetersiz Masaüstü Hareketi (Teleport / Macro Click)
     is_touch = browser_data.get("touch_supported", False)
+
+    # 1. Mobil touch_supported: true Bypass'ını Kapatma (Gerçek Dokunma Kanıtı)
+    # Eğer fare hareketi (>=3 nokta) varsa ama hiçbirinde kapasitif temas yarıçapı (r > 0) yoksa,
+    # saldırgan masaüstü koordinatlarına sahte touch_supported=True bayrağı eklemiştir!
+    has_capacitive_data = features.get("touch_event_count", 0) > 0
+    if is_touch and features.get("mouse_points", 0) >= 3 and not has_capacitive_data:
+        total_risk += 75.0
+        reasons.append("Spoofed touch_supported flag on non-capacitive desktop pointer trajectory.")
+        is_touch = False  # Tüm masaüstü kinematik filtrelerini zorla çalıştır!
+        features["touch_supported"] = False
+
     if (features["click_count"] > 0 or features["key_count"] > 0) and not is_touch:
         if features["mouse_points"] == 0:
             total_risk += 50.0
@@ -164,9 +193,15 @@ def analyze_behavior(
             total_risk += 60.0
             reasons.append("Synthetic mobile emulation: touch_supported is true on mobile viewport but maxTouchPoints is 0.")
 
-        # B. Doğal Biyolojik Parmak Uyumu (Fleshy Finger Compliance & Area Bonus)
-        # Fiziksel kapasitif ekranda insan parmağı temas yüzeyinde mikro deformasyon üretir
-        if touch_count >= 2 and avg_radius >= 3.0:
+        # Sabit Yarıçap (touch_radius_var == 0) Tuzağı & B. Doğal Biyolojik Parmak Uyumu
+        # Bot -15.0 bonusu almak için her noktaya sabit "r": 12.0 yazacaktır.
+        # Gerçek insan parmağı ekrana değdiğinde temas alanı basınca göre mikro düzeyde değişir (touch_radius_var > 0).
+        if touch_count >= 4 and radius_var < 1e-6:
+            total_risk += 55.0
+            reasons.append(
+                f"Synthetic touch emulation detected: Zero contact radius variance (radius_var: {radius_var:.8f})."
+            )
+        elif touch_count >= 2 and avg_radius >= 3.0 and radius_var >= 1e-6:
             total_risk = max(0.0, total_risk - 15.0)
             reasons.append(
                 f"Capacitive human touch contact verified (avg_radius: {avg_radius:.1f}px, compliance_var: {radius_var:.3f})."
@@ -177,15 +212,29 @@ def analyze_behavior(
         # Erişilebilirlik modunda matematiksel katılık azaltılır (örn. Trackball kullanıcıları için)
         acc_multiplier = 0.3 if accessibility_mode else 1.0
 
-        # A. Doğrusallık (Düz Çizgi Botları)
-        if features["total_distance"] > 30 and features["straightness"] > 0.985 and not is_touch:
+        # Secret-Keyed Dynamic Threshold Jitter (±%5 deterministik kaydırma, 1.0 üst sınır korumalı)
+        straightness_thresh = min(0.998, _get_dynamic_threshold(0.985, "straightness"))
+        straightness_swipe_thresh = min(0.999, _get_dynamic_threshold(0.995, "straightness_swipe"))
+        avg_jerk_thresh = _get_dynamic_threshold(0.00008, "avg_jerk")
+        spectral_purity_thresh = _get_dynamic_threshold(0.65, "spectral_purity")
+        curvature_thresh = _get_dynamic_threshold(0.75, "curvature")
+
+        # A. Doğrusallık (Düz Çizgi Botları & Mobil Swipe)
+        # Mobilde kullanıcı ekranı kaydırdığında (mouse_points >= 5 ve total_distance > 50),
+        # insan başparmağı cetvelle çizilmiş gibi (straightness > 0.995) hareket edemez.
+        is_straight_bot = (
+            (not is_touch and features["total_distance"] > 30 and features["straightness"] > straightness_thresh)
+            or (is_touch and features.get("mouse_points", 0) >= 5 and features["total_distance"] > 50 and features["straightness"] > straightness_swipe_thresh)
+        )
+        if is_straight_bot:
             risk_add = 75.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(
                 f"Euclidean straight-line trajectory detected (straightness: {features['straightness']:.4f}) [+{risk_add:.1f}]."
             )
 
-        # B. Robotik Hız & İvme Varyansı
+        # B. Robotik Hız & İvme Varyansı (Masaüstü ve Mobil Swipe)
+        # Mobilde swipe sırasında hız varyansı sıfır olamaz (velocity_var < 1e-5).
         if features["total_distance"] > 30 and features["velocity_var"] < 1e-5:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
@@ -200,7 +249,7 @@ def analyze_behavior(
             )
 
         # D. Nöromüsküler Jerk Titremesi Eksikliği (Bézier matematiksel pürüzsüzlük tespiti)
-        if features["total_distance"] > 50 and features["avg_jerk"] < 0.00008 and not is_touch:
+        if features["total_distance"] > 50 and features["avg_jerk"] < avg_jerk_thresh and not is_touch:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(
@@ -230,7 +279,7 @@ def analyze_behavior(
         if features["total_distance"] > 30 and not is_touch:
             purity = features.get("spectral_purity", 0.0)
             entropy = features.get("spectral_entropy", 1.0)
-            if purity > 0.65:
+            if purity > spectral_purity_thresh:
                 risk_add = 65.0 * acc_multiplier
                 total_risk += risk_add
                 reasons.append(
@@ -256,12 +305,35 @@ def analyze_behavior(
 
         # J. Diferansiyel Eğrilik Analizi (κ(t) - AI & Bézier Bot Avcısı v0.9.2)
         curvature_score = features.get("curvature_score", 0.0)
-        if curvature_score >= 0.75 and features["total_distance"] > 30 and not is_touch:
+        if curvature_score >= curvature_thresh and features["total_distance"] > 30 and not is_touch:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(
                 f"Synthetic differential curvature profile detected (curvature_score: {curvature_score:.2f}, rate_var: {features.get('curvature_rate_var', 0.0):.6f}) [+{risk_add:.1f}]."
             )
+
+    # 4.5 Tıklama – İmleç Uzamsal Hizalaması (Click-to-Cursor Spatial Check)
+    # Gerçek bir insan tıklama yaptığında, son mousemove koordinatı (x_last, y_last) ile click koordinatı (x_click, y_click) aynı noktadadır (Δd < 20 px).
+    # Kayıtlı fare yörüngesini başka bir form butonuna yapıştıran botlarda son fare noktası ile tıklama noktası uyuşmaz → Δd > 50 px ise +65.0 Risk.
+    clicks = telemetry.get("clicks", [])
+    moves = telemetry.get("mouse_movements", [])
+    if isinstance(clicks, list) and isinstance(moves, list) and clicks and moves:
+        try:
+            valid_clicks = [c for c in clicks if isinstance(c, dict) and "x" in c and "y" in c]
+            valid_moves = [m for m in moves if isinstance(m, dict) and "x" in m and "y" in m]
+            if valid_clicks and valid_moves:
+                last_move = valid_moves[-1]
+                first_click = valid_clicks[0]
+                x_last, y_last = float(last_move["x"]), float(last_move["y"])
+                x_click, y_click = float(first_click["x"]), float(first_click["y"])
+                delta_d = math.hypot(x_last - x_click, y_last - y_click)
+                if delta_d > 50.0:
+                    total_risk += 65.0
+                    reasons.append(
+                        f"Click-to-cursor spatial misalignment: Click location ({x_click:.1f}, {y_click:.1f}) is {delta_d:.1f}px away from last pointer position ({x_last:.1f}, {y_last:.1f}) (Trajectory Replay Bot)."
+                    )
+        except (ValueError, TypeError, KeyError):
+            pass
 
     # 5. Klavye Dinamikleri (Dwell, Flight Time & Digraph Entropy v0.9.2)
     if features.get("key_count", 0) >= 3:
@@ -328,6 +400,36 @@ def analyze_behavior(
                 total_risk += 50.0
                 reasons.append(
                     "Session Behavioral Invariance: Zero straightness variance across consecutive session requests."
+                )
+
+        # Çok Boyutlu Bulanık Benzerlik (Fuzzy Kinematic Similarity)
+        # δ = (|J1 - J2| / max(J1, 10^-6)) + |S1 - S2| + (|D1 - D2| / max(D1, 1.0))
+        # Eğer aynı oturumdaki ardışık 3 istekte δ < 0.015 (%98.5 benzerlik) ise template replay + jitter
+        triplets = []
+        for h in session_history:
+            if "avg_jerk" in h or "straightness" in h or "total_distance" in h:
+                j = float(h.get("avg_jerk", 0.0))
+                s = float(h.get("straightness", 0.0))
+                d = float(h.get("total_distance", 0.0))
+                triplets.append((j, s, d))
+
+        if len(triplets) >= 3:
+            def calc_delta(t1, t2):
+                j1, s1, d1 = t1
+                j2, s2, d2 = t2
+                return (
+                    abs(j1 - j2) / max(j1, 1e-6)
+                    + abs(s1 - s2)
+                    + abs(d1 - d2) / max(d1, 1.0)
+                )
+
+            t_last3 = triplets[-3:]
+            delta1 = calc_delta(t_last3[0], t_last3[1])
+            delta2 = calc_delta(t_last3[1], t_last3[2])
+            if delta1 < 0.015 and delta2 < 0.015:
+                total_risk += 70.0
+                reasons.append(
+                    f"Session Behavioral Invariance: High fuzzy kinematic similarity detected across session requests (delta1: {delta1:.4f}, delta2: {delta2:.4f} < 0.015, template replay with jitter)."
                 )
 
     heuristic_score = min(100.0, max(0.0, total_risk))
@@ -451,32 +553,35 @@ def classify_threat(
     if is_stealth:
         return "STEALTH_AUTOMATION"
 
+        # Secret-Keyed Dynamic Thresholds
+    straightness_thresh = min(0.998, _get_dynamic_threshold(0.985, "straightness"))
+    avg_jerk_thresh = _get_dynamic_threshold(0.00008, "avg_jerk")
+    spectral_purity_thresh = _get_dynamic_threshold(0.65, "spectral_purity")
+
     # 2. MINIMUM_JERK_BOT (Sentetik Biyolojik Eğri / Flash & Hogan / Bézier İvme / Fitts İhlali / Spektral Sinüs)
-    # Düz çizgi olmayan (straightness <= 0.985) ancak sentetik pürüzsüzlüğe / düşük jerk'e sahip eğriler veya FFT sinüs osilatörü
     if (
         features.get("mouse_points", 0) >= 3
         and features.get("total_distance", 0) > 30
         and not features.get("touch_supported", False)
     ):
         is_min_jerk = (
-            features.get("straightness", 0.0) <= 0.985
+            features.get("straightness", 0.0) <= straightness_thresh
             and (
-                features.get("avg_jerk", 1.0) < 0.00008
+                features.get("avg_jerk", 1.0) < avg_jerk_thresh
                 or features.get("acceleration_var", 1.0) < 1.5e-5
                 or (features.get("click_count", 0) > 0 and features.get("terminal_decel_ratio", 0.0) > 0.70)
                 or (features.get("mouse_points", 0) >= 10 and features.get("dt_var", 1.0) < 0.01)
                 or (features.get("total_distance", 0) > 60 and features.get("submovement_count", 0) <= 1)
             )
-        ) or (features.get("spectral_purity", 0.0) > 0.65)
+        ) or (features.get("spectral_purity", 0.0) > spectral_purity_thresh)
         if is_min_jerk:
             return "MINIMUM_JERK_BOT"
 
-    # 3. LINEAR_MACRO (Doğrusal Hareket / Sıfır Hız Varyansı / Teleport Fare)
+    # 3. LINEAR_MACRO (Doğrusal Hareket / Sıfır Hız Varyansı / Teleport Fare & Mobil Swipe)
     is_linear = (
         features.get("mouse_points", 0) >= 3
         and features.get("total_distance", 0) > 30
-        and not features.get("touch_supported", False)
-        and (features.get("straightness", 0.0) > 0.985 or features.get("velocity_var", 1.0) < 1e-5)
+        and (features.get("straightness", 0.0) > straightness_thresh or features.get("velocity_var", 1.0) < 1e-5)
     ) or (
         (features.get("click_count", 0) > 0 or features.get("key_count", 0) > 0)
         and features.get("mouse_points", 0) <= 2

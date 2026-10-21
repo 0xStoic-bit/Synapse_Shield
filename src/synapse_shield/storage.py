@@ -83,6 +83,11 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    def get_bot_strike_count(self, ip: str, window_sec: int = 60) -> int:
+        """Get the number of bot strikes recorded for an IP within window_sec."""
+        pass
+
+    @abstractmethod
     def clear_all(self) -> None:
         """Clear all nonces, bans, and bot strikes (used for tests and admin clear)."""
         pass
@@ -429,6 +434,31 @@ class SQLiteStorageBackend(StorageBackend):
                 return True
             return False
 
+    def get_bot_strike_count(self, ip: str, window_sec: int = 60) -> int:
+        now = time.time()
+        l1_count = 0
+        with self._lock:
+            if ip in self._ip_strikes_l1:
+                q = self._ip_strikes_l1[ip]
+                cutoff = now - window_sec
+                while q and q[0] < cutoff:
+                    q.popleft()
+                l1_count = len(q)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM ip_strikes WHERE ip = ? AND timestamp >= ?",
+                    (ip, now - window_sec),
+                )
+                row = cursor.fetchone()
+                db_count = row[0] if row else 0
+                return max(l1_count, db_count)
+        except Exception as e:
+            logger.error(f"SQLite get_bot_strike_count error: {e}")
+            return l1_count
+
     def clear_all(self) -> None:
         if HAS_RUST_CORE and synapse_core_rs is not None:
             try:
@@ -640,6 +670,19 @@ class RedisStorageBackend(StorageBackend):
             return self.fallback.record_bot_strike(
                 ip, threshold=threshold, window_sec=window_sec, ban_duration_sec=ban_duration_sec, reason=reason
             )
+
+    def get_bot_strike_count(self, ip: str, window_sec: int = 60) -> int:
+        try:
+            key = f"synapse:strikes:{ip}"
+            now = time.time()
+            pipeline = self.client.pipeline()
+            pipeline.zremrangebyscore(key, 0, now - window_sec)
+            pipeline.zcard(key)
+            results = pipeline.execute()
+            return int(results[1])
+        except Exception as e:
+            logger.warning("Redis get_bot_strike_count failed (%s), falling back to SQLite", e)
+            return self.fallback.get_bot_strike_count(ip, window_sec)
 
     def clear_all(self) -> None:
         try:

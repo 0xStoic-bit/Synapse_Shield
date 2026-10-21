@@ -128,7 +128,7 @@ def test_brave_farbling_override_with_anomalies():
     clean_brave_telemetry = {
         "browser": {"is_canvas_hooked": True, "webdriver": False, "screen_width": 1920, "screen_height": 1080},
         "mouse_movements": mouse_movements,
-        "clicks": [{"x": 140, "y": 110, "t": t_curr}],
+        "clicks": [{"x": mouse_movements[-1]["x"], "y": mouse_movements[-1]["y"], "t": t_curr}],
         "keystrokes": [],
     }
     score_a, cls_a, reasons_a, details_a = analyze_behavior(clean_brave_telemetry)

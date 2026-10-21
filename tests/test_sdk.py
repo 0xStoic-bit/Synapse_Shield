@@ -85,10 +85,16 @@ def test_pow_gray_area_and_fresh_retry(mock_predict):
     chal1_res = client.get("/api/challenge")
     challenge1 = chal1_res.json()["challenge"]
 
-    # Telemetry designed for gray area: is_webgl_hooked adds +40.0 risk
+    # Telemetry designed for gray area: is_webgl_hooked adds +45.0 risk without hard bot violation
     telemetry = {
-        "mouse_movements": [],
-        "clicks": [],
+        "mouse_movements": [
+            {"x": 100, "y": 100, "t": 1000},
+            {"x": 105, "y": 105, "t": 1050},
+            {"x": 110, "y": 110, "t": 1100},
+            {"x": 115, "y": 115, "t": 1150},
+            {"x": 120, "y": 120, "t": 1200},
+        ],
+        "clicks": [{"x": 120, "y": 120, "t": 1250}],
         "keystrokes": [],
         "scrolls": [],
         "browser": {
@@ -166,8 +172,14 @@ def test_pow_replay_attack_rejection_on_reused_token(mock_predict):
     challenge = chal_res.json()["challenge"]
 
     telemetry = {
-        "mouse_movements": [],
-        "clicks": [],
+        "mouse_movements": [
+            {"x": 100, "y": 100, "t": 1000},
+            {"x": 105, "y": 105, "t": 1050},
+            {"x": 110, "y": 110, "t": 1100},
+            {"x": 115, "y": 115, "t": 1150},
+            {"x": 120, "y": 120, "t": 1200},
+        ],
+        "clicks": [{"x": 120, "y": 120, "t": 1250}],
         "keystrokes": [],
         "scrolls": [],
         "browser": {

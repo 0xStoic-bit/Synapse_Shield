@@ -84,7 +84,7 @@ def test_brave_farbling_legitimate_human_is_capped():
             "screen_height": 1080,
         },
         "mouse_movements": human_movements,
-        "clicks": [{"x": 400, "y": 200, "t": t_curr}],
+        "clicks": [{"x": human_movements[-1]["x"], "y": human_movements[-1]["y"], "t": t_curr}],
         "keystrokes": [],
     }
     score, classification, reasons, _ = analyze_behavior(clean_brave_telemetry)
@@ -286,7 +286,7 @@ def test_middleware_allows_non_json_multipart_with_header_token():
         "telemetry": {
             "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
             "mouse_movements": human_movements,
-            "clicks": [{"x": 100, "y": 100, "t": t_curr}],
+            "clicks": [{"x": human_movements[-1]["x"], "y": human_movements[-1]["y"], "t": t_curr}],
         },
     }
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
