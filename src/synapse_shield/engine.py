@@ -213,8 +213,8 @@ def analyze_behavior(
         acc_multiplier = 0.3 if accessibility_mode else 1.0
 
         # Secret-Keyed Dynamic Threshold Jitter (±%5 deterministik kaydırma, 1.0 üst sınır korumalı)
-        straightness_thresh = min(0.998, _get_dynamic_threshold(0.985, "straightness"))
-        straightness_swipe_thresh = min(0.999, _get_dynamic_threshold(0.995, "straightness_swipe"))
+        straightness_thresh = max(0.985, min(0.998, _get_dynamic_threshold(0.985, "straightness")))
+        straightness_swipe_thresh = max(0.995, min(0.999, _get_dynamic_threshold(0.995, "straightness_swipe")))
         avg_jerk_thresh = _get_dynamic_threshold(0.00008, "avg_jerk")
         spectral_purity_thresh = _get_dynamic_threshold(0.65, "spectral_purity")
         curvature_thresh = _get_dynamic_threshold(0.75, "curvature")
@@ -554,7 +554,7 @@ def classify_threat(
         return "STEALTH_AUTOMATION"
 
         # Secret-Keyed Dynamic Thresholds
-    straightness_thresh = min(0.998, _get_dynamic_threshold(0.985, "straightness"))
+    straightness_thresh = max(0.985, min(0.998, _get_dynamic_threshold(0.985, "straightness")))
     avg_jerk_thresh = _get_dynamic_threshold(0.00008, "avg_jerk")
     spectral_purity_thresh = _get_dynamic_threshold(0.65, "spectral_purity")
 
