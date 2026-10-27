@@ -55,6 +55,13 @@ fn features_to_pydict<'py>(py: Python<'py>, feat: &ExtractedFeatures) -> PyResul
     dict.set_item("flight_time_var", feat.flight_time_var)?;
     dict.set_item("digraph_entropy", feat.digraph_entropy)?;
     dict.set_item("keystroke_score", feat.keystroke_score)?;
+    // --- Mobile SDK v2.0 Fields ---
+    dict.set_item("tap_count", feat.tap_count)?;
+    dict.set_item("avg_tap_duration", feat.avg_tap_duration)?;
+    dict.set_item("tap_duration_var", feat.tap_duration_var)?;
+    dict.set_item("device_pixel_ratio", feat.device_pixel_ratio)?;
+    dict.set_item("motion_variance", feat.motion_variance)?;
+    dict.set_item("is_mobile_gpu_mismatch", feat.is_mobile_gpu_mismatch)?;
     Ok(dict)
 }
 
@@ -91,13 +98,62 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                         raw.plugins_length = p;
                     }
                 }
+                if let Ok(Some(dpr_val)) = browser.get_item("device_pixel_ratio") {
+                    if let Ok(dpr) = dpr_val.extract::<f64>() {
+                        if dpr > 0.0 && !dpr.is_nan() && !dpr.is_infinite() {
+                            raw.device_pixel_ratio = dpr;
+                        }
+                    }
+                }
+                if let Ok(Some(mv_val)) = browser.get_item("motion_variance") {
+                    if let Ok(mv) = mv_val.extract::<f64>() {
+                        if mv >= 0.0 && !mv.is_nan() && !mv.is_infinite() {
+                            raw.motion_variance = mv;
+                        }
+                    }
+                }
+                if let Ok(Some(wgl_val)) = browser.get_item("webgl_renderer") {
+                    if let Ok(wgl) = wgl_val.extract::<String>() {
+                        raw.webgl_renderer = wgl;
+                    }
+                }
             }
         }
 
-        // 2. Click count
+        // 2. Click count & Touch Tap durations
         if let Ok(Some(clicks)) = dict.get_item("clicks") {
             if let Ok(list) = clicks.downcast::<PyList>() {
                 raw.click_count = list.len();
+                let limit = list.len().min(100);
+                for i in 0..limit {
+                    if let Ok(item) = list.get_item(i) {
+                        if let Ok(c_dict) = item.downcast::<PyDict>() {
+                            let r_val = c_dict.get_item("r").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
+                            let is_touch_src = c_dict
+                                .get_item("source")
+                                .ok()
+                                .flatten()
+                                .and_then(|v| v.extract::<String>().ok())
+                                .map(|s| s == "touch")
+                                .unwrap_or(false);
+                            let dur_opt = c_dict
+                                .get_item("tap_duration_ms")
+                                .ok()
+                                .flatten()
+                                .and_then(|v| v.extract::<f64>().ok())
+                                .or_else(|| c_dict.get_item("duration_ms").ok().flatten().and_then(|v| v.extract::<f64>().ok()));
+
+                            if let Some(dur) = dur_opt {
+                                if dur > 0.0 && dur < 5000.0 && !dur.is_nan() && !dur.is_infinite() {
+                                    raw.tap_durations.push(dur);
+                                }
+                            }
+                            if r_val > 0.0 || is_touch_src || dur_opt.unwrap_or(0.0) > 0.0 {
+                                raw.touch_click_count += 1;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -222,10 +278,26 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                             let t_res = m_dict.get_item("t").ok().flatten().and_then(|v| v.extract::<f64>().ok());
                             let r_res = m_dict.get_item("r").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
                             let f_res = m_dict.get_item("f").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
+                            let is_touch_src = m_dict
+                                .get_item("source")
+                                .ok()
+                                .flatten()
+                                .and_then(|v| v.extract::<String>().ok())
+                                .map(|s| s == "touch")
+                                .unwrap_or(false);
 
                             if let (Some(x), Some(y), Some(t)) = (x_res, y_res, t_res) {
                                 if !x.is_nan() && !x.is_infinite() && !y.is_nan() && !y.is_infinite() && !t.is_nan() && !t.is_infinite() {
-                                    raw.mouse_movements.push(MousePoint { x, y, t, r: r_res, f: f_res });
+                                    let clean_r = if !r_res.is_nan() && !r_res.is_infinite() { r_res.max(0.0) } else { 0.0 };
+                                    let clean_f = if !f_res.is_nan() && !f_res.is_infinite() { f_res.max(0.0) } else { 0.0 };
+                                    raw.mouse_movements.push(MousePoint {
+                                        x,
+                                        y,
+                                        t,
+                                        r: clean_r,
+                                        f: clean_f,
+                                        is_touch_source: is_touch_src,
+                                    });
                                 }
                             }
                         }
@@ -244,7 +316,7 @@ fn is_rust_core_active() -> bool {
 
 #[pyfunction]
 fn get_core_version() -> &'static str {
-    "0.9.8-native-rust"
+    "0.9.9-native-rust"
 }
 
 #[pyfunction]

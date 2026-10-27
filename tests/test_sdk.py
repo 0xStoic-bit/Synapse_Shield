@@ -328,3 +328,195 @@ def test_synthetic_mobile_emulation_detection():
     score, classification, reasons, details = analyze_behavior(telemetry)
     assert any("Synthetic mobile emulation" in r for r in reasons)
     assert score >= 60.0
+
+
+def test_mobile_single_tap_human_allowed():
+    """Verify that a genuine mobile single-tap (1 touchstart point + 1 click with tap_duration_ms) is allowed end-to-end without false positive."""
+    chal_res = client.get("/api/challenge")
+    assert chal_res.status_code == 200
+    challenge = chal_res.json()["challenge"]
+
+    telemetry = {
+        "mouse_movements": [
+            {"x": 195, "y": 540, "t": 1200, "r": 14.25, "f": 0.5, "source": "touch"},
+        ],
+        "clicks": [
+            {"x": 195, "y": 540, "t": 1285, "r": 14.25, "source": "touch", "tap_duration_ms": 85.0},
+        ],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 390,
+            "screen_height": 844,
+            "touch_supported": True,
+            "max_touch_points": 5,
+            "device_pixel_ratio": 3.0,
+            "webgl_renderer": "Apple GPU",
+            "motion_variance": 0.0124,
+            "plugins_length": 0,
+            "languages": "tr-TR,tr,en-US",
+        },
+    }
+
+    envelope = {
+        "challenge": challenge,
+        "telemetry": telemetry,
+        "created_at": int(time.time() * 1000),
+    }
+    token_str = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("utf-8")
+
+    res = client.post("/api/score", json={"token": token_str})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["classification"] == "Human"
+    assert data["bot_score"] < 35.0
+
+
+def test_mobile_webview_zero_radius_with_touch_source_allowed():
+    """Verify that iOS/WebView browsers reporting r=0.0 with source='touch' are not penalized as missing touch radius."""
+    telemetry = {
+        "mouse_movements": [
+            {"x": 200, "y": 400, "t": 1000, "r": 0.0, "f": 0.0, "source": "touch"},
+            {"x": 202, "y": 405, "t": 1020, "r": 0.0, "f": 0.0, "source": "touch"},
+        ],
+        "clicks": [
+            {"x": 202, "y": 405, "t": 1095, "r": 0.0, "source": "touch", "tap_duration_ms": 95.0},
+        ],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 393,
+            "screen_height": 852,
+            "touch_supported": True,
+            "max_touch_points": 5,
+            "device_pixel_ratio": 3.0,
+            "webgl_renderer": "Apple GPU",
+            "motion_variance": 0.0085,
+            "plugins_length": 0,
+            "languages": "tr-TR,tr",
+        },
+    }
+
+    score, classification, reasons, details = analyze_behavior(telemetry)
+    assert classification == "Human"
+    assert score < 30.0
+    assert details["features"]["touch_event_count"] >= 2
+
+
+def test_mobile_android_ime_soft_keyboard_allowed():
+    """Verify that Android Gboard / virtual IME keystrokes ('Unidentified' with <15ms synthetic dwell) are not flagged as robotic keystrokes."""
+    t0 = 1000
+    # Virtual keyboard fires keydown + keyup within 2-4ms with key='Unidentified', but human flight intervals
+    flight_offsets = [0, 85, 230, 480, 565, 720, 1050, 1190]
+    keystrokes = []
+    for idx, offset in enumerate(flight_offsets):
+        down_t = t0 + offset
+        up_t = down_t + 3 + (idx % 2)  # 3-4ms synthetic IME dwell
+        keystrokes.append({"key": "Unidentified", "type": "down", "t": down_t})
+        keystrokes.append({"key": "Unidentified", "type": "up", "t": up_t})
+
+    telemetry = {
+        "mouse_movements": [
+            {"x": 180, "y": 300, "t": 900, "r": 11.4, "f": 0.4, "source": "touch"},
+        ],
+        "clicks": [
+            {"x": 180, "y": 300, "t": 975, "r": 11.4, "source": "touch", "tap_duration_ms": 75.0},
+        ],
+        "keystrokes": keystrokes,
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 412,
+            "screen_height": 915,
+            "touch_supported": True,
+            "max_touch_points": 10,
+            "device_pixel_ratio": 2.625,
+            "webgl_renderer": "Adreno (TM) 740",
+            "motion_variance": 0.015,
+            "plugins_length": 0,
+            "languages": "tr-TR,tr",
+        },
+    }
+
+    score, classification, reasons, details = analyze_behavior(telemetry)
+    assert classification == "Human"
+    assert score < 35.0
+    assert not any("Keystroke dynamics mismatch" in r for r in reasons)
+
+
+def test_mobile_swipe_then_distant_tap_allowed():
+    """Verify that flick-scrolling (accelerating swipe) followed by tapping a distant button does not trigger Fitts or Click-to-Cursor false positives."""
+    # User swipes upward from y=650 to y=250 (accelerating flick), then taps a button at (310, 580)
+    swipe_points = [
+        {"x": 200, "y": 650, "t": 1000, "r": 12.1, "source": "touch"},
+        {"x": 202, "y": 620, "t": 1020, "r": 12.4, "source": "touch"},
+        {"x": 205, "y": 570, "t": 1040, "r": 12.8, "source": "touch"},
+        {"x": 207, "y": 500, "t": 1060, "r": 12.5, "source": "touch"},
+        {"x": 210, "y": 410, "t": 1080, "r": 11.9, "source": "touch"},
+        {"x": 212, "y": 300, "t": 1100, "r": 11.2, "source": "touch"},
+        # Then user touches button at (310, 580)
+        {"x": 310, "y": 580, "t": 1600, "r": 13.1, "source": "touch"},
+    ]
+    telemetry = {
+        "mouse_movements": swipe_points,
+        "clicks": [
+            {"x": 310, "y": 580, "t": 1690, "r": 13.1, "source": "touch", "tap_duration_ms": 90.0},
+        ],
+        "keystrokes": [],
+        "scrolls": [{"deltaY": 350, "t": 1120}],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 390,
+            "screen_height": 844,
+            "touch_supported": True,
+            "max_touch_points": 5,
+            "device_pixel_ratio": 3.0,
+            "webgl_renderer": "Apple GPU",
+            "motion_variance": 0.021,
+            "plugins_length": 0,
+            "languages": "tr-TR,tr",
+        },
+    }
+
+    score, classification, reasons, details = analyze_behavior(telemetry)
+    assert classification == "Human"
+    assert score < 35.0
+    assert not any("Fitts's Law violation" in r for r in reasons)
+    assert not any("Click-to-Cursor violation" in r for r in reasons)
+
+
+def test_mobile_gpu_emulator_mismatch_blocked():
+    """Verify that desktop/headless GPU renderers (SwiftShader, NVIDIA) spoofing a mobile touch viewport are blocked."""
+    telemetry = {
+        "mouse_movements": [
+            {"x": 180, "y": 400, "t": 1000, "r": 10.0, "source": "touch"},
+        ],
+        "clicks": [
+            {"x": 180, "y": 400, "t": 1002, "r": 10.0, "source": "touch", "tap_duration_ms": 2.0},
+        ],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 390,
+            "screen_height": 844,
+            "touch_supported": True,
+            "max_touch_points": 5,
+            "device_pixel_ratio": 3.0,
+            "webgl_renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0)",
+            "motion_variance": 0.0,
+            "plugins_length": 0,
+            "languages": "en-US,en",
+        },
+    }
+
+    score, classification, reasons, details = analyze_behavior(telemetry)
+    assert classification == "Bot"
+    assert score >= 85.0
+    assert details["features"]["is_mobile_gpu_mismatch"] is True
+    assert any("Synthetic mobile emulator detected" in r for r in reasons)
+    assert any("Superhuman instantaneous touch tap detected" in r for r in reasons)
+

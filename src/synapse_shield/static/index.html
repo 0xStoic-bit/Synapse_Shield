@@ -180,9 +180,9 @@
           </div>
 
           <div
-            class="flex-grow relative bg-[#06090F] min-h-[220px] overflow-hidden"
+            class="flex-grow relative bg-[#06090F] min-h-[220px] overflow-hidden touch-none"
             id="interactive-canvas"
-            onmousemove="handleCanvasMove(event)"
+            onmousemove="handleCanvasMove(event)" ontouchmove="handleCanvasMove(event)"
           >
             <canvas
               id="trail-canvas"
@@ -1035,8 +1035,8 @@ app.add_middleware(
 
       function handleCanvasMove(e) {
         const rect = e.currentTarget.getBoundingClientRect();
-        const x = Math.round(e.clientX - rect.left);
-        const y = Math.round(e.clientY - rect.top);
+        const pt = (e.touches && e.touches[0]) ? e.touches[0] : e; const x = Math.round(pt.clientX - rect.left);
+        const y = Math.round(pt.clientY - rect.top);
         document.getElementById("coord-display").textContent =
           `X: ${x.toString().padStart(3, "0")} | Y: ${y.toString().padStart(3, "0")}`;
 

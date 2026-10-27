@@ -1,5 +1,5 @@
 """
-Synapse Shield - Kinematic Feature Extractor v0.8.0 (Native Rust Core Accelerated)
+Synapse Shield - Kinematic Feature Extractor v0.9.9 (Native Rust Core Accelerated & Mobile SDK v2.0)
 """
 
 import math
@@ -83,7 +83,7 @@ def evaluate_curvature_zerocopy(x: Any, y: Any, t: Any) -> dict[str, float]:
 
 
 def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> dict[str, Any]:
-    # 0. High-Performance Native Rust Core (v0.8.0)
+    # 0. High-Performance Native Rust Core (v0.8.0+)
     if HAS_RUST_CORE and not force_python and isinstance(telemetry, dict) and synapse_core_rs is not None:
         try:
             return synapse_core_rs.extract_features_rs(telemetry)
@@ -130,12 +130,18 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         "flight_time_var": 0.0,
         "digraph_entropy": 0.5,
         "keystroke_score": 0.0,
+        "tap_count": 0,
+        "avg_tap_duration": 0.0,
+        "tap_duration_var": 0.0,
+        "device_pixel_ratio": 1.0,
+        "motion_variance": 0.0,
+        "is_mobile_gpu_mismatch": False,
     }
 
     if not isinstance(telemetry, dict):
         return features
 
-    # 1. Tarayıcı ve Ekran
+    # 1. Tarayıcı, Ekran ve Mobil Donanım Telemetrisi
     browser = telemetry.get("browser", {})
     if isinstance(browser, dict):
         features["webdriver"] = bool(browser.get("webdriver", False))
@@ -158,13 +164,78 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         except Exception:
             features["plugins_length"] = 1
 
-    # 2. Sayaçlar
+        try:
+            dpr = float(browser.get("device_pixel_ratio", 1.0))
+            if dpr > 0.0 and not math.isnan(dpr) and not math.isinf(dpr):
+                features["device_pixel_ratio"] = dpr
+        except (ValueError, TypeError):
+            features["device_pixel_ratio"] = 1.0
+
+        try:
+            mv = float(browser.get("motion_variance", 0.0))
+            if mv >= 0.0 and not math.isnan(mv) and not math.isinf(mv):
+                features["motion_variance"] = mv
+        except (ValueError, TypeError):
+            features["motion_variance"] = 0.0
+
+        webgl_renderer = str(browser.get("webgl_renderer", "")).lower()
+        if (
+            features["touch_supported"]
+            and 0.0 < features["screen_width"] < 768.0
+            and webgl_renderer
+        ):
+            desktop_or_emulator_gpus = (
+                "swiftshader",
+                "llvmpipe",
+                "softpipe",
+                "virtualbox",
+                "vmware",
+                "nvidia",
+                "geforce",
+                "radeon",
+                "uhd graphics",
+                "iris(tm)",
+                "microsoft basic render",
+            )
+            if any(sig in webgl_renderer for sig in desktop_or_emulator_gpus):
+                features["is_mobile_gpu_mismatch"] = True
+
+    # 2. Sayaçlar ve Dokunma (Tap Hold Time) Biyometrisi
     scrolls = telemetry.get("scrolls", [])
     clicks = telemetry.get("clicks", [])
     features["scroll_count"] = len(scrolls) if isinstance(scrolls, list) else 0
     features["click_count"] = len(clicks) if isinstance(clicks, list) else 0
 
-    # 3. Klavye Dinamikleri (Dwell & Flight Time Parity v0.9.2)
+    tap_durations: list[float] = []
+    touch_click_count = 0
+    if isinstance(clicks, list):
+        for c in clicks[:100]:
+            if isinstance(c, dict):
+                r_c = 0.0
+                try:
+                    r_c = float(c.get("r", 0.0))
+                except (ValueError, TypeError):
+                    r_c = 0.0
+                is_touch_src = str(c.get("source", "")) == "touch"
+
+                dur_val = c.get("tap_duration_ms", c.get("duration_ms"))
+                valid_dur = 0.0
+                if isinstance(dur_val, (int, float)) and not math.isnan(dur_val) and not math.isinf(dur_val):
+                    d_f = float(dur_val)
+                    if 0.0 < d_f < 5000.0:
+                        tap_durations.append(d_f)
+                        valid_dur = d_f
+
+                if r_c > 0.0 or is_touch_src or valid_dur > 0.0:
+                    touch_click_count += 1
+
+    features["tap_count"] = len(tap_durations)
+    if tap_durations:
+        avg_tap = sum(tap_durations) / len(tap_durations)
+        features["avg_tap_duration"] = avg_tap
+        features["tap_duration_var"] = sum((d - avg_tap) ** 2 for d in tap_durations) / len(tap_durations)
+
+    # 3. Klavye Dinamikleri (Dwell & Flight Time Parity v0.9.2 + Mobile IME Support)
     keystrokes = telemetry.get("keystrokes", [])
     if isinstance(keystrokes, list) and len(keystrokes) > 0:
         keystrokes = keystrokes[:150]  # DoS koruması: en fazla 150 tuş vuruşu işle
@@ -277,7 +348,7 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
             if n_vf >= 4:
                 bins = [0] * 8
                 for f in valid_flights:
-                    b = min(7, int(f / 50.0))
+                    b = min(7, int(f / 100.0))
                     bins[b] += 1
                 ent = 0.0
                 for c in bins:
@@ -299,7 +370,10 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                 if 0.0 < features["avg_flight_time"] < 25.0:
                     score += 0.70
 
-                if dwell_times:
+                is_mobile_ime = any(
+                    str(d.get("key", "")).lower() in ("unidentified", "process") for d in detailed
+                )
+                if dwell_times and not is_mobile_ime:
                     if features["avg_dwell_time"] < 15.0:
                         score += 0.75
                     elif features["dwell_time_var"] < 2.0 and len(dwell_times) >= 3:
@@ -359,6 +433,7 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     t = float(m["t"])
                     r = float(m.get("r", 0.0)) if "r" in m else 0.0
                     f = float(m.get("f", 0.0)) if "f" in m else 0.0
+                    is_touch_src = str(m.get("source", "")) == "touch"
                     if not (
                         math.isnan(x)
                         or math.isnan(y)
@@ -373,6 +448,7 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                             "t": t,
                             "r": max(0.0, r) if not math.isnan(r) and not math.isinf(r) else 0.0,
                             "f": max(0.0, f) if not math.isnan(f) and not math.isinf(f) else 0.0,
+                            "is_touch_source": is_touch_src,
                         })
                 except (ValueError, TypeError):
                     continue
@@ -382,11 +458,16 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         # 4.1 Dokunmatik & Kapasitif Biyometri (Touch Biometrics)
         radii = [m["r"] for m in valid_moves if m.get("r", 0.0) > 0.0]
         forces = [m["f"] for m in valid_moves if m.get("f", 0.0) > 0.0]
-        features["touch_event_count"] = len(radii)
+        explicit_touch_moves = sum(1 for m in valid_moves if m.get("is_touch_source", False))
+
         if radii:
+            features["touch_event_count"] = len(radii)
             avg_r = sum(radii) / len(radii)
             features["avg_touch_radius"] = avg_r
             features["touch_radius_var"] = sum((r_val - avg_r) ** 2 for r_val in radii) / len(radii)
+        else:
+            features["touch_event_count"] = explicit_touch_moves + touch_click_count
+
         if forces:
             features["avg_touch_force"] = sum(forces) / len(forces)
 
@@ -493,7 +574,6 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                 features["terminal_decel_ratio"] = (terminal_avg_vel / max_vel) if max_vel > 1e-5 else 1.0
 
                 # Alt-Hareket (Sub-movement Decomposition)
-                # İnsan el hareketleri hedefe ulaşana kadar birden fazla yerel hız tepe noktası (çan profili) üretir.
                 peak_count = 0
                 min_peak_thresh = 0.15 * max_vel if max_vel > 1e-5 else 0.0
                 for i in range(1, len(velocities) - 1):
@@ -503,7 +583,6 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                 features["submovement_count"] = max(1, peak_count) if max_vel > 1e-5 else 0
 
                 # Spektral Analiz (FFT & PSD)
-                # Hız serisindeki osilasyonların frekans spektrumunu inceler
                 if len(velocities) >= 8:
                     try:
                         v_centered = [v - avg_vel for v in velocities]

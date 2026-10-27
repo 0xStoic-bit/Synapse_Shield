@@ -143,3 +143,30 @@ async def replay_attack_plugin(shared_state: Dict[str, Any]):
     valid_token = base64.b64encode(json.dumps(envelope).encode()).decode()
     await asyncio.to_thread(send_attack, "Replay Attack (1st)", {"token": valid_token}, 206)
     return await asyncio.to_thread(send_attack, "Replay Attack Plugin (2nd)", {"token": valid_token}, 206)
+
+
+@redteam_attack(category="tamper", weight=28)
+async def mobile_emulator_spoof_plugin(shared_state: Dict[str, Any]):
+    print("[Attack] Executing mobile_emulator_spoof_plugin (Mobile Viewport + SwiftShader GPU + Instant Tap)...")
+    try:
+        from .live_attacker import send_attack
+    except ImportError:
+        return
+    t = int(time.time() * 1000)
+    payload = {
+        "mouse_movements": [{"x": 195, "y": 420, "t": t, "r": 12.0, "source": "touch"}],
+        "clicks": [{"x": 195, "y": 420, "t": t, "r": 12.0, "source": "touch", "tap_duration_ms": 0.0}],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 390,
+            "screen_height": 844,
+            "touch_supported": True,
+            "max_touch_points": 5,
+            "device_pixel_ratio": 3.0,
+            "webgl_renderer": "Google Inc. (Google SwiftShader)",
+            "motion_variance": 0.0,
+            "plugins_length": 0,
+        },
+    }
+    return await asyncio.to_thread(send_attack, "Mobile Emulator Spoof Plugin", payload, 207)
+

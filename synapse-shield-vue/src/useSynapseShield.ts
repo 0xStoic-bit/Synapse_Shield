@@ -41,17 +41,37 @@ function getCleanFunctionToString(): () => string {
   }
 }
 
+function getWebGLRenderer(): string {
+  try {
+    if (typeof document === "undefined" || !document.createElement) return "";
+    const canvas = document.createElement("canvas");
+    const gl = (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as any;
+    if (!gl) return "";
+    const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+    if (debugInfo) {
+      return String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "");
+    }
+    return String(gl.getParameter(gl.RENDERER) || "");
+  } catch (e) {
+    return "";
+  }
+}
+
 export interface SynapseTelemetry {
-  mouse_movements: Array<{ x: number; y: number; t: number; r?: number; f?: number }>;
-  clicks: Array<{ x: number; y: number; t: number; r?: number }>;
-  keystrokes: Array<{ type: string; t: number }>;
+  mouse_movements: Array<{ x: number; y: number; t: number; r?: number; f?: number; source?: string }>;
+  clicks: Array<{ x: number; y: number; t: number; r?: number; tap_duration_ms?: number; source?: string }>;
+  keystrokes: Array<{ type: string; key?: string; t: number; down?: number; up?: number; duration_ms?: number }>;
   scrolls: Array<{ y: number; t: number }>;
   browser: {
     webdriver: boolean;
     screen_width: number;
     screen_height: number;
+    device_pixel_ratio?: number;
     touch_supported: boolean;
     max_touch_points?: number;
+    motion_variance?: number;
+    webgl_renderer?: string;
+    orientation?: string;
     is_plugin_array_fake?: boolean;
     has_webdriver_own_prop?: boolean;
     is_webgl_hooked?: boolean;
@@ -100,6 +120,10 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
 
   let lastMoveTime = 0;
   let lastScrollTime = 0;
+  let lastMotionTime = 0;
+  let lastTouchStartTime = 0;
+  let motionSamples: number[] = [];
+  const activeKeys: Record<string, number> = {};
 
   const refreshChallenge = async (): Promise<string | null> => {
     if (typeof window === 'undefined') return null;
@@ -151,9 +175,20 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     telemetry.value.clicks = [];
     telemetry.value.keystrokes = [];
     telemetry.value.scrolls = [];
+    motionSamples = [];
+    lastTouchStartTime = 0;
   };
 
   const getProtectedPayload = (powResult?: { salt: string; nonce: number }): SynapsePayload => {
+    const n = motionSamples.length;
+    if (n >= 2) {
+      const mean = motionSamples.reduce((a, b) => a + b, 0) / n;
+      const variance = motionSamples.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+      telemetry.value.browser.motion_variance = Math.round(variance * 1000000) / 1000000;
+    } else {
+      telemetry.value.browser.motion_variance = 0;
+    }
+
     if (currentChallenge.value) {
       const envelope: any = {
         challenge: currentChallenge.value,
@@ -186,14 +221,18 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
     const now = Date.now();
-    const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
-    const f = touch.force || 0;
+    lastTouchStartTime = now;
+    const rX = touch.radiusX || (touch as any).webkitRadiusX || 0;
+    const rY = touch.radiusY || (touch as any).webkitRadiusY || rX;
+    const r = (rX + rY) * 0.5;
+    const f = touch.force || (touch as any).webkitForce || 0;
     telemetry.value.mouse_movements.push({
       x: touch.clientX,
       y: touch.clientY,
       t: now,
-      r: Math.round(r * 10) / 10,
-      f: Math.round(f * 100) / 100,
+      r: Math.round(r * 1000) / 1000,
+      f: Math.round(f * 1000) / 1000,
+      source: "touch",
     });
     lastMoveTime = now;
     if (telemetry.value.mouse_movements.length > 500) telemetry.value.mouse_movements.shift();
@@ -204,14 +243,17 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     const now = Date.now();
     if (now - lastMoveTime >= moveThrottleMs) {
       const touch = e.touches[0];
-      const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
-      const f = touch.force || 0;
+      const rX = touch.radiusX || (touch as any).webkitRadiusX || 0;
+      const rY = touch.radiusY || (touch as any).webkitRadiusY || rX;
+      const r = (rX + rY) * 0.5;
+      const f = touch.force || (touch as any).webkitForce || 0;
       telemetry.value.mouse_movements.push({
         x: touch.clientX,
         y: touch.clientY,
         t: now,
-        r: Math.round(r * 10) / 10,
-        f: Math.round(f * 100) / 100,
+        r: Math.round(r * 1000) / 1000,
+        f: Math.round(f * 1000) / 1000,
+        source: "touch",
       });
       lastMoveTime = now;
       if (telemetry.value.mouse_movements.length > 500) telemetry.value.mouse_movements.shift();
@@ -221,29 +263,81 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
   const handleTouchEnd = (e: TouchEvent) => {
     if (e.changedTouches && e.changedTouches.length > 0) {
       const touch = e.changedTouches[0];
-      const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
+      const now = Date.now();
+      const rX = touch.radiusX || (touch as any).webkitRadiusX || 0;
+      const rY = touch.radiusY || (touch as any).webkitRadiusY || rX;
+      const r = (rX + rY) * 0.5;
+      const tapDuration = lastTouchStartTime > 0 ? Math.max(1, now - lastTouchStartTime) : 0;
       telemetry.value.clicks.push({
         x: touch.clientX,
         y: touch.clientY,
-        t: Date.now(),
-        r: Math.round(r * 10) / 10,
+        t: now,
+        r: Math.round(r * 1000) / 1000,
+        tap_duration_ms: tapDuration,
+        source: "touch",
       });
       if (telemetry.value.clicks.length > 50) telemetry.value.clicks.shift();
     }
   };
 
+  const handleDeviceMotion = (e: DeviceMotionEvent) => {
+    const now = Date.now();
+    if (now - lastMotionTime < 50) return;
+    const acc = e.accelerationIncludingGravity || e.acceleration;
+    const rot = e.rotationRate;
+    let mag = 0;
+    if (acc && (acc.x !== null || acc.y !== null || acc.z !== null)) {
+      const ax = Number(acc.x) || 0;
+      const ay = Number(acc.y) || 0;
+      const az = Number(acc.z) || 0;
+      mag += Math.sqrt(ax * ax + ay * ay + az * az);
+    }
+    if (rot && (rot.alpha !== null || rot.beta !== null || rot.gamma !== null)) {
+      const ra = Number(rot.alpha) || 0;
+      const rb = Number(rot.beta) || 0;
+      const rg = Number(rot.gamma) || 0;
+      mag += Math.sqrt(ra * ra + rb * rb + rg * rg) * 0.1;
+    }
+    if (mag > 0) {
+      motionSamples.push(mag);
+      lastMotionTime = now;
+      if (motionSamples.length > 40) motionSamples.shift();
+    }
+  };
+
   const handleClick = (e: MouseEvent) => {
-    telemetry.value.clicks.push({ x: e.clientX, y: e.clientY, t: Date.now() });
+    const now = Date.now();
+    if (lastTouchStartTime > 0 && now - lastTouchStartTime < 800) {
+      return;
+    }
+    telemetry.value.clicks.push({ x: e.clientX, y: e.clientY, t: now });
     if (telemetry.value.clicks.length > 50) telemetry.value.clicks.shift();
   };
 
-  const handleKeyDown = () => {
-    telemetry.value.keystrokes.push({ type: "down", t: Date.now() });
+  const handleKeyDown = (e: KeyboardEvent) => {
+    const keyName = e.key ? e.key.toLowerCase() : (e.code || "unknown");
+    const now = Date.now();
+    if (!activeKeys[keyName]) {
+      activeKeys[keyName] = now;
+    }
+    telemetry.value.keystrokes.push({ type: "down", key: keyName, t: now });
     if (telemetry.value.keystrokes.length > 50) telemetry.value.keystrokes.shift();
   };
 
-  const handleKeyUp = () => {
-    telemetry.value.keystrokes.push({ type: "up", t: Date.now() });
+  const handleKeyUp = (e: KeyboardEvent) => {
+    const keyName = e.key ? e.key.toLowerCase() : (e.code || "unknown");
+    const now = Date.now();
+    const downTime = activeKeys[keyName];
+    delete activeKeys[keyName];
+    const duration = downTime ? (now - downTime) : 0;
+    telemetry.value.keystrokes.push({
+      type: "up",
+      key: keyName,
+      t: now,
+      down: downTime || now,
+      up: now,
+      duration_ms: duration,
+    });
     if (telemetry.value.keystrokes.length > 50) telemetry.value.keystrokes.shift();
   };
 
@@ -302,8 +396,12 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
       webdriver: navigator.webdriver || false,
       screen_width: window.innerWidth || window.screen.width,
       screen_height: window.innerHeight || window.screen.height,
+      device_pixel_ratio: window.devicePixelRatio || 1,
       touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
       max_touch_points: typeof navigator !== "undefined" ? navigator.maxTouchPoints || 0 : 0,
+      motion_variance: 0,
+      webgl_renderer: getWebGLRenderer(),
+      orientation: (window.screen && (window.screen as any).orientation && (window.screen as any).orientation.type) ? (window.screen as any).orientation.type : "",
       is_plugin_array_fake: isPluginArrayFake(),
       has_webdriver_own_prop: Object.prototype.hasOwnProperty.call(navigator, "webdriver"),
       is_webgl_hooked: checkWebGLHook(),
@@ -319,6 +417,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
     window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("devicemotion", handleDeviceMotion, { passive: true });
     window.addEventListener("click", handleClick, { passive: true });
     window.addEventListener("keydown", handleKeyDown, { passive: true });
     window.addEventListener("keyup", handleKeyUp, { passive: true });
@@ -334,6 +433,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     window.removeEventListener("touchstart", handleTouchStart);
     window.removeEventListener("touchmove", handleTouchMove);
     window.removeEventListener("touchend", handleTouchEnd);
+    window.removeEventListener("devicemotion", handleDeviceMotion);
     window.removeEventListener("click", handleClick);
     window.removeEventListener("keydown", handleKeyDown);
     window.removeEventListener("keyup", handleKeyUp);

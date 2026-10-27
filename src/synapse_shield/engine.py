@@ -1,5 +1,5 @@
 """
-Synapse Shield - Core Behavioral Decision Engine v0.4.1 (Anti-Bezier Hardened)
+Synapse Shield - Core Behavioral Decision Engine v0.9.9 (Anti-Bezier & Mobile SDK v2.0 Hardened)
 """
 
 import hashlib
@@ -23,6 +23,7 @@ def _get_dynamic_threshold(base_value: float, key_tag: str, spread_pct: float = 
     val_int = int.from_bytes(digest[:4], "big") % 10000
     jitter = ((val_int / 10000.0) * 2.0 - 1.0) * spread_pct
     return base_value * (1.0 + jitter)
+
 
 # --- GLOBAL WARMUP ---
 # FastAPI (Uvicorn) worker başına sadece 1 kez yüklenir, RAM'de kalır.
@@ -92,11 +93,15 @@ def analyze_behavior(
         reasons.append("Automation tool interface (navigator.webdriver) detected.")
 
     # 1.5 Anti-Stealth & Prototype Tamper Detection
-    browser_data = telemetry.get("browser", {})
+    browser_data = telemetry.get("browser", {}) if isinstance(telemetry, dict) else {}
+    if not isinstance(browser_data, dict):
+        browser_data = {}
+
     is_stealth_automation = (
         features.get("webdriver", False)
         or browser_data.get("is_plugin_array_fake")
         or browser_data.get("has_webdriver_own_prop")
+        or features.get("is_mobile_gpu_mismatch", False)
     )
     features["is_stealth_automation"] = bool(is_stealth_automation)
 
@@ -158,12 +163,12 @@ def analyze_behavior(
             reasons.append("Zero user interaction telemetry detected.")
 
     # 3. Faresiz veya Yetersiz Masaüstü Hareketi (Teleport / Macro Click)
-    is_touch = browser_data.get("touch_supported", False)
+    is_touch = bool(browser_data.get("touch_supported", False))
 
     # 1. Mobil touch_supported: true Bypass'ını Kapatma (Gerçek Dokunma Kanıtı)
-    # Eğer fare hareketi (>=3 nokta) varsa ama hiçbirinde kapasitif temas yarıçapı (r > 0) yoksa,
+    # Eğer fare hareketi (>=3 nokta) varsa ama hiçbirinde dokunma kanıtı (r > 0, source="touch" veya tap_duration) yoksa,
     # saldırgan masaüstü koordinatlarına sahte touch_supported=True bayrağı eklemiştir!
-    has_capacitive_data = features.get("touch_event_count", 0) > 0
+    has_capacitive_data = features.get("touch_event_count", 0) > 0 or features.get("tap_count", 0) > 0
     if is_touch and features.get("mouse_points", 0) >= 3 and not has_capacitive_data:
         total_risk += 75.0
         reasons.append("Spoofed touch_supported flag on non-capacitive desktop pointer trajectory.")
@@ -180,23 +185,35 @@ def analyze_behavior(
                 f"Instantaneous cursor teleportation: Only {features['mouse_points']} mouse point(s) recorded before interaction (Macro Bot)."
             )
 
-    # 3.5 Mobil & Dokunmatik Biyometrik Doğrulama (Capacitive Touch Kinematics)
+    # 3.5 Mobil & Dokunmatik Biyometrik Doğrulama (Capacitive Touch, Tap Hold & Anti-Emulator v2.0)
     if is_touch:
         screen_w = features.get("screen_width", 1024)
-        features.get("max_touch_points", 0)
         touch_count = features.get("touch_event_count", 0)
         avg_radius = features.get("avg_touch_radius", 0.0)
         radius_var = features.get("touch_radius_var", 0.0)
+        tap_count = features.get("tap_count", 0)
+        avg_tap_dur = features.get("avg_tap_duration", 0.0)
+        tap_dur_var = features.get("tap_duration_var", 0.0)
+        motion_var = features.get("motion_variance", 0.0)
 
         # A. Sentetik Mobil Emülasyon Tespiti (Küçük ekran + touch_supported var ama maxTouchPoints açıkça 0)
         if "max_touch_points" in browser_data and browser_data["max_touch_points"] == 0 and screen_w < 768:
             total_risk += 60.0
             reasons.append("Synthetic mobile emulation: touch_supported is true on mobile viewport but maxTouchPoints is 0.")
 
-        # Sabit Yarıçap (touch_radius_var == 0) Tuzağı & B. Doğal Biyolojik Parmak Uyumu
-        # Bot -15.0 bonusu almak için her noktaya sabit "r": 12.0 yazacaktır.
+        # B. Mobil GPU / Emülatör Çapraz Doğrulaması (SwiftShader, llvmpipe, masaüstü NVIDIA/AMD/Intel)
+        if features.get("is_mobile_gpu_mismatch", False):
+            total_risk += 85.0
+            reasons.append(
+                f"Synthetic mobile emulator detected: Desktop or software WebGL renderer ({browser_data.get('webgl_renderer', 'unknown')}) on mobile touch viewport."
+            )
+
+        # C. Sabit Yarıçap (touch_radius_var == 0) Tuzağı & Doğal Biyolojik Parmak Uyumu
         # Gerçek insan parmağı ekrana değdiğinde temas alanı basınca göre mikro düzeyde değişir (touch_radius_var > 0).
-        if touch_count >= 4 and radius_var < 1e-6:
+        # Not: iOS WebKit / WebView r=0 döndürdüğünde avg_radius == 0.0 olur; kısa kuantize dokunuşlarda (4-5 nokta)
+        # organik tap_duration veya cihaz hareket sensörü varsa yanlış pozitif engellenir.
+        has_organic_mobile_aux = avg_tap_dur >= 15.0 or motion_var > 1e-5
+        if touch_count >= 4 and avg_radius > 0.0 and radius_var < 1e-6 and (touch_count >= 6 or not has_organic_mobile_aux):
             total_risk += 55.0
             reasons.append(
                 f"Synthetic touch emulation detected: Zero contact radius variance (radius_var: {radius_var:.8f})."
@@ -205,6 +222,30 @@ def analyze_behavior(
             total_risk = max(0.0, total_risk - 15.0)
             reasons.append(
                 f"Capacitive human touch contact verified (avg_radius: {avg_radius:.1f}px, compliance_var: {radius_var:.3f})."
+            )
+
+        # D. Tap Hold Time Biyometrisi (touchend - touchstart basılı tutma süresi)
+        if tap_count >= 1 and 0.0 < avg_tap_dur < 8.0:
+            total_risk += 55.0
+            reasons.append(
+                f"Superhuman instantaneous touch tap detected (avg_tap_duration: {avg_tap_dur:.1f}ms < 8ms)."
+            )
+        elif tap_count >= 3 and tap_dur_var < 0.5:
+            total_risk += 50.0
+            reasons.append(
+                f"Robotic constant-duration touch taps detected (tap_duration_var: {tap_dur_var:.4f})."
+            )
+        elif tap_count >= 1 and 15.0 <= avg_tap_dur <= 800.0:
+            total_risk = max(0.0, total_risk - 10.0)
+            reasons.append(
+                f"Organic mobile tap hold duration verified (avg_tap_duration: {avg_tap_dur:.1f}ms)."
+            )
+
+        # E. Jiroskop / İvmeölçer Fiziksel El Titremesi Doğrulaması
+        if motion_var > 1e-4:
+            total_risk = max(0.0, total_risk - 10.0)
+            reasons.append(
+                f"Physical handheld device micro-motion verified (motion_variance: {motion_var:.4f})."
             )
 
     # 4. Kinematik & Bézier Eğrisi Analizi
@@ -261,8 +302,9 @@ def analyze_behavior(
             total_risk += 35.0
             reasons.append("Deterministic fixed-interval timer observed (zero dt variance).")
 
-        # F. FITTS KANUNU (Hedefe Yaklaşırken Yavaşlamayan Eğri Botları)
-        if features["click_count"] > 0 and features["total_distance"] > 50:
+        # F. FITTS KANUNU (Hedefe Yaklaşırken Yavaşlamayan Masaüstü Eğri Botları)
+        # Mobilde kalıcı bir imleç yoktur; swipe/flick hareketi hedefe nişan alma değil kaydırma eylemidir.
+        if features["click_count"] > 0 and features["total_distance"] > 50 and not is_touch:
             if features["terminal_decel_ratio"] > 0.70:
                 total_risk += 45.0
                 reasons.append(
@@ -313,20 +355,30 @@ def analyze_behavior(
             )
 
     # 4.5 Tıklama – İmleç Uzamsal Hizalaması (Click-to-Cursor Spatial Check)
-    # Gerçek bir insan tıklama yaptığında, son mousemove koordinatı (x_last, y_last) ile click koordinatı (x_click, y_click) aynı noktadadır (Δd < 20 px).
-    # Kayıtlı fare yörüngesini başka bir form butonuna yapıştıran botlarda son fare noktası ile tıklama noktası uyuşmaz → Δd > 50 px ise +65.0 Risk.
-    clicks = telemetry.get("clicks", [])
-    moves = telemetry.get("mouse_movements", [])
+    # Masaüstünde son mousemove koordinatı (x_last, y_last) ile click koordinatı (x_click, y_click) aynı noktadadır (Δd < 20 px).
+    # Mobilde ise kullanıcı önce ekranı kaydırıp (swipe) sonra farklı bir noktadaki butona dokunabilir;
+    # bu nedenle mobilde tıklamanın kaydedilen herhangi bir touch noktasıyla uzamsal uyumu kontrol edilir.
+    clicks = telemetry.get("clicks", []) if isinstance(telemetry, dict) else []
+    moves = telemetry.get("mouse_movements", []) if isinstance(telemetry, dict) else []
     if isinstance(clicks, list) and isinstance(moves, list) and clicks and moves:
         try:
             valid_clicks = [c for c in clicks if isinstance(c, dict) and "x" in c and "y" in c]
             valid_moves = [m for m in moves if isinstance(m, dict) and "x" in m and "y" in m]
             if valid_clicks and valid_moves:
-                last_move = valid_moves[-1]
-                first_click = valid_clicks[0]
-                x_last, y_last = float(last_move["x"]), float(last_move["y"])
-                x_click, y_click = float(first_click["x"]), float(first_click["y"])
-                delta_d = math.hypot(x_last - x_click, y_last - y_click)
+                target_click = valid_clicks[-1]
+                x_click, y_click = float(target_click["x"]), float(target_click["y"])
+                if is_touch:
+                    ref_move = min(
+                        valid_moves,
+                        key=lambda m: math.hypot(float(m["x"]) - x_click, float(m["y"]) - y_click),
+                    )
+                    x_last, y_last = float(ref_move["x"]), float(ref_move["y"])
+                    delta_d = math.hypot(x_last - x_click, y_last - y_click)
+                else:
+                    last_move = valid_moves[-1]
+                    x_last, y_last = float(last_move["x"]), float(last_move["y"])
+                    delta_d = math.hypot(x_last - x_click, y_last - y_click)
+
                 if delta_d > 50.0:
                     total_risk += 65.0
                     reasons.append(
@@ -434,9 +486,11 @@ def analyze_behavior(
 
     heuristic_score = min(100.0, max(0.0, total_risk))
 
-    # 7. Yapay Zeka (1D-CNN) Puanlaması
+    # 7. Yapay Zeka (1D-CNN) Puanlaması (Mobile Single-Tap / Short-Swipe Gated)
+    # 60 adımlık masaüstü 1D-CNN modeli <12 noktalı kısa mobil dokunuşlarda (Single Tap)
+    # sıfır dolgusu (zero-padding) nedeniyle yanlış pozitif üretmemesi için yalnızca yeterli yörünge olduğunda çalışır.
     ai_score = 0.0
-    if _ai_model and _tokenizer:
+    if _ai_model and _tokenizer and (not is_touch or features.get("mouse_points", 0) >= 12):
         try:
             fused = _tokenizer.fuse(telemetry)
             ai_prob = _ai_model.predict(fused["mouse_tensor"], fused["static_vector"])
@@ -453,7 +507,8 @@ def analyze_behavior(
         features.get("key_interval_var", 50.0) < 2.0 or features.get("key_interval_avg", 100.0) < 25.0
     )
     fitts_violation = (
-        features.get("click_count", 0) > 0
+        not is_touch
+        and features.get("click_count", 0) > 0
         and features.get("total_distance", 0) > 50
         and features.get("terminal_decel_ratio", 0.0) > 0.70
     )
@@ -534,15 +589,18 @@ def classify_threat(
     if reasons and any("Session Behavioral Invariance" in r for r in reasons):
         return "SESSION_INVARIANCE_BOT"
 
-    browser_data = telemetry.get("browser", {})
+    browser_data = telemetry.get("browser", {}) if isinstance(telemetry, dict) else {}
+    if not isinstance(browser_data, dict):
+        browser_data = {}
 
-    # 1. STEALTH_AUTOMATION (Tarayıcı Seviyesi / Stealth Botlar)
+    # 1. STEALTH_AUTOMATION (Tarayıcı Seviyesi / Stealth Botlar / Sentetik Mobil Emülatör)
     is_stealth = (
         features.get("webdriver", False)
         or browser_data.get("is_plugin_array_fake", False)
         or browser_data.get("has_webdriver_own_prop", False)
         or browser_data.get("is_webgl_hooked", False)
         or browser_data.get("is_canvas_hooked", False)
+        or features.get("is_mobile_gpu_mismatch", False)
         or (not features.get("screen_valid", True))
         or (
             not features.get("touch_supported", False)
@@ -553,7 +611,7 @@ def classify_threat(
     if is_stealth:
         return "STEALTH_AUTOMATION"
 
-        # Secret-Keyed Dynamic Thresholds
+    # Secret-Keyed Dynamic Thresholds
     straightness_thresh = max(0.985, min(0.998, _get_dynamic_threshold(0.985, "straightness")))
     avg_jerk_thresh = _get_dynamic_threshold(0.00008, "avg_jerk")
     spectral_purity_thresh = _get_dynamic_threshold(0.65, "spectral_purity")

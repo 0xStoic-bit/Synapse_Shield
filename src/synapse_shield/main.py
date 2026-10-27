@@ -574,7 +574,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
 
     hard_bot_violation = (
         total_interactive_events == 0
-        or (1 <= mouse_points <= 2)
+        or (1 <= mouse_points <= 2 and not feat.get("touch_supported", False))
         or is_stealth
         or has_invariance
     )

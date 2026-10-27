@@ -1,6 +1,6 @@
 /**
- * Synapse Shield SDK v0.9.7 - Cryptographic Behavioral Telemetry Collector
- * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine
+ * Synapse Shield SDK v0.9.9 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
+ * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (Desktop + Mobile SDK v2.0)
  */
 
 (function (window) {
@@ -38,6 +38,23 @@
     }
   }
 
+  // Extract WebGL unmasked renderer string once for anti-emulator hardware verification
+  function getWebGLRenderer() {
+    try {
+      if (typeof document === "undefined" || !document.createElement) return "";
+      const canvas = document.createElement("canvas");
+      const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+      if (!gl) return "";
+      const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+      if (debugInfo) {
+        return String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "");
+      }
+      return String(gl.getParameter(gl.RENDERER) || "");
+    } catch (e) {
+      return "";
+    }
+  }
+
   // Dynamic Proof of Work Leading Zero Hex Validator
   function checkLeadingZeroHex(hashArray, difficulty) {
     const fullBytes = Math.floor(difficulty / 2);
@@ -55,15 +72,22 @@
     clicks: [],
     keystrokes: [],
     scrolls: [],
+    motionSamples: [],
     lastMoveTime: 0,
     lastScrollTime: 0,
+    lastMotionTime: 0,
+    lastTouchStartTime: 0,
     moveThrottleMs: 30,
     scrollThrottleMs: 100,
+    motionThrottleMs: 50,
+    cachedWebGLRenderer: "",
     currentChallenge: null,
     isInitialized: false,
 
     async init() {
       if (this.isInitialized) return;
+
+      this.cachedWebGLRenderer = getWebGLRenderer();
 
       // Mouse movements
       window.addEventListener("mousemove", (e) => {
@@ -75,19 +99,23 @@
         }
       }, { passive: true });
 
-      // Mobile / Touch interactions (Eliminates false-positive bot scoring on phones & tablets)
+      // Mobile / Touch interactions (Capacitive ellipse, Tap hold duration & Touch source tagging)
       window.addEventListener("touchstart", (e) => {
         if (!e.touches || e.touches.length === 0) return;
         const touch = e.touches[0];
         const now = Date.now();
-        const r = touch.radiusX || touch.webkitRadiusX || 0;
-        const f = touch.force || 0;
+        this.lastTouchStartTime = now;
+        const rX = touch.radiusX || touch.webkitRadiusX || 0;
+        const rY = touch.radiusY || touch.webkitRadiusY || rX;
+        const r = (rX + rY) * 0.5;
+        const f = touch.force || touch.webkitForce || 0;
         this.mouseMovements.push({
           x: touch.clientX,
           y: touch.clientY,
           t: now,
-          r: Math.round(r * 10) / 10,
-          f: Math.round(f * 100) / 100,
+          r: Math.round(r * 1000) / 1000,
+          f: Math.round(f * 1000) / 1000,
+          source: "touch",
         });
         this.lastMoveTime = now;
         if (this.mouseMovements.length > 500) this.mouseMovements.shift();
@@ -98,14 +126,17 @@
         const now = Date.now();
         if (now - this.lastMoveTime >= this.moveThrottleMs) {
           const touch = e.touches[0];
-          const r = touch.radiusX || touch.webkitRadiusX || 0;
-          const f = touch.force || 0;
+          const rX = touch.radiusX || touch.webkitRadiusX || 0;
+          const rY = touch.radiusY || touch.webkitRadiusY || rX;
+          const r = (rX + rY) * 0.5;
+          const f = touch.force || touch.webkitForce || 0;
           this.mouseMovements.push({
             x: touch.clientX,
             y: touch.clientY,
             t: now,
-            r: Math.round(r * 10) / 10,
-            f: Math.round(f * 100) / 100,
+            r: Math.round(r * 1000) / 1000,
+            f: Math.round(f * 1000) / 1000,
+            source: "touch",
           });
           this.lastMoveTime = now;
           if (this.mouseMovements.length > 500) this.mouseMovements.shift();
@@ -115,27 +146,63 @@
       window.addEventListener("touchend", (e) => {
         if (e.changedTouches && e.changedTouches.length > 0) {
           const touch = e.changedTouches[0];
-          const r = touch.radiusX || touch.webkitRadiusX || 0;
+          const now = Date.now();
+          const rX = touch.radiusX || touch.webkitRadiusX || 0;
+          const rY = touch.radiusY || touch.webkitRadiusY || rX;
+          const r = (rX + rY) * 0.5;
+          const tapDuration = this.lastTouchStartTime > 0 ? Math.max(1, now - this.lastTouchStartTime) : 0;
           this.clicks.push({
             x: touch.clientX,
             y: touch.clientY,
-            t: Date.now(),
-            r: Math.round(r * 10) / 10,
+            t: now,
+            r: Math.round(r * 1000) / 1000,
+            tap_duration_ms: tapDuration,
+            source: "touch",
           });
           if (this.clicks.length > 50) this.clicks.shift();
         }
       }, { passive: true });
 
-      // Desktop Click interactions
+      // Handheld Mobile Micro-Motion / Gyroscope Biometrics
+      window.addEventListener("devicemotion", (e) => {
+        const now = Date.now();
+        if (now - this.lastMotionTime < this.motionThrottleMs) return;
+        const acc = e.accelerationIncludingGravity || e.acceleration;
+        const rot = e.rotationRate;
+        let mag = 0;
+        if (acc && (acc.x !== null || acc.y !== null || acc.z !== null)) {
+          const ax = Number(acc.x) || 0;
+          const ay = Number(acc.y) || 0;
+          const az = Number(acc.z) || 0;
+          mag += Math.sqrt(ax * ax + ay * ay + az * az);
+        }
+        if (rot && (rot.alpha !== null || rot.beta !== null || rot.gamma !== null)) {
+          const ra = Number(rot.alpha) || 0;
+          const rb = Number(rot.beta) || 0;
+          const rg = Number(rot.gamma) || 0;
+          mag += Math.sqrt(ra * ra + rb * rb + rg * rg) * 0.1;
+        }
+        if (mag > 0) {
+          this.motionSamples.push(mag);
+          this.lastMotionTime = now;
+          if (this.motionSamples.length > 40) this.motionSamples.shift();
+        }
+      }, { passive: true });
+
+      // Desktop Click interactions (Deduplicate synthetic click right after touchend)
       window.addEventListener("click", (e) => {
-        this.clicks.push({ x: e.clientX, y: e.clientY, t: Date.now() });
+        const now = Date.now();
+        if (this.lastTouchStartTime > 0 && now - this.lastTouchStartTime < 800) {
+          return;
+        }
+        this.clicks.push({ x: e.clientX, y: e.clientY, t: now });
         if (this.clicks.length > 50) this.clicks.shift();
       }, { passive: true });
 
-      // Keyboard dynamics (Dwell & Flight Time Tracking)
+      // Keyboard dynamics (Dwell & Flight Time Tracking + Mobile IME Compatibility)
       const activeKeys = {};
       window.addEventListener("keydown", (e) => {
-        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.code || "unknown") : "unknown";
+        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
         const now = Date.now();
         if (!activeKeys[keyName]) {
           activeKeys[keyName] = now;
@@ -145,7 +212,7 @@
       }, { passive: true });
 
       window.addEventListener("keyup", (e) => {
-        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.code || "unknown") : "unknown";
+        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
         const now = Date.now();
         const downTime = activeKeys[keyName];
         delete activeKeys[keyName];
@@ -196,6 +263,16 @@
       this.clicks = [];
       this.keystrokes = [];
       this.scrolls = [];
+      this.motionSamples = [];
+      this.lastTouchStartTime = 0;
+    },
+
+    getMotionVariance() {
+      const n = this.motionSamples.length;
+      if (n < 2) return 0;
+      const mean = this.motionSamples.reduce((a, b) => a + b, 0) / n;
+      const variance = this.motionSamples.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+      return Math.round(variance * 1000000) / 1000000;
     },
 
     getPayload() {
@@ -209,8 +286,12 @@
           webdriver: Boolean(navigator.webdriver),
           screen_width: window.innerWidth || (window.screen ? window.screen.width : 0),
           screen_height: window.innerHeight || (window.screen ? window.screen.height : 0),
+          device_pixel_ratio: window.devicePixelRatio || 1,
           touch_supported: ("ontouchstart" in window) || (navigator.maxTouchPoints > 0),
           max_touch_points: navigator.maxTouchPoints || 0,
+          motion_variance: this.getMotionVariance(),
+          webgl_renderer: this.cachedWebGLRenderer || getWebGLRenderer(),
+          orientation: (window.screen && window.screen.orientation && window.screen.orientation.type) ? window.screen.orientation.type : "",
           plugins_length: navigator.plugins ? navigator.plugins.length : 0,
           languages: navigator.languages ? navigator.languages.join(",") : (navigator.language || ""),
           is_plugin_array_fake: (function () {

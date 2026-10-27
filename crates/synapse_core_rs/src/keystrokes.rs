@@ -121,8 +121,16 @@ pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> Keystrok
             score += 0.70;
         }
 
-        // Robotic dwell time: zero variance or instant keypress
-        if !dwell_times.is_empty() {
+        // Mobile Soft Keyboard (IME / Gboard / iOS Keyboard) detection:
+        // Mobile virtual keyboards fire synthetic keydown/keyup with key="Unidentified" (keyCode 229)
+        // and near-zero dwell times (0-5ms). Exempt virtual IME events from mechanical switch dwell penalties.
+        let is_mobile_ime = sorted_keys.iter().any(|k| {
+            let kl = k.key.to_lowercase();
+            kl == "unidentified" || kl == "process"
+        });
+
+        // Robotic dwell time: zero variance or instant keypress (Desktop mechanical keys)
+        if !dwell_times.is_empty() && !is_mobile_ime {
             if avg_dwell < 15.0 {
                 score += 0.75; // Superhuman instantaneous press
             } else if var_dwell < 2.0 && dwell_times.len() >= 3 {

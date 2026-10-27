@@ -1,7 +1,7 @@
 """
 Type stubs for the native Rust acceleration extension (synapse_core_rs).
-Provides microsecond SIMD kinematic feature extraction, rotating two-bucket nonce cache,
-and sub-microsecond in-memory L1 IP quarantine checks.
+Provides microsecond SIMD kinematic feature extraction, mobile capacitive/sensor biometrics,
+rotating two-bucket nonce cache, and sub-microsecond in-memory L1 IP quarantine checks.
 """
 
 from typing import Any
@@ -16,20 +16,21 @@ def get_core_version() -> str:
 
 def extract_features_rs(telemetry: dict[str, Any]) -> dict[str, Any]:
     """
-    Extract 19D kinematic features, curvature metrics, and keystroke dynamics in Rust.
+    Extract kinematic features, mobile touch/tap/sensor metrics, curvature metrics,
+    and keystroke dynamics in Rust.
     """
     ...
 
-def evaluate_curvature_naturalness_rs(trajectory: list[dict[str, Any]]) -> float:
+def evaluate_curvature_naturalness_rs(x: list[float], y: list[float], t: list[float]) -> dict[str, float]:
     """
     Evaluate biological naturalness of curvature across mouse trajectory points.
-    Returns naturalness score between 0.0 (synthetic/linear) and 1.0 (biological).
+    Returns dictionary with curvature_score, mean_curvature, curvature_var, curvature_rate_var.
     """
     ...
 
-def evaluate_curvature_zerocopy_rs(points: list[tuple[float, float, float]]) -> float:
+def evaluate_curvature_zerocopy_rs(x: Any, y: Any, t: Any) -> dict[str, float]:
     """
-    Zero-copy curvature evaluation from tuple triples (x, y, timestamp_ms).
+    Zero-copy curvature evaluation from contiguous buffers or lists (x, y, timestamp_ms).
     """
     ...
 
@@ -39,7 +40,7 @@ def evaluate_keystroke_dynamics_rs(keystrokes: list[dict[str, Any]]) -> dict[str
     """
     ...
 
-def consume_nonce_rs(nonce: str, ttl_sec: int = 120) -> bool:
+def consume_nonce_rs(nonce: str) -> bool:
     """
     Record and consume a cryptographic nonce in the rotating Two-Bucket O(1) cache.
     Returns True if nonce is valid and fresh, False if already consumed (Replay Attack).

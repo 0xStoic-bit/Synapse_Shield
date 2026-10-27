@@ -9,6 +9,7 @@ pub struct MousePoint {
     pub t: f64,
     pub r: f64,
     pub f: f64,
+    pub is_touch_source: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,8 @@ pub struct KeyPoint {
 pub struct RawTelemetry {
     pub mouse_movements: Vec<MousePoint>,
     pub click_count: usize,
+    pub touch_click_count: usize,
+    pub tap_durations: Vec<f64>,
     pub scroll_count: usize,
     pub keystrokes: Vec<KeyPoint>,
     pub detailed_keystrokes: Vec<DetailedKeystroke>,
@@ -30,6 +33,9 @@ pub struct RawTelemetry {
     pub plugins_length: i64,
     pub touch_supported: bool,
     pub max_touch_points: i64,
+    pub device_pixel_ratio: f64,
+    pub motion_variance: f64,
+    pub webgl_renderer: String,
 }
 
 impl Default for RawTelemetry {
@@ -37,6 +43,8 @@ impl Default for RawTelemetry {
         Self {
             mouse_movements: Vec::new(),
             click_count: 0,
+            touch_click_count: 0,
+            tap_durations: Vec::new(),
             scroll_count: 0,
             keystrokes: Vec::new(),
             detailed_keystrokes: Vec::new(),
@@ -47,6 +55,9 @@ impl Default for RawTelemetry {
             plugins_length: 1,
             touch_supported: false,
             max_touch_points: 0,
+            device_pixel_ratio: 1.0,
+            motion_variance: 0.0,
+            webgl_renderer: String::new(),
         }
     }
 }
@@ -93,6 +104,13 @@ pub struct ExtractedFeatures {
     pub flight_time_var: f64,
     pub digraph_entropy: f64,
     pub keystroke_score: f64,
+    // --- Mobile SDK v2.0 Biometrics ---
+    pub tap_count: usize,
+    pub avg_tap_duration: f64,
+    pub tap_duration_var: f64,
+    pub device_pixel_ratio: f64,
+    pub motion_variance: f64,
+    pub is_mobile_gpu_mismatch: bool,
 }
 
 impl Default for ExtractedFeatures {
@@ -137,6 +155,12 @@ impl Default for ExtractedFeatures {
             flight_time_var: 0.0,
             digraph_entropy: 0.5,
             keystroke_score: 0.0,
+            tap_count: 0,
+            avg_tap_duration: 0.0,
+            tap_duration_var: 0.0,
+            device_pixel_ratio: 1.0,
+            motion_variance: 0.0,
+            is_mobile_gpu_mismatch: false,
         }
     }
 }
@@ -151,10 +175,33 @@ pub fn compute_kinematics(raw: &RawTelemetry) -> ExtractedFeatures {
     feat.plugins_length = raw.plugins_length;
     feat.touch_supported = raw.touch_supported;
     feat.max_touch_points = raw.max_touch_points;
+    feat.device_pixel_ratio = raw.device_pixel_ratio;
+    feat.motion_variance = raw.motion_variance;
+
+    if raw.touch_supported && raw.screen_width > 0.0 && raw.screen_width < 768.0 && !raw.webgl_renderer.is_empty() {
+        let renderer_lower = raw.webgl_renderer.to_lowercase();
+        const DESKTOP_OR_EMULATOR_GPUS: &[&str] = &[
+            "swiftshader",
+            "llvmpipe",
+            "softpipe",
+            "virtualbox",
+            "vmware",
+            "nvidia",
+            "geforce",
+            "radeon",
+            "uhd graphics",
+            "iris(tm)",
+            "microsoft basic render",
+        ];
+        if DESKTOP_OR_EMULATOR_GPUS.iter().any(|&sig| renderer_lower.contains(sig)) {
+            feat.is_mobile_gpu_mismatch = true;
+        }
+    }
 
     // 1.5 Touch & Capacitive Biometrics
     let mut touch_radii = Vec::new();
     let mut touch_forces = Vec::new();
+    let mut explicit_touch_moves = 0usize;
     for m in &raw.mouse_movements {
         if m.r > 0.0 {
             touch_radii.push(m.r);
@@ -162,18 +209,33 @@ pub fn compute_kinematics(raw: &RawTelemetry) -> ExtractedFeatures {
         if m.f > 0.0 {
             touch_forces.push(m.f);
         }
+        if m.is_touch_source {
+            explicit_touch_moves += 1;
+        }
     }
-    feat.touch_event_count = touch_radii.len();
     if !touch_radii.is_empty() {
+        feat.touch_event_count = touch_radii.len();
         let count = touch_radii.len() as f64;
         let avg_r: f64 = touch_radii.iter().sum::<f64>() / count;
         let var_r: f64 = touch_radii.iter().map(|&r| (r - avg_r).powi(2)).sum::<f64>() / count;
         feat.avg_touch_radius = avg_r;
         feat.touch_radius_var = var_r;
+    } else {
+        feat.touch_event_count = explicit_touch_moves + raw.touch_click_count;
     }
     if !touch_forces.is_empty() {
         let count = touch_forces.len() as f64;
         feat.avg_touch_force = touch_forces.iter().sum::<f64>() / count;
+    }
+
+    // 1.6 Tap Hold Time Biometrics (touchend - touchstart duration)
+    feat.tap_count = raw.tap_durations.len();
+    if !raw.tap_durations.is_empty() {
+        let count = raw.tap_durations.len() as f64;
+        let avg_tap: f64 = raw.tap_durations.iter().sum::<f64>() / count;
+        let var_tap: f64 = raw.tap_durations.iter().map(|&d| (d - avg_tap).powi(2)).sum::<f64>() / count;
+        feat.avg_tap_duration = avg_tap;
+        feat.tap_duration_var = var_tap;
     }
 
     // 2. Event counters

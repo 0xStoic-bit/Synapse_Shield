@@ -41,17 +41,37 @@ function getCleanFunctionToString(): () => string {
   }
 }
 
+function getWebGLRenderer(): string {
+  try {
+    if (typeof document === "undefined" || !document.createElement) return "";
+    const canvas = document.createElement("canvas");
+    const gl = (canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+    if (!gl) return "";
+    const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+    if (debugInfo) {
+      return String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "");
+    }
+    return String(gl.getParameter(gl.RENDERER) || "");
+  } catch (e) {
+    return "";
+  }
+}
+
 export interface SynapseTelemetry {
-  mouse_movements: Array<{ x: number; y: number; t: number; r?: number; f?: number }>;
-  clicks: Array<{ x: number; y: number; t: number; r?: number }>;
-  keystrokes: Array<{ type: string; t: number }>;
+  mouse_movements: Array<{ x: number; y: number; t: number; r?: number; f?: number; source?: string }>;
+  clicks: Array<{ x: number; y: number; t: number; r?: number; tap_duration_ms?: number; source?: string }>;
+  keystrokes: Array<{ type: string; key?: string; t: number; down?: number; up?: number; duration_ms?: number }>;
   scrolls: Array<{ y: number; t: number }>;
   browser: {
     webdriver: boolean;
     screen_width: number;
     screen_height: number;
+    device_pixel_ratio?: number;
     touch_supported: boolean;
     max_touch_points?: number;
+    motion_variance?: number;
+    webgl_renderer?: string;
+    orientation?: string;
     is_plugin_array_fake?: boolean;
     has_webdriver_own_prop?: boolean;
     is_webgl_hooked?: boolean;
@@ -82,9 +102,13 @@ export function useSynapseShield() {
 
   const lastMoveTime = useRef(0);
   const lastScrollTime = useRef(0);
+  const lastMotionTime = useRef(0);
+  const lastTouchStartTime = useRef(0);
+  const motionSamples = useRef<number[]>([]);
 
   const moveThrottleMs = 30;
   const scrollThrottleMs = 100;
+  const motionThrottleMs = 50;
 
   const refreshChallenge = useCallback(async () => {
     try {
@@ -140,8 +164,12 @@ export function useSynapseShield() {
       webdriver: navigator.webdriver || false,
       screen_width: window.innerWidth || window.screen.width,
       screen_height: window.innerHeight || window.screen.height,
+      device_pixel_ratio: window.devicePixelRatio || 1,
       touch_supported: "ontouchstart" in window || navigator.maxTouchPoints > 0,
       max_touch_points: typeof navigator !== "undefined" ? navigator.maxTouchPoints || 0 : 0,
+      motion_variance: 0,
+      webgl_renderer: getWebGLRenderer(),
+      orientation: (window.screen && (window.screen as any).orientation && (window.screen as any).orientation.type) ? (window.screen as any).orientation.type : "",
       is_plugin_array_fake: isPluginArrayFake(),
       has_webdriver_own_prop: Object.prototype.hasOwnProperty.call(navigator, "webdriver"),
       is_webgl_hooked: checkWebGLHook(),
@@ -163,14 +191,18 @@ export function useSynapseShield() {
       if (!e.touches || e.touches.length === 0) return;
       const touch = e.touches[0];
       const now = Date.now();
-      const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
-      const f = touch.force || 0;
+      lastTouchStartTime.current = now;
+      const rX = touch.radiusX || (touch as any).webkitRadiusX || 0;
+      const rY = touch.radiusY || (touch as any).webkitRadiusY || rX;
+      const r = (rX + rY) * 0.5;
+      const f = touch.force || (touch as any).webkitForce || 0;
       telemetry.current.mouse_movements.push({
         x: touch.clientX,
         y: touch.clientY,
         t: now,
-        r: Math.round(r * 10) / 10,
-        f: Math.round(f * 100) / 100,
+        r: Math.round(r * 1000) / 1000,
+        f: Math.round(f * 1000) / 1000,
+        source: "touch",
       });
       lastMoveTime.current = now;
       if (telemetry.current.mouse_movements.length > 500) telemetry.current.mouse_movements.shift();
@@ -181,14 +213,17 @@ export function useSynapseShield() {
       const now = Date.now();
       if (now - lastMoveTime.current >= moveThrottleMs) {
         const touch = e.touches[0];
-        const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
-        const f = touch.force || 0;
+        const rX = touch.radiusX || (touch as any).webkitRadiusX || 0;
+        const rY = touch.radiusY || (touch as any).webkitRadiusY || rX;
+        const r = (rX + rY) * 0.5;
+        const f = touch.force || (touch as any).webkitForce || 0;
         telemetry.current.mouse_movements.push({
           x: touch.clientX,
           y: touch.clientY,
           t: now,
-          r: Math.round(r * 10) / 10,
-          f: Math.round(f * 100) / 100,
+          r: Math.round(r * 1000) / 1000,
+          f: Math.round(f * 1000) / 1000,
+          source: "touch",
         });
         lastMoveTime.current = now;
         if (telemetry.current.mouse_movements.length > 500) telemetry.current.mouse_movements.shift();
@@ -198,29 +233,82 @@ export function useSynapseShield() {
     const handleTouchEnd = (e: TouchEvent) => {
       if (e.changedTouches && e.changedTouches.length > 0) {
         const touch = e.changedTouches[0];
-        const r = touch.radiusX || (touch as any).webkitRadiusX || 0;
+        const now = Date.now();
+        const rX = touch.radiusX || (touch as any).webkitRadiusX || 0;
+        const rY = touch.radiusY || (touch as any).webkitRadiusY || rX;
+        const r = (rX + rY) * 0.5;
+        const tapDuration = lastTouchStartTime.current > 0 ? Math.max(1, now - lastTouchStartTime.current) : 0;
         telemetry.current.clicks.push({
           x: touch.clientX,
           y: touch.clientY,
-          t: Date.now(),
-          r: Math.round(r * 10) / 10,
+          t: now,
+          r: Math.round(r * 1000) / 1000,
+          tap_duration_ms: tapDuration,
+          source: "touch",
         });
         if (telemetry.current.clicks.length > 50) telemetry.current.clicks.shift();
       }
     };
 
+    const handleDeviceMotion = (e: DeviceMotionEvent) => {
+      const now = Date.now();
+      if (now - lastMotionTime.current < motionThrottleMs) return;
+      const acc = e.accelerationIncludingGravity || e.acceleration;
+      const rot = e.rotationRate;
+      let mag = 0;
+      if (acc && (acc.x !== null || acc.y !== null || acc.z !== null)) {
+        const ax = Number(acc.x) || 0;
+        const ay = Number(acc.y) || 0;
+        const az = Number(acc.z) || 0;
+        mag += Math.sqrt(ax * ax + ay * ay + az * az);
+      }
+      if (rot && (rot.alpha !== null || rot.beta !== null || rot.gamma !== null)) {
+        const ra = Number(rot.alpha) || 0;
+        const rb = Number(rot.beta) || 0;
+        const rg = Number(rot.gamma) || 0;
+        mag += Math.sqrt(ra * ra + rb * rb + rg * rg) * 0.1;
+      }
+      if (mag > 0) {
+        motionSamples.current.push(mag);
+        lastMotionTime.current = now;
+        if (motionSamples.current.length > 40) motionSamples.current.shift();
+      }
+    };
+
     const handleClick = (e: MouseEvent) => {
-      telemetry.current.clicks.push({ x: e.clientX, y: e.clientY, t: Date.now() });
+      const now = Date.now();
+      if (lastTouchStartTime.current > 0 && now - lastTouchStartTime.current < 800) {
+        return;
+      }
+      telemetry.current.clicks.push({ x: e.clientX, y: e.clientY, t: now });
       if (telemetry.current.clicks.length > 50) telemetry.current.clicks.shift();
     };
 
-    const handleKeyDown = () => {
-      telemetry.current.keystrokes.push({ type: "down", t: Date.now() });
+    const activeKeys: Record<string, number> = {};
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const keyName = e.key ? e.key.toLowerCase() : (e.code || "unknown");
+      const now = Date.now();
+      if (!activeKeys[keyName]) {
+        activeKeys[keyName] = now;
+      }
+      telemetry.current.keystrokes.push({ type: "down", key: keyName, t: now });
       if (telemetry.current.keystrokes.length > 50) telemetry.current.keystrokes.shift();
     };
 
-    const handleKeyUp = () => {
-      telemetry.current.keystrokes.push({ type: "up", t: Date.now() });
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const keyName = e.key ? e.key.toLowerCase() : (e.code || "unknown");
+      const now = Date.now();
+      const downTime = activeKeys[keyName];
+      delete activeKeys[keyName];
+      const duration = downTime ? (now - downTime) : 0;
+      telemetry.current.keystrokes.push({
+        type: "up",
+        key: keyName,
+        t: now,
+        down: downTime || now,
+        up: now,
+        duration_ms: duration,
+      });
       if (telemetry.current.keystrokes.length > 50) telemetry.current.keystrokes.shift();
     };
 
@@ -240,6 +328,7 @@ export function useSynapseShield() {
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
     window.addEventListener("touchend", handleTouchEnd, { passive: true });
+    window.addEventListener("devicemotion", handleDeviceMotion, { passive: true });
     window.addEventListener("click", handleClick, { passive: true });
     window.addEventListener("keydown", handleKeyDown, { passive: true });
     window.addEventListener("keyup", handleKeyUp, { passive: true });
@@ -250,6 +339,7 @@ export function useSynapseShield() {
       window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("devicemotion", handleDeviceMotion);
       window.removeEventListener("click", handleClick);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
@@ -262,9 +352,20 @@ export function useSynapseShield() {
     telemetry.current.clicks = [];
     telemetry.current.keystrokes = [];
     telemetry.current.scrolls = [];
+    motionSamples.current = [];
+    lastTouchStartTime.current = 0;
   }, []);
 
   const getProtectedPayload = useCallback((): SynapsePayload => {
+    const n = motionSamples.current.length;
+    if (n >= 2) {
+      const mean = motionSamples.current.reduce((a, b) => a + b, 0) / n;
+      const variance = motionSamples.current.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+      telemetry.current.browser.motion_variance = Math.round(variance * 1000000) / 1000000;
+    } else {
+      telemetry.current.browser.motion_variance = 0;
+    }
+
     if (currentChallenge) {
       const envelope = {
         challenge: currentChallenge,

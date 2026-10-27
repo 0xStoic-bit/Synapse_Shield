@@ -345,7 +345,7 @@ def evaluate_synapse_request_sync(
 
     hard_bot_violation = (
         total_interactive_events == 0
-        or (1 <= mouse_points <= 2)
+        or (1 <= mouse_points <= 2 and not feat.get("touch_supported", False))
         or is_stealth
         or has_invariance
     )
