@@ -38,6 +38,7 @@
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
+| 📱 **移动端 SDK v2.0 与反模拟器生物识别** | 全面覆盖原生 JS、React 与 Vue 的移动端生物特征遥测：按压保持时间（`touchend - touchstart` 均值与方差）、免权限陀螺仪/加速度计微颤（`motion_variance`）、WebGL 渲染器跨维校验（`is_mobile_gpu_mismatch` 精准拦截伪装移动视口的 `SwiftShader`/桌面显卡 +85 Risk）、Android Gboard/IME 软键盘适配（`key="Unidentified"`），彻底消除移动端单次轻触（Single-Tap）与滑动后点击的误报 (v0.9.9)。 |
 | 🛡️ **运动学深度加固、动态抖动与 PoW 防御** | 真实电容触控有效性校验（防御桌面端伪造触控 +75 Risk）、固定触控半径陷阱（方差为 0 判定为模拟器 +55 Risk）、致命违规硬封禁否决与绑定 IP 的 PoW 挑战机制（限定 35.0-55.0 灰色区间）、多维模糊轨迹重放检测 ($\delta < 0.015$)、点击与指针终点空间距离校准 ($\Delta d \le 50\text{px}$)、基于密钥的动态阈值抖动 ($\pm 5\%$) 以及训练集防投毒单 IP 样本配额限制 (v0.9.9)。 |
 | ⚡ **向量化 1D-CNN、Rust L1 缓存与 Alpine musllinux 支持** | 基于 NumPy BLAS 实现向量化卷积推理（耗时仅 0.092ms，提速 5.2 倍），线程本地持久化 SQLite WAL 与 L1 内存会话/封禁缓存（中间件全链路耗时 0.84ms），支持 Alpine Linux (`musllinux_1_2`) 多架构原生轮子，全面修复 Brave 指纹伪装与直线/宏点击绕过风险 (v0.9.8)。 |
 | 🛡️ **企业级全栈安全加固与反代防护** | 原生支持 `X-Synapse-Token` 请求头与文件上传防御，完善 `SYNAPSE_TRUSTED_PROXIES` 反代透传解析 (`CF-Connecting-IP` / `X-Forwarded-For`)，无阻塞影子模式 (`mode="shadow"`)，灰度 PoW 质询，以及 Django 与 Flask 的完整密码学平权校验 (v0.9.7)。 |
