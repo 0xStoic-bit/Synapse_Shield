@@ -1,5 +1,5 @@
 """
-Synapse Shield - Core Behavioral Decision Engine v0.9.9 (Anti-Bezier & Mobile SDK v2.0 Hardened)
+Synapse Shield - Core Behavioral Decision Engine v0.10.0 (Anti-Bezier & Mobile SDK v2.0 Hardened)
 """
 
 import hashlib

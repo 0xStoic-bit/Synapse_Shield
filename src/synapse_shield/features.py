@@ -1,5 +1,5 @@
 """
-Synapse Shield - Kinematic Feature Extractor v0.9.9 (Native Rust Core Accelerated & Mobile SDK v2.0)
+Synapse Shield - Kinematic Feature Extractor v0.10.0 (Native Rust Core Accelerated & Mobile SDK v2.0)
 """
 
 import math

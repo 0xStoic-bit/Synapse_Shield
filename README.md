@@ -20,7 +20,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v099) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v0100) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -34,11 +34,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.9.9)
+## ✨ Key Features & Security Architecture (v0.10.0)
 
 | Feature | Description |
 | :--- | :--- |
-| 📱 **Mobile SDK v2.0 & Anti-Emulator Biometrics** | End-to-end mobile biometric telemetry across Vanilla JS, React, and Vue: Tap Hold Time (`touchend - touchstart` duration & variance), passive gyroscope/accelerometer micro-tremor (`motion_variance`), WebGL GPU cross-validation (`is_mobile_gpu_mismatch` catching `SwiftShader`/`NVIDIA` on mobile viewports +85 Risk), Android Gboard/IME soft-keyboard support (`key="Unidentified"`), and zero false positives on Single-Tap and Flick-Scroll + Tap interactions (v0.9.9). |
+| 📱 **Mobile SDK v2.0 & Anti-Emulator Biometrics** | End-to-end mobile biometric telemetry across Vanilla JS, React, and Vue: Tap Hold Time (`touchend - touchstart` duration & variance), passive gyroscope/accelerometer micro-tremor (`motion_variance`), WebGL GPU cross-validation (`is_mobile_gpu_mismatch` catching `SwiftShader`/`NVIDIA` on mobile viewports +85 Risk), Android Gboard/IME soft-keyboard support (`key="Unidentified"`), and zero false positives on Single-Tap and Flick-Scroll + Tap interactions (v0.10.0). |
 | 🛡️ **Kinematic Hardening, Dynamic Jitter & PoW Defense** | Effective capacitive touch validation (anti-spoofing +75 Risk), constant touch radius trap (+55 Risk), hard bot violation veto & IP-bound PoW challenges (35.0-55.0 gray area), fuzzy trajectory replay detection ($\delta < 0.015$), click-to-cursor spatial alignment ($\Delta d \le 50\text{px}$), secret-keyed dynamic threshold jitter ($\pm 5\%$), and anti-poisoning active learning limits (v0.9.9). |
 | ⚡ **Vectorized 1D-CNN, Rust L1 Cache & Alpine musllinux** | NumPy BLAS vectorized 1D-CNN inference (0.092ms, 5.2x speedup), thread-local persistent WAL SQLite with L1 in-memory ban/session caches (0.84ms end-to-end middleware), multi-architecture Alpine Linux (`musllinux_1_2`) wheels, and complete mitigation of Brave farbling camouflage and straight-line/macro bot vectors (v0.9.8). |
 | 🛡️ **Enterprise Hardening & Reverse Proxy Shield** | First-class `X-Synapse-Token` HTTP header, `SYNAPSE_TRUSTED_PROXIES` resolution (`CF-Connecting-IP` / `X-Forwarded-For`), non-blocking Shadow Mode (`mode="shadow"`), Smart Challenge PoW gray-area flow, and full cryptographic parity across Django and Flask (v0.9.7). |
