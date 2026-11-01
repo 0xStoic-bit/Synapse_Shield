@@ -17,7 +17,6 @@ if hasattr(sys.stderr, "reconfigure"):
         pass
 
 
-
 def main():
     parser = argparse.ArgumentParser(description="Synapse Shield - CLI Controller")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -56,10 +55,15 @@ def main():
 
     # Red Team Plugin Orchestrator Command
     redteam_parser = subparsers.add_parser("redteam", help="Run the modular Red Team plugin orchestrator")
-    redteam_parser.add_argument("--category", type=str, default=None, help="Specific attack category to run (e.g. bot, tamper, crypto)")
-    
+    redteam_parser.add_argument(
+        "--category", type=str, default=None, help="Specific attack category to run (e.g. bot, tamper, crypto)"
+    )
+
     # Telemetry CLI command
     subparsers.add_parser("telemetry", help="View Rust L1 Nonce & IP Ban cache metrics")
+
+    # Doctor Health Audit Command
+    subparsers.add_parser("doctor", help="Run comprehensive system diagnostics & security health audit")
 
     args = parser.parse_args()
 
@@ -94,27 +98,35 @@ def main():
     elif args.command == "redteam":
         import asyncio
         from .redteam_plugin import SynapseRedTeamOrchestrator
-        
+
         async def run_redteam():
             orchestrator = SynapseRedTeamOrchestrator()
             if args.category:
                 await orchestrator.run_category(args.category)
             else:
                 await orchestrator.run_full_scenario()
-                
+
         asyncio.run(run_redteam())
     elif args.command == "telemetry":
         try:
             from . import synapse_core_rs
+
             if synapse_core_rs:
-                stats = synapse_core_rs.get_state_engine_stats_rs()
                 import json
+
+                stats = synapse_core_rs.get_state_engine_stats_rs()
                 print("🛡️  Rust State Engine Telemetry:")
                 print(json.dumps(stats, indent=2))
             else:
                 print("synapse_core_rs is not available.")
         except Exception as e:
             print(f"Error reading telemetry: {e}")
+    elif args.command == "doctor":
+        try:
+            from .doctor import run_doctor
+        except ImportError:
+            from doctor import run_doctor
+        sys.exit(run_doctor())
 
 
 if __name__ == "__main__":

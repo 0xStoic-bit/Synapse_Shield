@@ -1,11 +1,12 @@
 """
 Synapse Shield - Cryptographic Token & Replay Attack Defense
-Handles HMAC-SHA256 challenge generation, expiration, and single-use nonce tracking.
+Handles HMAC-SHA256 challenge generation, expiration, client network binding, and single-use nonce tracking.
 """
 
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import math
@@ -106,26 +107,79 @@ def _cleanup_expired_nonces():
         logger.warning(f"Nonce cleanup failed: {e}")
 
 
-def generate_challenge(expires_in_sec: int = 60) -> dict[str, Any]:
+def get_client_subnet(client_ip: str | None) -> str:
+    """
+    Normalizes a client IP address into its routing subnet block:
+    - IPv4: Masked to /24 subnet (e.g. 192.168.1.50 -> 192.168.1.0).
+    - IPv6: Masked to /64 subnet.
+    - Invalid or empty IP: 'unknown_subnet'.
+    """
+    if not client_ip:
+        return "unknown_subnet"
+    ip_str = str(client_ip).strip()
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        if getattr(ip, "ipv4_mapped", None):
+            ip = ip.ipv4_mapped
+        if ip.version == 4:
+            return str(ipaddress.ip_network(f"{ip}/24", strict=False).network_address)
+        else:
+            return str(ipaddress.ip_network(f"{ip}/64", strict=False).network_address)
+    except Exception:
+        return ip_str
+
+
+def compute_client_binding_hash(client_ip: str | None = None, user_agent: str | None = None) -> str:
+    """
+    Computes a deterministic 16-character HMAC digest binding the challenge to the client's network
+    subnet (/24 IPv4 or /64 IPv6) and User-Agent. This defeats Token Relay and Harvested Challenge Farm attacks.
+    - Keyed with SECRET_KEY to prevent offline rainbow-table discovery.
+    """
+    if not client_ip and not user_agent:
+        return ""
+    subnet = get_client_subnet(client_ip)
+    norm_ua = (user_agent or "").strip().lower()
+    raw = f"{subnet}:{norm_ua}".encode("utf-8")
+    return hmac.HMAC(SECRET_KEY, raw, digestmod=hashlib.sha256).hexdigest()[:16]
+
+
+def generate_challenge(
+    expires_in_sec: int = 60,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
+) -> dict[str, Any]:
     """
     İstemciye HMAC-SHA256 ile imzalanmış tek kullanımlık bir challenge üretir.
-    Format: nonce.timestamp.signature
+    Format:
+    - İstemci bağlı (Client-bound): nonce.timestamp.binding_hash.signature
+    - Standart / serbest: nonce.timestamp.signature
     """
-    # Süresi dolan nonceları temizleyerek db şişmesini önle
     _cleanup_expired_nonces()
 
     now_ms = int(time.time() * 1000)
-
     nonce = secrets.token_hex(16)
     ts = now_ms
-    signature = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
-    challenge = f"{nonce}.{ts}.{signature}"
+
+    bind_hash = compute_client_binding_hash(client_ip, user_agent)
+    if bind_hash:
+        sig_data = f"{nonce}:{ts}:{bind_hash}".encode("utf-8")
+        signature = hmac.HMAC(SECRET_KEY, sig_data, digestmod=hashlib.sha256).hexdigest()
+        challenge = f"{nonce}.{ts}.{bind_hash}.{signature}"
+    else:
+        sig_data = f"{nonce}:{ts}".encode("utf-8")
+        signature = hmac.HMAC(SECRET_KEY, sig_data, digestmod=hashlib.sha256).hexdigest()
+        challenge = f"{nonce}.{ts}.{signature}"
+
     return {"challenge": challenge, "expires_in": expires_in_sec}
 
 
-def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]:
+def verify_and_consume_token(
+    token_str: str,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
     """
-    İstemciden gelen token'ı çözer; imza, zaman aşımı ve Replay Attack kontrolü yapar.
+    İstemciden gelen token'ı çözer; imza, zaman aşımı, client binding ve Replay Attack kontrolü yapar.
     Returns: (is_valid: bool, reason: str, telemetry: dict)
     """
     # 0. DoS & CPU Koruma: Token Uzunluk Sınırı (Max 64 KB)
@@ -142,19 +196,45 @@ def verify_and_consume_token(token_str: str) -> tuple[bool, str, dict[str, Any]]
     telemetry = payload.get("telemetry", {})
 
     parts = challenge.split(".")
-    if len(parts) != 3:
+    if len(parts) == 3:
+        nonce, ts_str, sig = parts
+        bind_hash = None
+    elif len(parts) == 4:
+        nonce, ts_str, bind_hash, sig = parts
+    else:
         return False, "Bozuk challenge yapısı", {}
 
-    nonce, ts_str, sig = parts
     try:
         ts = int(ts_str)
     except ValueError:
         return False, "Geçersiz zaman damgası", {}
 
     # 1. Kriptografik HMAC İmzasını Doğrula
-    expected_sig = hmac.HMAC(SECRET_KEY, f"{nonce}:{ts}".encode(), digestmod=hashlib.sha256).hexdigest()
+    if bind_hash is not None:
+        expected_sig = hmac.HMAC(
+            SECRET_KEY, f"{nonce}:{ts}:{bind_hash}".encode("utf-8"), digestmod=hashlib.sha256
+        ).hexdigest()
+    else:
+        expected_sig = hmac.HMAC(
+            SECRET_KEY, f"{nonce}:{ts}".encode("utf-8"), digestmod=hashlib.sha256
+        ).hexdigest()
+
     if not hmac.compare_digest(sig, expected_sig):
         return False, "Sahte challenge imzası (Forged Signature)", {}
+
+    # 1.5 İstemci Bağlama (Token Relay & Farm Attack) Koruması
+    if bind_hash is not None:
+        if client_ip or user_agent:
+            current_binding = compute_client_binding_hash(client_ip, user_agent)
+            if not hmac.compare_digest(bind_hash, current_binding):
+                return (
+                    False,
+                    "Token Relay Saldırısı: Token başka bir istemci veya IP tarafından üretilmiş! (Token Client Binding Mismatch)",
+                    {},
+                )
+    else:
+        if os.environ.get("SYNAPSE_TOKEN_BINDING", "").lower() == "strict":
+            return False, "Güvenlik İhlali: Token istemciye bağlı değil (Unbound Token Rejected in Strict Mode)", {}
 
     # 2. Replay Attack Koruması: ÖNCE NONCE'U TÜKET (Probe & Retry engeli)
     # Hızlı gelen veya zaman yolculuğu yapan isteklerde dahi token hemen harcanmalı!

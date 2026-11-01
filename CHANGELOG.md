@@ -5,6 +5,17 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-11-01
+### Cryptographic Hardening, Token Relay Defense & Diagnostics
+- **[P0] Cryptographic Client Network Binding (`nonce.ts.bind_hash.sig`):**
+  - **Token Relay & Harvesting Farm Mitigation:** Bound challenges directly to the client's network subnet (`/24` IPv4, `/64` IPv6) and case-normalized User-Agent via a deterministic 16-character HMAC digest (`compute_client_binding_hash`). Tokens acquired by clean solver IPs or real browsers cannot be transferred to headless scrapers or distributed bot networks (`TOKEN_RELAY_ATTACK`, +100 Risk).
+  - **Roaming Subnet Tolerance:** Allows legitimate dynamic IP shifts within the client's ISP carrier subnet block (`/24` or `/64`) while terminating unauthorized cross-network token transfers.
+  - **Backward Compatibility:** Seamlessly verifies legacy unbound challenges unless `SYNAPSE_TOKEN_BINDING=strict` is configured.
+- **[P1] Leak-Free SQLite Connection Lifecycle Management:**
+  - Implemented thread-safe `_open_connections` registry with mutex protection (`_connections_lock`), guaranteeing clean teardown of all worker connections in multi-threaded Uvicorn/ASGI environments.
+- **[P1] Synapse Shield Doctor CLI (`synapse-shield doctor`):**
+  - Added built-in diagnostic health audit tool verifying Python runtime (>= 3.10), Native Rust SIMD Core status, 1D-CNN neural weights integrity, HMAC secret key entropy, SQLite WAL health, and reverse proxy IP resolution.
+
 ## [0.10.0] - 2026-10-27
 ### Security, Mobile SDK v2.0 & Kinematic Hardening
 - **[P0] Mobile SDK v2.0 & Handheld Biometric Engine:**

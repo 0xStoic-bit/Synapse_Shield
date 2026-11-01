@@ -36,16 +36,20 @@ _get_trusted_proxies = get_trusted_proxies
 TRUSTED_PROXIES = _get_trusted_proxies()
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
+DATASET_DB_FILE = os.environ.get("SYNAPSE_DATASET_PATH", os.path.join(tempfile.gettempdir(), "synapse_dataset.db"))
 
 # Thread-local SQLite bağlantı yönetimi
 # NOT: asyncio.to_thread ile kullanıldığında, ThreadPoolExecutor'dan farklı thread'ler
 # gelebilir. Küçük ölçekte (default pool_size=min(32, os.cpu_count()+4)) sorun olmaz,
 # ancak yüksek ölçekte connection sayısı pool_size kadar olabilir.
 _thread_local = threading.local()
+_dataset_thread_local = threading.local()
+_open_connections: set[sqlite3.Connection] = set()
+_connections_lock = threading.Lock()
 
 
 def get_connection() -> sqlite3.Connection:
-    """Thread-local SQLite bağlantısı döndürür. Her thread kendi connection'ını kullanır."""
+    """Thread-local SQLite bağlantısı döndürür. Açılan tüm bağlantılar havuzda güvenle izlenir."""
     conn = getattr(_thread_local, "connection", None)
     if conn is None:
         conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=10.0)
@@ -53,20 +57,37 @@ def get_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA wal_autocheckpoint=1000;")
         _thread_local.connection = conn
+        with _connections_lock:
+            _open_connections.add(conn)
+    return conn
+
+
+def get_dataset_connection() -> sqlite3.Connection:
+    conn = getattr(_dataset_thread_local, "connection", None)
+    if conn is None:
+        conn = sqlite3.connect(DATASET_DB_FILE, check_same_thread=False, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        _dataset_thread_local.connection = conn
+        with _connections_lock:
+            _open_connections.add(conn)
     return conn
 
 
 def _cleanup_connections():
-    """atexit hook: Thread-local bağlantıları temizle."""
-    conn = getattr(_thread_local, "connection", None)
-    if conn:
-        try:
-            conn.close()
-        except Exception:
-            pass
+    """atexit hook: Thread-local ve worker havuzundaki tüm açık SQLite bağlantılarını güvenle kapatır."""
+    with _connections_lock:
+        for conn in list(_open_connections):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _open_connections.clear()
+    _thread_local.connection = None
+    _dataset_thread_local.connection = None
 
 
 atexit.register(_cleanup_connections)
+close_all_connections = _cleanup_connections
 
 
 def init_db():
@@ -121,17 +142,7 @@ def init_db():
 
 init_db()
 
-DATASET_DB_FILE = os.environ.get("SYNAPSE_DATASET_PATH", os.path.join(tempfile.gettempdir(), "synapse_dataset.db"))
-_dataset_thread_local = threading.local()
 
-
-def get_dataset_connection() -> sqlite3.Connection:
-    conn = getattr(_dataset_thread_local, "connection", None)
-    if conn is None:
-        conn = sqlite3.connect(DATASET_DB_FILE, check_same_thread=False, timeout=10.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        _dataset_thread_local.connection = conn
-    return conn
 
 
 def init_dataset_db():
@@ -488,7 +499,8 @@ async def get_challenge(request: Request):
     ip = get_client_ip(request)
     if not check_challenge_rate_limit(ip):
         raise HTTPException(status_code=429, detail="Too Many Requests. Please wait before requesting another challenge.")
-    return generate_challenge()
+    ua = request.headers.get("user-agent", "")
+    return generate_challenge(client_ip=ip, user_agent=ua)
 
 
 @app.post("/api/score")
@@ -514,7 +526,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=403, detail="[Synapse Shield] Missing token.")
 
     # 1. Kriptografik Token Varsa Doğrula
-    is_valid, reason, telemetry = verify_and_consume_token(token)
+    is_valid, reason, telemetry = verify_and_consume_token(token, client_ip=ip, user_agent=user_agent)
     if not is_valid:
         # Süresi dolan token: Kullanıcıyı banlama, token yenileme iste (False Positive Engeli)
         if reason == "TOKEN_EXPIRED":
@@ -531,7 +543,10 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             )
         # Replay Attack veya sahte token durumu: Ceza havuzuna ekle
         record_ip_decision(ip, is_bot=True)
-        threat_type = "REPLAY_ATTACK"
+        if "Token Relay" in reason or "Binding Mismatch" in reason:
+            threat_type = "TOKEN_RELAY_ATTACK"
+        else:
+            threat_type = "REPLAY_ATTACK"
         background_tasks.add_task(save_log, ip, user_agent, 100.0, "Bot", threat_type, [reason], {}, {})
         background_tasks.add_task(asyncio.to_thread, send_webhook_notification, ip, threat_type, 100.0, [reason])
         return {

@@ -34,10 +34,11 @@
 
 ---
 
-## ✨ 核心特性与安全架构 (v0.10.0)
+## ✨ 核心特性与安全架构 (v0.10.1)
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
+| 🔐 **客户端网络绑定与 Token Relay 防御** | 密码学客户端设备与网络子网双向绑定机制（`nonce.ts.bind_hash.sig`）。通过将 challenge 令牌绑定至 `/24` IPv4 与 `/64` IPv6 子网及大小写归一化 User-Agent，结合漫游容错机制，彻底封杀自动化 Token Relay 与跨 IP 集中式打码/收割农场攻击。内置防悬挂无泄漏的 SQLite Worker 线程生命周期管理与全新的 `synapse-shield doctor` 系统诊断体检 CLI 工具 (v0.10.1)。 |
 | 📱 **移动端 SDK v2.0 与反模拟器生物识别** | 全面覆盖原生 JS、React 与 Vue 的移动端生物特征遥测：按压保持时间（`touchend - touchstart` 均值与方差）、免权限陀螺仪/加速度计微颤（`motion_variance`）、WebGL 渲染器跨维校验（`is_mobile_gpu_mismatch` 精准拦截伪装移动视口的 `SwiftShader`/桌面显卡 +85 Risk）、Android Gboard/IME 软键盘适配（`key="Unidentified"`），彻底消除移动端单次轻触（Single-Tap）与滑动后点击的误报 (v0.10.0)。 |
 | 🛡️ **运动学深度加固、动态抖动与 PoW 防御** | 真实电容触控有效性校验（防御桌面端伪造触控 +75 Risk）、固定触控半径陷阱（方差为 0 判定为模拟器 +55 Risk）、致命违规硬封禁否决与绑定 IP 的 PoW 挑战机制（限定 35.0-55.0 灰色区间）、多维模糊轨迹重放检测 ($\delta < 0.015$)、点击与指针终点空间距离校准 ($\Delta d \le 50\text{px}$)、基于密钥的动态阈值抖动 ($\pm 5\%$) 以及训练集防投毒单 IP 样本配额限制 (v0.9.9)。 |
 | ⚡ **向量化 1D-CNN、Rust L1 缓存与 Alpine musllinux 支持** | 基于 NumPy BLAS 实现向量化卷积推理（耗时仅 0.092ms，提速 5.2 倍），线程本地持久化 SQLite WAL 与 L1 内存会话/封禁缓存（中间件全链路耗时 0.84ms），支持 Alpine Linux (`musllinux_1_2`) 多架构原生轮子，全面修复 Brave 指纹伪装与直线/宏点击绕过风险 (v0.9.8)。 |

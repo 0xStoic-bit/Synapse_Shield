@@ -254,7 +254,7 @@ def evaluate_synapse_request_sync(
         )
 
     # 3. Token cryptographic verification & replay protection
-    is_valid, reason, telemetry = verify_and_consume_token(token)
+    is_valid, reason, telemetry = verify_and_consume_token(token, client_ip=client_ip, user_agent=user_agent)
     if not is_valid:
         if "Replay" in reason or "Yeniden Oynatma" in reason:
             if METRICS_ENABLED and synapse_replays_detected_total is not None:
