@@ -34,6 +34,7 @@ def shield_protect(
     max_risk_score: float = 50.0,
     accessibility_mode: bool = False,
     mode: str = "enforce",
+    enable_pow: bool = False,
 ) -> Callable:
     """
     Decorator to protect any FastAPI endpoint with Synapse Shield behavioral biometrics.
@@ -108,6 +109,7 @@ def shield_protect(
                 mode=mode,
                 pow_nonce=str(pow_nonce) if pow_nonce else None,
                 pow_salt=str(pow_salt) if pow_salt else None,
+                enable_pow=enable_pow,
             )
 
             if not decision.allowed:
@@ -148,6 +150,7 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
         mode: str = "enforce",
+        enable_pow: bool = False,
     ) -> None:
         if not FASTAPI_AVAILABLE:
             raise ImportError("Starlette is required to use SynapseShieldMiddleware.")
@@ -156,6 +159,7 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
         self.mode = mode
+        self.enable_pow = enable_pow
 
     async def dispatch(self, request: Request, call_next: Callable) -> Any:
         # Check path filter
@@ -212,6 +216,7 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
             mode=self.mode,
             pow_nonce=str(pow_nonce) if pow_nonce else None,
             pow_salt=str(pow_salt) if pow_salt else None,
+            enable_pow=self.enable_pow,
         )
 
         if not decision.allowed:

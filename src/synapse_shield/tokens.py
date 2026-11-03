@@ -315,17 +315,29 @@ def verify_and_consume_token(
     return True, "Geçerli", telemetry
 
 
-def generate_pow_salt(client_ip: str | None = None) -> str:
+def generate_pow_salt(client_ip: str | None = None, difficulty: int = 4) -> str:
     """
     PoW (Proof of Work) için HMAC imzalı salt üretir.
-    Format: salt_hex.timestamp.signature
+    Format: salt_hex.timestamp.difficulty.signature
     Eğer client_ip verilmişse HMAC imzasına client_ip dahil edilir.
     """
     salt_hex = secrets.token_hex(8)
     ts = int(time.time() * 1000)
+    diff = int(difficulty)
     ip_part = f":{client_ip.strip()}" if client_ip else ""
-    signature = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
-    return f"{salt_hex}.{ts}.{signature}"
+    signature = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}:{diff}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
+    return f"{salt_hex}.{ts}.{diff}.{signature}"
+
+
+def extract_pow_difficulty(signed_salt: str) -> int:
+    """Extracts signed difficulty from PoW salt envelope (defaults to 4)."""
+    parts = str(signed_salt).split(".")
+    if len(parts) == 4:
+        try:
+            return int(parts[2])
+        except ValueError:
+            return 4
+    return 4
 
 
 def verify_pow_salt(signed_salt: str, client_ip: str | None = None) -> bool:
@@ -334,18 +346,28 @@ def verify_pow_salt(signed_salt: str, client_ip: str | None = None) -> bool:
     Eğer IP koruması varsa client_ip ile eşleşmelidir.
     """
     parts = signed_salt.split(".")
-    if len(parts) != 3:
-        return False
-    salt_hex, ts_str, sig = parts
-
-    try:
-        ts = int(ts_str)
-    except ValueError:
-        return False
-
     ip_part = f":{client_ip.strip()}" if client_ip else ""
-    expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected_sig):
+
+    if len(parts) == 4:
+        salt_hex, ts_str, diff_str, sig = parts
+        try:
+            ts = int(ts_str)
+            diff = int(diff_str)
+        except ValueError:
+            return False
+        expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}:{diff}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return False
+    elif len(parts) == 3:
+        salt_hex, ts_str, sig = parts
+        try:
+            ts = int(ts_str)
+        except ValueError:
+            return False
+        expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return False
+    else:
         return False
 
     now_ms = int(time.time() * 1000)
@@ -353,7 +375,7 @@ def verify_pow_salt(signed_salt: str, client_ip: str | None = None) -> bool:
     return not (elapsed_sec > 60.0 or elapsed_sec < -5.0)
 
 
-def verify_and_consume_pow(salt: str, nonce: str, client_ip: str | None = None) -> bool:
+def verify_and_consume_pow(salt: str, nonce: str, client_ip: str | None = None, difficulty: int | None = None) -> bool:
     """
     PoW (Proof of Work) çözümünün geçerliliğini kontrol eder ve salt:nonce ikilisini
     tek kullanımlık olarak depolama katmanında tüketir (Replay koruması).
@@ -364,8 +386,11 @@ def verify_and_consume_pow(salt: str, nonce: str, client_ip: str | None = None) 
     if not verify_pow_salt(salt, client_ip=client_ip):
         return False
 
-    hash_res = hashlib.sha256((salt + nonce).encode()).hexdigest()
-    if not hash_res.startswith("0000"):
+    required_diff = difficulty if difficulty is not None else extract_pow_difficulty(salt)
+    target_prefix = "0" * max(1, required_diff)
+
+    hash_res = hashlib.sha256((salt + str(nonce)).encode()).hexdigest()
+    if not hash_res.startswith(target_prefix):
         return False
 
     pow_key = f"pow:{salt}:{nonce}"

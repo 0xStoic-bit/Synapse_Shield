@@ -122,12 +122,12 @@ pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> Keystrok
         }
 
         // Mobile Soft Keyboard (IME / Gboard / iOS Keyboard) detection:
-        // Mobile virtual keyboards fire synthetic keydown/keyup with key="Unidentified" (keyCode 229)
-        // and near-zero dwell times (0-5ms). Exempt virtual IME events from mechanical switch dwell penalties.
-        let is_mobile_ime = sorted_keys.iter().any(|k| {
+        // Require majority of keys being IME to prevent desktop bot dwell bypass
+        let ime_count = sorted_keys.iter().filter(|k| {
             let kl = k.key.to_lowercase();
             kl == "unidentified" || kl == "process"
-        });
+        }).count();
+        let is_mobile_ime = ime_count * 2 >= sorted_keys.len();
 
         // Robotic dwell time: zero variance or instant keypress (Desktop mechanical keys)
         if !dwell_times.is_empty() && !is_mobile_ime {

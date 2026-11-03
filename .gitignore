@@ -112,3 +112,10 @@ graphify-out/
 secret*.txt
 *.pem
 credentials.json
+
+# Ajan ve Yerel Script Dosyaları
+GEMINI_DIRECTIVE.md
+generate_pdf.py
+*.pdf
+collab_test.*
+src/collab_test.*

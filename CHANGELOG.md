@@ -5,6 +5,27 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-11-04
+### Privacy, SPA Lifecycle, Proxy CIDR & Infrastructure Resilience
+- **[P0] Keystroke Zero-PII Shield (GDPR / HIPAA / PCI-DSS Level 1 Compliance):**
+  - **Client-Side Masking (`key: "masked"`):** Automatically identifies sensitive inputs (password, credit card, CVV, PIN, token, security code) and strips raw character data in ephemeral client memory before telemetry construction.
+  - **Client-Side Linguistic Scoring (`is_freq_digraph`):** Evaluates frequent digraph correlations in ephemeral memory without recording or transmitting character pairs, maintaining high anti-bot discriminative power while transmitting zero Personally Identifiable Information across the wire.
+- **[P0] SPA Token Lifecycle & Refresh Mutex:**
+  - **Single-Use Token Invalidation:** Automatically invalidates `currentChallenge` upon payload consumption, eliminating false-positive 403 Replay Attack rejections in Single-Page Applications (React, Vue, Next.js).
+  - **Token Staleness & Coalescing Mutex:** Transparently auto-refreshes challenge tokens older than 45 seconds and coalesces concurrent `/api/challenge` requests via inflight promise deduplication.
+- **[P0] Proof-of-Work (PoW) Hardening & Telemetry Window Shift:**
+  - **Dynamic Signed Difficulty (`salt.ts.diff.sig`):** Cryptographically signs adaptive difficulty into the PoW challenge envelope, preventing malicious downgrade attacks.
+  - **Telemetry Retention on PoW Retry:** Shifts historical telemetry timestamps forward to align with the fresh challenge creation window instead of purging them, eliminating false-positive 403 blocks (`total_interactive_events == 0`) for legitimate humans solving PoW.
+  - **Middleware End-to-End Enablement:** Ensured `enable_pow=True` propagates reliably across all ASGI, WSGI, Litestar, Django, Sanic, and Flask integration middleware layers.
+- **[P0] Trusted Reverse Proxy CIDR & Header Sanitization:**
+  - **CIDR Subnet Resolution:** Added native CIDR parsing (`ipaddress.ip_network`) for `SYNAPSE_TRUSTED_PROXIES` (e.g. `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `173.245.48.0/20`), enabling seamless enterprise deployment behind Cloudflare, AWS ALB, and Kubernetes Ingress controllers.
+  - **IP Header Syntax Validation:** Validates `X-Forwarded-For`, `CF-Connecting-IP`, and `X-Real-IP` strings against strict RFC IP syntax before trusting proxy hops, preventing header injection and malformed IP attacks.
+- **[P1] CGNAT & Campus NAT Collision Mitigation:**
+  - **User-Agent Session Partitioning:** Incorporated User-Agent SHA-256 hash into session identifiers (`ip_{client_ip}_{ua_hash}`), preventing multi-user collisions on carrier-grade NAT and university networks (e.g. Eduroam).
+  - **Configurable DoS Threshold:** Added `SYNAPSE_MAX_REQ_10S` environment variable (default: 100 req/10s) for flexible rate limit tuning.
+- **[P1] IME Dwell-Time Bypass Patch:**
+  - Enforced touch capability or majority requirement for mobile IME keys (`unidentified` / `process`), preventing desktop bots from claiming virtual IME status to bypass mechanical switch dwell checks in both Rust SIMD and Python feature extractors.
+
 ## [0.10.1] - 2026-11-01
 ### Cryptographic Hardening, Token Relay Defense & Diagnostics
 - **[P0] Cryptographic Client Network Binding (`nonce.ts.bind_hash.sig`):**

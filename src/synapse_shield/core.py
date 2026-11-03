@@ -41,9 +41,56 @@ MAX_PAYLOAD_SIZE = 262_144  # 256 KB
 
 
 def get_trusted_proxies() -> set[str]:
-    """Return set of trusted reverse proxy IP addresses."""
+    """Return set of trusted reverse proxy IP addresses or CIDR blocks."""
     raw = os.environ.get("SYNAPSE_TRUSTED_PROXIES", "127.0.0.1,::1,localhost")
     return {ip.strip() for ip in raw.split(",") if ip.strip()}
+
+
+def _is_ip_in_trusted(ip_str: str, trusted_raw_items: Any) -> bool:
+    """Helper to check if an IP string matches trusted proxies (supports CIDR, loopback, and exact match)."""
+    if not ip_str:
+        return False
+    ip_clean = ip_str.strip()
+    if ip_clean in ("127.0.0.1", "::1", "localhost"):
+        if any(item in ("127.0.0.1", "::1", "localhost") for item in trusted_raw_items):
+            return True
+
+    try:
+        ip_obj = ipaddress.ip_address(ip_clean)
+    except ValueError:
+        return ip_clean in trusted_raw_items
+
+    for item in trusted_raw_items:
+        item_str = str(item).strip()
+        if not item_str:
+            continue
+        if item_str == "localhost":
+            if ip_obj.is_loopback:
+                return True
+            continue
+        try:
+            if "/" in item_str:
+                net = ipaddress.ip_network(item_str, strict=False)
+                if ip_obj in net:
+                    return True
+            else:
+                if ip_obj == ipaddress.ip_address(item_str):
+                    return True
+        except ValueError:
+            if ip_clean == item_str:
+                return True
+    return False
+
+
+def _is_valid_ip(ip_str: str) -> bool:
+    """Validates if a string is a syntactically valid IPv4 or IPv6 address."""
+    if not ip_str:
+        return False
+    try:
+        ipaddress.ip_address(ip_str.strip())
+        return True
+    except ValueError:
+        return False
 
 
 def resolve_client_ip(
@@ -54,14 +101,14 @@ def resolve_client_ip(
     """
     Safely resolve the originating client IP address behind reverse proxies (Nginx, Cloudflare, AWS ALB).
     Only trusts forwarding headers (CF-Connecting-IP, X-Real-IP, X-Forwarded-For) if client_host is
-    explicitly in the trusted proxy set. Prevents IP spoofing while protecting legitimate visitors.
+    explicitly in the trusted proxy set or CIDR blocks. Prevents IP spoofing while protecting legitimate visitors.
     """
     if trusted_proxies is None:
         trusted_proxies = get_trusted_proxies()
 
     client_ip = (client_host or "127.0.0.1").strip()
 
-    if client_ip not in trusted_proxies:
+    if not _is_ip_in_trusted(client_ip, trusted_proxies):
         return client_ip
 
     header_dict: dict[str, str] = {}
@@ -82,14 +129,14 @@ def resolve_client_ip(
             if val:
                 header_dict[key] = str(val)
 
-    # 1. Cloudflare True Client IP
+    # 1. Cloudflare True Client IP (validated for IP format)
     cf_ip = header_dict.get("cf-connecting-ip")
-    if cf_ip:
+    if cf_ip and _is_valid_ip(cf_ip):
         return cf_ip.strip()
 
-    # 2. Standard single reverse proxy header
+    # 2. Standard single reverse proxy header (validated for IP format)
     real_ip = header_dict.get("x-real-ip")
-    if real_ip:
+    if real_ip and _is_valid_ip(real_ip):
         return real_ip.strip()
 
     # 3. Traversed X-Forwarded-For chain: client, proxy1, proxy2
@@ -97,10 +144,11 @@ def resolve_client_ip(
     if forwarded:
         ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
         for ip in reversed(ips):
-            if ip not in trusted_proxies:
+            if _is_valid_ip(ip) and not _is_ip_in_trusted(ip, trusted_proxies):
                 return ip
-        if ips:
-            return ips[0]
+        for ip in reversed(ips):
+            if _is_valid_ip(ip):
+                return ip
 
     return client_ip
 
@@ -192,13 +240,15 @@ def evaluate_synapse_request_sync(
     mode: str = "enforce",
     pow_nonce: str | None = None,
     pow_salt: str | None = None,
-    enable_pow: bool = False,
+    enable_pow: bool | None = None,
 ) -> SynapseDecision:
     """
     Synchronous core security evaluation engine.
     Used natively by synchronous frameworks (Django, Flask) and wrapped in threadpools for ASGI/FastAPI.
     """
     storage = get_storage()
+    if enable_pow is None:
+        enable_pow = os.environ.get("SYNAPSE_ENABLE_POW", "").lower() in ("1", "true")
     is_shadow = mode.lower() == "shadow"
 
     # 1. IP Ban check
@@ -289,21 +339,23 @@ def evaluate_synapse_request_sync(
         )
 
     # 4. Multi-turn Session Identification & History
-    # Tie session to client_ip to prevent spoofing / rotating User-Agent to bypass session invariance
-    session_id = f"ip_{client_ip}"
+    # Tie session to client_ip + User-Agent hash to prevent IP-wide collisions on CGNAT / Eduroam
+    ua_hash = hashlib.sha256((user_agent or "unknown_ua").encode("utf-8")).hexdigest()[:8]
+    session_id = f"ip_{client_ip}_{ua_hash}"
     session_history = storage.get_session_telemetries(session_id, window_sec=300)
 
     # 4.5 Sliding-Window Request Frequency (Poisson Anomaly & DoS protection)
     recent_request_count = storage.record_and_get_request_count(client_ip, window_sec=10)
-    if recent_request_count > 100:
-        storage.ban_ip(client_ip, duration_sec=900, reason="Extreme request frequency (DoS protection: >100 req/10s)")
+    max_10s_limit = int(os.environ.get("SYNAPSE_MAX_REQ_10S", "100"))
+    if recent_request_count > max_10s_limit:
+        storage.ban_ip(client_ip, duration_sec=900, reason=f"Extreme request frequency (DoS protection: >{max_10s_limit} req/10s)")
         return SynapseDecision(
             allowed=False,
             status_code=403,
             error_message="[Synapse Shield] Extreme request frequency detected. IP temporarily banned.",
             classification="Bot",
             bot_score=100.0,
-            reasons=["Extreme request frequency (>100 req/10s)"],
+            reasons=[f"Extreme request frequency (>{max_10s_limit} req/10s)"],
             action="block",
             headers={"X-Synapse-Decision": "block", "X-Synapse-Risk-Score": "100.0%"},
         )
@@ -455,7 +507,7 @@ async def evaluate_synapse_request(
     mode: str = "enforce",
     pow_nonce: str | None = None,
     pow_salt: str | None = None,
-    enable_pow: bool = False,
+    enable_pow: bool | None = None,
 ) -> SynapseDecision:
     """
     Asynchronous wrapper for non-blocking invocation in ASGI event loops.

@@ -47,12 +47,14 @@ class SynapseShieldASGIMiddleware:
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
         mode: str = "enforce",
+        enable_pow: bool = False,
     ) -> None:
         self.app = app
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
         self.mode = mode
+        self.enable_pow = enable_pow
 
     async def __call__(self, scope: dict[str, Any], receive: Callable, send: Callable) -> None:
         if scope["type"] != "http":
@@ -157,6 +159,7 @@ class SynapseShieldASGIMiddleware:
             mode=self.mode,
             pow_nonce=str(pow_nonce) if pow_nonce else None,
             pow_salt=str(pow_salt) if pow_salt else None,
+            enable_pow=self.enable_pow,
         )
 
         if not decision.allowed:

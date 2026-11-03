@@ -261,7 +261,7 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     continue
 
                 if k_type == "down":
-                    pending_downs.setdefault(k_key, []).append(t_val)
+                    pending_downs.setdefault(k_key, []).append((t_val, k.get("is_freq_digraph")))
                 elif k_type == "up":
                     up_val = k.get("up")
                     if isinstance(up_val, (int, float)) and not math.isnan(up_val) and not math.isinf(up_val):
@@ -269,19 +269,38 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     else:
                         up_t = t_val
 
+                    down_freq = k.get("is_freq_digraph")
                     if pending_downs.get(k_key):
-                        down_t = pending_downs[k_key].pop(0)
-                        detailed.append({"key": k_key, "down": down_t, "up": up_t})
+                        down_t, stored_freq = pending_downs[k_key].pop(0)
+                        if stored_freq is not None:
+                            down_freq = stored_freq
+                        entry = {"key": k_key, "down": down_t, "up": up_t}
+                        if down_freq is not None:
+                            entry["is_freq_digraph"] = bool(down_freq)
+                        detailed.append(entry)
                     elif "duration_ms" in k and isinstance(k["duration_ms"], (int, float)):
                         dur = float(k["duration_ms"])
-                        detailed.append({"key": k_key, "down": up_t - dur, "up": up_t})
+                        entry = {"key": k_key, "down": up_t - dur, "up": up_t}
+                        if down_freq is not None:
+                            entry["is_freq_digraph"] = bool(down_freq)
+                        detailed.append(entry)
                     elif "down" in k and isinstance(k["down"], (int, float)):
-                        detailed.append({"key": k_key, "down": float(k["down"]), "up": up_t})
+                        entry = {"key": k_key, "down": float(k["down"]), "up": up_t}
+                        if down_freq is not None:
+                            entry["is_freq_digraph"] = bool(down_freq)
+                        detailed.append(entry)
 
             # Kalan eşleşmemiş keydown'ları ekle
             for k_key, down_list in pending_downs.items():
-                for down_t in down_list:
-                    detailed.append({"key": k_key, "down": down_t, "up": None})
+                for item in down_list:
+                    if isinstance(item, tuple):
+                        down_t, stored_freq = item
+                    else:
+                        down_t, stored_freq = item, None
+                    entry = {"key": k_key, "down": down_t, "up": None}
+                    if stored_freq is not None:
+                        entry["is_freq_digraph"] = bool(stored_freq)
+                    detailed.append(entry)
         else:
             detailed = []
             for k in keystrokes:
@@ -301,7 +320,10 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                             up_val = t_val + float(k["duration_ms"])
                         else:
                             up_val = None
-                        detailed.append({"key": key_str, "down": t_val, "up": up_val})
+                        entry = {"key": key_str, "down": t_val, "up": up_val}
+                        if "is_freq_digraph" in k:
+                            entry["is_freq_digraph"] = bool(k["is_freq_digraph"])
+                        detailed.append(entry)
 
         features["key_count"] = len(detailed)
         if len(detailed) > 0:
@@ -370,16 +392,21 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                 if 0.0 < features["avg_flight_time"] < 25.0:
                     score += 0.70
 
-                is_mobile_ime = any(
-                    str(d.get("key", "")).lower() in ("unidentified", "process") for d in detailed
+                # Mobile Virtual IME check (Gboard / iOS soft keyboard)
+                # Require touch support or majority of keys being IME to prevent desktop bot dwell bypass
+                ime_count = sum(
+                    1 for d in detailed if str(d.get("key", "")).lower() in ("unidentified", "process")
                 )
+                is_touch_device = bool(features.get("touch_supported", False))
+                is_mobile_ime = (is_touch_device and ime_count > 0) or (ime_count * 2 >= len(detailed))
+
                 if dwell_times and not is_mobile_ime:
                     if features["avg_dwell_time"] < 15.0:
                         score += 0.75
                     elif features["dwell_time_var"] < 2.0 and len(dwell_times) >= 3:
                         score += 0.80
 
-                # Digraph linguistic correlation check
+                # Digraph linguistic correlation check (supports client-side Zero-PII is_freq_digraph)
                 frequent_digraphs = {
                     "th", "er", "on", "an", "re", "he", "in", "ed", "nd", "ha",
                     "at", "en", "es", "of", "or", "nt", "ea", "ti", "to", "it",
@@ -387,16 +414,37 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     "la", "le", "ik", "ak", "el", "al", "ma", "me", "ba", "ka",
                 }
                 digraph_flights = {}
+                direct_freq_flights = []
+                direct_non_freq_flights = []
+
                 for i in range(1, len(detailed)):
-                    prev_k = str(detailed[i - 1]["key"]).lower()
-                    curr_k = str(detailed[i]["key"]).lower()
+                    fl = detailed[i]["down"] - detailed[i - 1]["down"]
+                    if not (0.0 < fl < 2000.0):
+                        continue
+
+                    # If client computed is_freq_digraph (Zero-PII mode):
+                    if "is_freq_digraph" in detailed[i]:
+                        if detailed[i]["is_freq_digraph"]:
+                            direct_freq_flights.append(fl)
+                        else:
+                            direct_non_freq_flights.append(fl)
+                        continue
+
+                    prev_k = str(detailed[i - 1].get("key", "")).lower()
+                    curr_k = str(detailed[i].get("key", "")).lower()
                     if len(prev_k) == 1 and len(curr_k) == 1:
                         pair = prev_k + curr_k
-                        fl = detailed[i]["down"] - detailed[i - 1]["down"]
-                        if 0.0 < fl < 2000.0:
-                            digraph_flights.setdefault(pair, []).append(fl)
+                        digraph_flights.setdefault(pair, []).append(fl)
 
-                if digraph_flights:
+                if direct_freq_flights or direct_non_freq_flights:
+                    if direct_freq_flights and direct_non_freq_flights:
+                        f_mean = sum(direct_freq_flights) / len(direct_freq_flights)
+                        nf_mean = sum(direct_non_freq_flights) / len(direct_non_freq_flights)
+                        if f_mean >= nf_mean * 1.05 and len(detailed) >= 8:
+                            score += 0.40
+                        elif f_mean < nf_mean * 0.85:
+                            score = max(0.0, score - 0.25)
+                elif digraph_flights:
                     freq_avg = []
                     non_freq_avg = []
                     for pair, times in digraph_flights.items():

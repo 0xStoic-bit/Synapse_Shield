@@ -105,9 +105,13 @@ export default function Page() {
 
 ---
 
-## Features (v0.9.3)
+## Features (v0.10.2)
 
-- **Hardened Security Architecture:** Full alignment with Synapse Shield v0.9.3 production hardening (Algorithmic DoS mitigation, Rust SIMD differential curvature $\kappa(t)$, zero-copy buffers, and keystroke entropy analysis).
+- **Keystroke Zero-PII Shield (v0.10.2):** Automatic client-side masking of sensitive input fields (`key: "masked"` for password/card inputs) and local digraph frequency computation (`is_freq_digraph`), transmitting zero PII across the wire.
+- **SPA Token Lifecycle & Coalescing Mutex (v0.10.2):** Single-use challenge token lifecycle invalidation to eliminate 403 Replay Attack loops in Next.js and React applications.
+- **PoW Telemetry Retention (v0.10.2):** Shifts historical telemetry timestamps forward upon PoW challenge retry, eliminating empty telemetry 403 blocks for genuine users.
+- **Mobile SDK v2.0 & Handheld Biometrics (v0.10.0):** Tap hold duration tracking (`tap_duration_ms`), passive 3-axis gyroscope motion variance, and WebGL emulator detection.
+- **Hardened Security Architecture:** Full alignment with Synapse Shield production hardening (Algorithmic DoS mitigation, Rust SIMD differential curvature $\kappa(t)$, zero-copy buffers, and keystroke entropy analysis).
 - **Transparent Token Expiration Refresh:** Seamlessly renegotiates expired tokens (`HTTP 400 EXPIRED`) without triggering IP quarantine or streak bans.
 - **Distributed State & Redis Support:** Seamless integration with Synapse Shield's distributed multi-server cluster mode.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with native APIs.

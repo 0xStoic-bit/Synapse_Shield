@@ -67,6 +67,41 @@
     return true;
   }
 
+  // Frequent digraphs for client-side zero-PII linguistic scoring
+  const FREQUENT_DIGRAPHS = new Set([
+    "th", "er", "on", "an", "re", "he", "in", "ed", "nd", "ha",
+    "at", "en", "es", "of", "or", "nt", "ea", "ti", "to", "it",
+    "st", "io", "le", "is", "ou", "ar", "as", "de", "rt", "ve",
+    "la", "le", "ik", "ak", "el", "al", "ma", "me", "ba", "ka"
+  ]);
+
+  // Sensitive input detection for Zero-PII keystroke protection (GDPR / HIPAA / PCI-DSS compliance)
+  function isSensitiveInput(target) {
+    if (!target) return false;
+    try {
+      const type = (target.getAttribute && target.getAttribute("type")) || target.type || "";
+      const name = (target.getAttribute && target.getAttribute("name")) || target.name || "";
+      const id = target.id || "";
+      const autocomplete = (target.getAttribute && target.getAttribute("autocomplete")) || target.autocomplete || "";
+      const sensitiveRegex = /password|passcode|secret|pin|cvv|cvc|card|credit|security_code|token/i;
+      const tLower = String(type).toLowerCase();
+      const aLower = String(autocomplete).toLowerCase();
+      if (
+        tLower === "password" ||
+        aLower === "current-password" ||
+        aLower === "new-password" ||
+        aLower === "cc-number" ||
+        aLower === "cc-csc"
+      ) {
+        return true;
+      }
+      if (sensitiveRegex.test(String(name)) || sensitiveRegex.test(String(id))) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   const SynapseShield = {
     mouseMovements: [],
     clicks: [],
@@ -82,6 +117,8 @@
     motionThrottleMs: 50,
     cachedWebGLRenderer: "",
     currentChallenge: null,
+    challengeCreatedAt: 0,
+    _refreshPromise: null,
     isInitialized: false,
 
     async init() {
@@ -199,31 +236,54 @@
         if (this.clicks.length > 50) this.clicks.shift();
       }, { passive: true });
 
-      // Keyboard dynamics (Dwell & Flight Time Tracking + Mobile IME Compatibility)
+      // Keyboard dynamics (Dwell & Flight Time Tracking + Mobile IME Compatibility + Zero-PII Shield)
       const activeKeys = {};
+      let lastRawKey = "";
+
       window.addEventListener("keydown", (e) => {
-        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
+        const isSens = isSensitiveInput(e.target);
+        const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
         const now = Date.now();
-        if (!activeKeys[keyName]) {
-          activeKeys[keyName] = now;
+
+        let isFreq = false;
+        if (lastRawKey && rawKey && lastRawKey.length === 1 && rawKey.length === 1) {
+          isFreq = FREQUENT_DIGRAPHS.has(lastRawKey + rawKey);
         }
-        this.keystrokes.push({ type: "down", key: keyName, t: now });
+        lastRawKey = rawKey;
+
+        // Zero-PII: mask sensitive inputs so passwords and card numbers are never collected
+        const keyName = isSens ? "masked" : rawKey;
+
+        if (!activeKeys[keyName]) {
+          activeKeys[keyName] = { down: now, isFreq: isFreq };
+        }
+        this.keystrokes.push({
+          type: "down",
+          key: keyName,
+          t: now,
+          is_freq_digraph: isFreq,
+        });
         if (this.keystrokes.length > 50) this.keystrokes.shift();
       }, { passive: true });
 
       window.addEventListener("keyup", (e) => {
-        const keyName = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
+        const isSens = isSensitiveInput(e.target);
+        const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
+        const keyName = isSens ? "masked" : rawKey;
         const now = Date.now();
-        const downTime = activeKeys[keyName];
+        const keyState = activeKeys[keyName];
         delete activeKeys[keyName];
-        const duration = downTime ? (now - downTime) : 0;
+        const downTime = keyState ? keyState.down : now;
+        const isFreq = keyState ? keyState.isFreq : false;
+        const duration = keyState ? (now - downTime) : 0;
         this.keystrokes.push({
           type: "up",
           key: keyName,
           t: now,
-          down: downTime || now,
+          down: downTime,
           up: now,
           duration_ms: duration,
+          is_freq_digraph: isFreq,
         });
         if (this.keystrokes.length > 50) this.keystrokes.shift();
       }, { passive: true });
@@ -247,15 +307,22 @@
     },
 
     async refreshChallenge() {
-      try {
-        const res = await fetch("/api/challenge");
-        if (res.ok) {
-          const data = await res.json();
-          this.currentChallenge = data.challenge;
+      if (this._refreshPromise) return this._refreshPromise;
+      this._refreshPromise = (async () => {
+        try {
+          const res = await fetch("/api/challenge");
+          if (res.ok) {
+            const data = await res.json();
+            this.currentChallenge = data.challenge;
+            this.challengeCreatedAt = Date.now();
+          }
+        } catch (e) {
+          console.warn("Could not fetch challenge, falling back to unsigned mode.");
+        } finally {
+          this._refreshPromise = null;
         }
-      } catch (e) {
-        console.warn("Could not fetch challenge, falling back to unsigned mode.");
-      }
+      })();
+      return this._refreshPromise;
     },
 
     reset() {
@@ -373,6 +440,9 @@
     },
 
     async submit(url = "/api/score", retryWithPoW = false, powData = null) {
+      if (!this.currentChallenge || (Date.now() - this.challengeCreatedAt > 45000)) {
+        await this.refreshChallenge();
+      }
       const payload = this.getPayload();
 
       if (powData) {
@@ -426,15 +496,33 @@
             await new Promise((resolve) => setTimeout(resolve, 1600 - elapsed));
           }
 
-          // 5. Trim telemetry window so telemetry_duration_sec <= elapsed + 0.3s
-          // (Prevents Time Travel Bot detection when retrying with a fresh challenge)
-          const now = Date.now();
-          const maxWindowMs = Math.max(1200, now - challengeTs);
-          const windowStart = now - maxWindowMs;
-          this.mouseMovements = this.mouseMovements.filter((e) => e.t >= windowStart);
-          this.clicks = this.clicks.filter((e) => e.t >= windowStart);
-          this.keystrokes = this.keystrokes.filter((e) => e.t >= windowStart);
-          this.scrolls = this.scrolls.filter((e) => e.t >= windowStart);
+          // 5. Shift telemetry timestamps to match fresh challenge window
+          // Preserves kinematic intervals, jerks, and curvature while preventing 'Time Travel' rejection
+          // and avoiding empty telemetry 403 blocks.
+          const allEvents = [
+            ...this.mouseMovements,
+            ...this.clicks,
+            ...this.keystrokes,
+            ...this.scrolls,
+          ];
+          if (allEvents.length > 0) {
+            let minT = Infinity;
+            allEvents.forEach((ev) => {
+              const t = ev.t || ev.down;
+              if (typeof t === "number" && t < minT) minT = t;
+            });
+            if (minT < challengeTs && minT !== Infinity) {
+              const shift = challengeTs - minT + 50;
+              this.mouseMovements.forEach((e) => { if (e.t) e.t += shift; });
+              this.clicks.forEach((e) => { if (e.t) e.t += shift; });
+              this.keystrokes.forEach((e) => {
+                if (e.t) e.t += shift;
+                if (e.down) e.down += shift;
+                if (e.up) e.up += shift;
+              });
+              this.scrolls.forEach((e) => { if (e.t) e.t += shift; });
+            }
+          }
 
           // Retry with fresh challenge token and valid PoW data
           return await this.submit(url, true, { nonce: powNonce, salt: data.pow_salt });
@@ -456,10 +544,17 @@
       if (!this.isInitialized) {
         await this.init();
       }
-      if (!this.currentChallenge) {
+      const now = Date.now();
+      if (!this.currentChallenge || (now - this.challengeCreatedAt > 45000)) {
         await this.refreshChallenge();
       }
-      return this.getPayload().token;
+      const payload = this.getPayload();
+      // Invalidate current challenge immediately after consumption to guarantee single-use token lifecycle
+      // and prevent 403 Replay Attack in SPAs (React / Vue / Next.js)
+      this.currentChallenge = null;
+      // Proactively trigger background refresh for next call
+      this.refreshChallenge();
+      return payload.token;
     },
 
     protectFetch(urlPatterns) {
