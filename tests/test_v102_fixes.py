@@ -1,13 +1,10 @@
 import os
-import time
-import pytest
-from synapse_shield.core import resolve_client_ip, _is_ip_in_trusted, _is_valid_ip, evaluate_synapse_request_sync
+from synapse_shield.core import resolve_client_ip, _is_ip_in_trusted, _is_valid_ip
 from synapse_shield.tokens import (
     generate_pow_salt,
     extract_pow_difficulty,
     verify_pow_salt,
     verify_and_consume_pow,
-    generate_challenge,
 )
 from synapse_shield.features import extract_features
 
