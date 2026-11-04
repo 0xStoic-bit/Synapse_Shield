@@ -5,6 +5,18 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4] - 2026-11-04
+### Zero-PII Keystroke Privacy & Multi-Framework SDK Hardening
+- **[Critical] True Zero-PII In-Transit Keystroke Masking (GDPR Art. 5(1)(c) & KVKK Art. 4 Compliance):**
+  - **Universal Single-Character Masking:** Extended client-side keystroke masking across Vanilla JS (`synapse-sdk.js`), React (`useSynapseShield.ts`), and Vue 3 (`useSynapseShield.ts`) to immediately mask all single-character inputs (`rawKey.length === 1 -> key: "masked"`).
+  - **Zero Raw Text in Transit:** No raw typed character (whether from password fields, usernames, or search boxes) is ever transmitted over the network in token envelopes.
+  - **Client-Side Digraph Parity:** Linguistic digraph frequency (`is_freq_digraph`) is pre-computed in client memory prior to masking, preserving full kinematic and muscle-memory bot detection fidelity.
+  - **Functional Key Preservation:** Preserved virtual IME indicators (`"unidentified"`, `"process"`) and navigation control events (`"enter"`, `"backspace"`) to ensure 100% Android/iOS soft-keyboard and typing flight-time entropy detection.
+- **[High] React & Vue SDK Hardening:**
+  - Added `FREQUENT_DIGRAPHS` set and `isSensitiveInput` regex detection to React and Vue hooks.
+  - Resolved `lookupId` collision in concurrent keystroke down/up tracking via `e.code || rawKey`.
+  - Added SSR-safe `declare const Buffer` definitions for headless and Node.js environments.
+
 ## [0.10.3] - 2026-11-04
 ### Adversarial Red-Team Hardening & Dual-Model Security Audit
 - **[Critical] IME Virtual Keyboard Bypass Remediation:**

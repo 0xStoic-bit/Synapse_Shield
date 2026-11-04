@@ -105,9 +105,9 @@ export default function Page() {
 
 ---
 
-## Features (v0.10.3)
+## Features (v0.10.4)
 
-- **Keystroke Zero-PII Shield (v0.10.3):** Automatic client-side masking of sensitive input fields (`key: "masked"` for password/card inputs) and local digraph frequency computation (`is_freq_digraph`), transmitting zero PII across the wire.
+- **Universal Keystroke Zero-PII Shield (v0.10.4):** Automatic client-side masking of all single-character inputs (`rawKey.length === 1 -> "masked"`) and sensitive fields, local digraph frequency computation (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR & KVKK compliant).
 - **SPA Token Lifecycle & Coalescing Mutex (v0.10.3):** Single-use challenge token lifecycle invalidation to eliminate 403 Replay Attack loops in Next.js and React applications.
 - **PoW Telemetry Retention (v0.10.3):** Shifts historical telemetry timestamps forward upon PoW challenge retry, eliminating empty telemetry 403 blocks for genuine users.
 - **Mobile SDK v2.0 & Handheld Biometrics (v0.10.0):** Tap hold duration tracking (`tap_duration_ms`), passive 3-axis gyroscope motion variance, and WebGL emulator detection.

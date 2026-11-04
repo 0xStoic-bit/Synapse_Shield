@@ -1,6 +1,6 @@
 {
   "name": "synapse-shield-vue",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Vue 3 and Nuxt 3 integration for Synapse Shield Behavioral Biometrics",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -32,7 +32,7 @@
     "biometrics",
     "anti-bot"
   ],
-  "author": "Mustafa Güngör",
+  "author": "Mustafa G\u00fcng\u00f6r",
   "license": "MIT",
   "peerDependencies": {
     "vue": ">=3.0.0"

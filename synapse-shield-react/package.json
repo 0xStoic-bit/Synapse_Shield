@@ -1,6 +1,6 @@
 {
   "name": "synapse-shield-react",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "React and Next.js integration for Synapse Shield Behavioral Biometrics",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,7 +27,7 @@
     "synapse-shield",
     "bot-protection"
   ],
-  "author": "Mustafa Güngör",
+  "author": "Mustafa G\u00fcng\u00f6r",
   "license": "MIT",
   "peerDependencies": {
     "react": ">=16.8.0",

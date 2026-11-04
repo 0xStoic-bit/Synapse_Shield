@@ -1,5 +1,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 
+declare const Buffer: any;
+
 // Safe UTF-8 Base64 Encoder (SSR Safe)
 function safeBtoa(str: string): string {
   try {
@@ -60,7 +62,7 @@ function getWebGLRenderer(): string {
 export interface SynapseTelemetry {
   mouse_movements: Array<{ x: number; y: number; t: number; r?: number; f?: number; source?: string }>;
   clicks: Array<{ x: number; y: number; t: number; r?: number; tap_duration_ms?: number; source?: string }>;
-  keystrokes: Array<{ type: string; key?: string; t: number; down?: number; up?: number; duration_ms?: number }>;
+  keystrokes: Array<{ type: string; key?: string; t: number; down?: number; up?: number; duration_ms?: number; is_freq_digraph?: boolean }>;
   scrolls: Array<{ y: number; t: number }>;
   browser: {
     webdriver: boolean;
@@ -93,6 +95,40 @@ export interface UseSynapseShieldOptions {
   scrollThrottleMs?: number;
 }
 
+const FREQUENT_DIGRAPHS = new Set([
+  "th", "er", "on", "an", "re", "he", "in", "ed", "nd", "ha",
+  "at", "en", "es", "of", "or", "nt", "ea", "ti", "to", "it",
+  "st", "io", "le", "is", "ou", "ar", "as", "de", "rt", "ve",
+  "er", "en", "da", "de", "an", "ar", "in", "te", "la", "le",
+  "ik", "ak", "el", "al", "ma", "me", "ba", "ka"
+]);
+
+function isSensitiveInput(target: any): boolean {
+  if (!target) return false;
+  try {
+    const type = (target.getAttribute && target.getAttribute("type")) || target.type || "";
+    const name = (target.getAttribute && target.getAttribute("name")) || target.name || "";
+    const id = target.id || "";
+    const autocomplete = (target.getAttribute && target.getAttribute("autocomplete")) || target.autocomplete || "";
+    const sensitiveRegex = /password|passcode|secret|pin|cvv|cvc|card|credit|security_code|token/i;
+    const tLower = String(type).toLowerCase();
+    const aLower = String(autocomplete).toLowerCase();
+    if (
+      tLower === "password" ||
+      aLower === "current-password" ||
+      aLower === "new-password" ||
+      aLower === "cc-number" ||
+      aLower === "cc-csc"
+    ) {
+      return true;
+    }
+    if (sensitiveRegex.test(String(name)) || sensitiveRegex.test(String(id))) {
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
   const {
     apiEndpoint = '/api',
@@ -123,7 +159,8 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
   let lastMotionTime = 0;
   let lastTouchStartTime = 0;
   let motionSamples: number[] = [];
-  const activeKeys: Record<string, number> = {};
+  const activeKeys: Record<string, { down: number; isFreq: boolean }> = {};
+  let lastRawKey = "";
 
   const refreshChallenge = async (): Promise<string | null> => {
     if (typeof window === 'undefined') return null;
@@ -315,28 +352,52 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    const keyName = e.key ? e.key.toLowerCase() : (e.code || "unknown");
+    const isSens = isSensitiveInput(e.target);
+    const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
+    const lookupId = e.code || rawKey;
     const now = Date.now();
-    if (!activeKeys[keyName]) {
-      activeKeys[keyName] = now;
+
+    let isFreq = false;
+    if (lastRawKey && rawKey && lastRawKey.length === 1 && rawKey.length === 1) {
+      isFreq = FREQUENT_DIGRAPHS.has(lastRawKey + rawKey);
     }
-    telemetry.value.keystrokes.push({ type: "down", key: keyName, t: now });
+    lastRawKey = rawKey;
+
+    const isSingleChar = rawKey.length === 1;
+    const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+
+    if (!activeKeys[lookupId]) {
+      activeKeys[lookupId] = { down: now, isFreq };
+    }
+    telemetry.value.keystrokes.push({
+      type: "down",
+      key: keyName,
+      t: now,
+      is_freq_digraph: isFreq,
+    });
     if (telemetry.value.keystrokes.length > 50) telemetry.value.keystrokes.shift();
   };
 
   const handleKeyUp = (e: KeyboardEvent) => {
-    const keyName = e.key ? e.key.toLowerCase() : (e.code || "unknown");
+    const isSens = isSensitiveInput(e.target);
+    const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
+    const lookupId = e.code || rawKey;
+    const isSingleChar = rawKey.length === 1;
+    const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
     const now = Date.now();
-    const downTime = activeKeys[keyName];
-    delete activeKeys[keyName];
-    const duration = downTime ? (now - downTime) : 0;
+    const keyState = activeKeys[lookupId];
+    delete activeKeys[lookupId];
+    const downTime = keyState ? keyState.down : now;
+    const isFreq = keyState ? keyState.isFreq : false;
+    const duration = keyState ? (now - downTime) : 0;
     telemetry.value.keystrokes.push({
       type: "up",
       key: keyName,
       t: now,
-      down: downTime || now,
+      down: downTime,
       up: now,
       duration_ms: duration,
+      is_freq_digraph: isFreq,
     });
     if (telemetry.value.keystrokes.length > 50) telemetry.value.keystrokes.shift();
   };

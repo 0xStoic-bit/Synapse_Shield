@@ -243,6 +243,7 @@
       window.addEventListener("keydown", (e) => {
         const isSens = isSensitiveInput(e.target);
         const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
+        const lookupId = e.code || rawKey;
         const now = Date.now();
 
         let isFreq = false;
@@ -251,11 +252,12 @@
         }
         lastRawKey = rawKey;
 
-        // Zero-PII: mask sensitive inputs so passwords and card numbers are never collected
-        const keyName = isSens ? "masked" : rawKey;
+        // Zero-PII: mask sensitive inputs and all single characters (letters, numbers, symbols) so raw text is never collected
+        const isSingleChar = rawKey.length === 1;
+        const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
 
-        if (!activeKeys[keyName]) {
-          activeKeys[keyName] = { down: now, isFreq: isFreq };
+        if (!activeKeys[lookupId]) {
+          activeKeys[lookupId] = { down: now, isFreq: isFreq, keyName: keyName };
         }
         this.keystrokes.push({
           type: "down",
@@ -269,10 +271,12 @@
       window.addEventListener("keyup", (e) => {
         const isSens = isSensitiveInput(e.target);
         const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
-        const keyName = isSens ? "masked" : rawKey;
+        const lookupId = e.code || rawKey;
+        const isSingleChar = rawKey.length === 1;
+        const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
         const now = Date.now();
-        const keyState = activeKeys[keyName];
-        delete activeKeys[keyName];
+        const keyState = activeKeys[lookupId];
+        delete activeKeys[lookupId];
         const downTime = keyState ? keyState.down : now;
         const isFreq = keyState ? keyState.isFreq : false;
         const duration = keyState ? (now - downTime) : 0;
