@@ -340,7 +340,7 @@ def evaluate_synapse_request_sync(
 
     # 4. Multi-turn Session Identification & History
     # Tie session to client_ip + User-Agent hash to prevent IP-wide collisions on CGNAT / Eduroam
-    ua_hash = hashlib.sha256((user_agent or "unknown_ua").encode("utf-8")).hexdigest()[:8]
+    ua_hash = hashlib.sha256((user_agent or "unknown_ua").encode("utf-8")).hexdigest()[:16]
     session_id = f"ip_{client_ip}_{ua_hash}"
     session_history = storage.get_session_telemetries(session_id, window_sec=300)
 
@@ -414,8 +414,9 @@ def evaluate_synapse_request_sync(
             if METRICS_ENABLED and synapse_pow_solved_total is not None:
                 synapse_pow_solved_total.inc()
         elif not is_shadow:
-            # Emit challenge request
-            challenge_salt = generate_pow_salt(client_ip=client_ip)
+            # Emit challenge request with risk-adaptive PoW difficulty
+            pow_diff = 5 if bot_score >= 45.0 else 4
+            challenge_salt = generate_pow_salt(client_ip=client_ip, difficulty=pow_diff)
             return SynapseDecision(
                 allowed=False,
                 status_code=429,
@@ -425,7 +426,7 @@ def evaluate_synapse_request_sync(
                 reasons=reasons,
                 telemetry=telemetry,
                 action="challenge",
-                challenge_data={"pow_difficulty": 4, "pow_salt": challenge_salt},
+                challenge_data={"pow_difficulty": pow_diff, "pow_salt": challenge_salt},
                 headers={
                     "X-Synapse-Action": "challenge",
                     "X-Synapse-Risk-Score": f"{bot_score:.1f}%",

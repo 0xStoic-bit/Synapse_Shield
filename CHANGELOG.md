@@ -5,6 +5,21 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-11-04
+### Adversarial Red-Team Hardening & Dual-Model Security Audit
+- **[Critical] IME Virtual Keyboard Bypass Remediation:**
+  - **Strict Majority Enforcement:** Removed the single-touch heuristic in Python feature extractor (`features.py`) to align 100% with Rust SIMD core (`keystrokes.rs`). Dwell-time evaluation is only bypassed when >= 50% of keys are genuine IME virtual inputs (`unidentified` / `process`), terminating the adversarial exploit where bots injected `touch_supported=True` to zero out dwell analysis.
+- **[High] Client-Side Infinite Expiry Retry Guard:**
+  - **Bounded Recursion (`_retried = true`):** Capped transparent token expiration retries in `synapse-sdk.js` to exactly 1 attempt, preventing client-side CPU exhaustion and infinite network loops during server clock-skew or upstream reverse-proxy misconfigurations.
+- **[High] Enforced Token Client-Binding on Bound Challenges:**
+  - **Context-Bound Token Validation:** Patched `verify_and_consume_token` in `tokens.py` to strictly reject client-bound challenges whenever `client_ip` and `user_agent` are omitted by callers, preventing token relay exploitation through unauthenticated verification paths.
+- **[High] 64-bit CGNAT & Campus Network Session Collision Shield:**
+  - **Doubled UA Hash Entropy:** Expanded `ua_hash` in `session_id` from 8 hex chars (32 bits) to 16 hex chars (64 bits), moving the birthday bound collision threshold from ~65k to > 4 billion distinct client sessions on shared NAT and Eduroam networks.
+- **[Medium] Risk-Adaptive Proof-of-Work (PoW) Difficulty:**
+  - **Dynamic Scaling:** Dynamically scales PoW challenge difficulty based on the calculated risk score (diff=5 for risk >= 45%, diff=4 for risk between 35% and 44%).
+- **[Low] Secret Key Hex Decoding Support:**
+  - **Entropy Density Maximization:** Added automatic `bytes.fromhex()` decoding for 64-character hex keys configured via `SYNAPSE_SECRET_KEY`, ensuring full 32-byte binary entropy density.
+
 ## [0.10.2] - 2026-11-04
 ### Privacy, SPA Lifecycle, Proxy CIDR & Infrastructure Resilience
 - **[P0] Keystroke Zero-PII Shield (GDPR / HIPAA / PCI-DSS Level 1 Compliance):**

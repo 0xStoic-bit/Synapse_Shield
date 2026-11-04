@@ -34,11 +34,11 @@
 
 ---
 
-## ✨ 核心特性与安全架构 (v0.10.2)
+## ✨ 核心特性与安全架构 (v0.10.3)
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
-| 🛡️ **Zero-PII 击键隐私盾与 SPA 声明周期** | 客户端敏感输入字段智能脱敏（密码/信用卡/PIN 自动替换为 `key: "masked"`），并在前端内存直接评估高频双字符动力学（`is_freq_digraph`），网络传输 **0 字节个人隐私数据**（完全符合 GDPR / HIPAA / PCI-DSS）。单次使用 Challenge 令牌自动失效机制，彻底根除 SPA（React / Vue / Next.js）第二请求 403 重放误拦截。PoW 动态难度 HMAC 签名 (`salt.ts.diff.sig`)，PoW 重试遥测时间戳平移对齐（杜绝 403 零事件拦截），CIDR 反向代理白名单解析 (`10.0.0.0/8`, `172.16.0.0/12`)，CGNAT 校园网/NAT 会话隔离及桌面端 IME 击键停顿绕过修复 (v0.10.2)。 |
+| 🛡️ **Zero-PII 击键隐私盾与 SPA 声明周期** | 客户端敏感输入字段智能脱敏（密码/信用卡/PIN 自动替换为 `key: "masked"`），并在前端内存直接评估高频双字符动力学（`is_freq_digraph`），网络传输 **0 字节个人隐私数据**（完全符合 GDPR / HIPAA / PCI-DSS）。单次使用 Challenge 令牌自动失效机制，彻底根除 SPA（React / Vue / Next.js）第二请求 403 重放误拦截。PoW 动态难度 HMAC 签名 (`salt.ts.diff.sig`)，PoW 重试遥测时间戳平移对齐（杜绝 403 零事件拦截），CIDR 反向代理白名单解析 (`10.0.0.0/8`, `172.16.0.0/12`)，CGNAT 校园网/NAT 会话隔离及桌面端 IME 击键停顿绕过修复 (v0.10.3)。 |
 | 🔐 **客户端网络绑定与 Token Relay 防御** | 密码学客户端设备与网络子网双向绑定机制（`nonce.ts.bind_hash.sig`）。通过将 challenge 令牌绑定至 `/24` IPv4 与 `/64` IPv6 子网及大小写归一化 User-Agent，结合漫游容错机制，彻底封杀自动化 Token Relay 与跨 IP 集中式打码/收割农场攻击。内置防悬挂无泄漏的 SQLite Worker 线程生命周期管理与全新的 `synapse-shield doctor` 系统诊断体检 CLI 工具 (v0.10.1)。 |
 | 📱 **移动端 SDK v2.0 与反模拟器生物识别** | 全面覆盖原生 JS、React 与 Vue 的移动端生物特征遥测：按压保持时间（`touchend - touchstart` 均值与方差）、免权限陀螺仪/加速度计微颤（`motion_variance`）、WebGL 渲染器跨维校验（`is_mobile_gpu_mismatch` 精准拦截伪装移动视口的 `SwiftShader`/桌面显卡 +85 Risk）、Android Gboard/IME 软键盘适配（`key="Unidentified"`），彻底消除移动端单次轻触（Single-Tap）与滑动后点击的误报 (v0.10.0)。 |
 | 🛡️ **运动学深度加固、动态抖动与 PoW 防御** | 真实电容触控有效性校验（防御桌面端伪造触控 +75 Risk）、固定触控半径陷阱（方差为 0 判定为模拟器 +55 Risk）、致命违规硬封禁否决与绑定 IP 的 PoW 挑战机制（限定 35.0-55.0 灰色区间）、多维模糊轨迹重放检测 ($\delta < 0.015$)、点击与指针终点空间距离校准 ($\Delta d \le 50\text{px}$)、基于密钥的动态阈值抖动 ($\pm 5\%$) 以及训练集防投毒单 IP 样本配额限制 (v0.9.9)。 |

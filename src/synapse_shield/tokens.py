@@ -31,10 +31,13 @@ def _load_or_generate_secret_key() -> bytes:
     Kalıcı SECRET_KEY yükleme stratejisi: ENV > dosya > yeni oluştur + uyar.
     Production ortamında SYNAPSE_SECRET_KEY env variable'ı zorunlu olarak ayarlanmalıdır.
     """
-    # 1. Öncelik: Ortam değişkeni
+    # 1. Öncelik: Ortam değişkeni (Hex kodlu veya raw string destekli)
     env_key = os.environ.get("SYNAPSE_SECRET_KEY")
     if env_key:
-        return env_key.encode()
+        try:
+            return bytes.fromhex(env_key.strip())
+        except ValueError:
+            return env_key.encode("utf-8")
 
     # 2. Öncelik: Kalıcı dosya fallback
     key_dir = Path.home() / ".synapse_shield"
@@ -224,14 +227,13 @@ def verify_and_consume_token(
 
     # 1.5 İstemci Bağlama (Token Relay & Farm Attack) Koruması
     if bind_hash is not None:
-        if client_ip or user_agent:
-            current_binding = compute_client_binding_hash(client_ip, user_agent)
-            if not hmac.compare_digest(bind_hash, current_binding):
-                return (
-                    False,
-                    "Token Relay Saldırısı: Token başka bir istemci veya IP tarafından üretilmiş! (Token Client Binding Mismatch)",
-                    {},
-                )
+        current_binding = compute_client_binding_hash(client_ip, user_agent)
+        if not current_binding or not hmac.compare_digest(bind_hash, current_binding):
+            return (
+                False,
+                "Token Relay Saldırısı: Token başka bir istemci veya IP tarafından üretilmiş! (Token Client Binding Mismatch)",
+                {},
+            )
     else:
         if os.environ.get("SYNAPSE_TOKEN_BINDING", "").lower() == "strict":
             return False, "Güvenlik İhlali: Token istemciye bağlı değil (Unbound Token Rejected in Strict Mode)", {}

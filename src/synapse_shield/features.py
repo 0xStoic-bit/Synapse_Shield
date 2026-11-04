@@ -397,8 +397,8 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                 ime_count = sum(
                     1 for d in detailed if str(d.get("key", "")).lower() in ("unidentified", "process")
                 )
-                is_touch_device = bool(features.get("touch_supported", False))
-                is_mobile_ime = (is_touch_device and ime_count > 0) or (ime_count * 2 >= len(detailed))
+                # Require majority of keystrokes to be virtual IME to prevent desktop bot dwell bypass (matches Rust core)
+                is_mobile_ime = bool(detailed) and (ime_count * 2 >= len(detailed))
 
                 if dwell_times and not is_mobile_ime:
                     if features["avg_dwell_time"] < 15.0:

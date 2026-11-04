@@ -439,7 +439,7 @@
       throw new Error("Synapse Shield: PoW solution could not be found within attempt bounds.");
     },
 
-    async submit(url = "/api/score", retryWithPoW = false, powData = null) {
+    async submit(url = "/api/score", retryWithPoW = false, powData = null, _retried = false) {
       if (!this.currentChallenge || (Date.now() - this.challengeCreatedAt > 45000)) {
         await this.refreshChallenge();
       }
@@ -459,12 +459,12 @@
 
         const data = await response.json();
 
-        // Handle Token Expiration transparent retry (Masum yavaş kullanıcı koruması)
-        if ((data.code === "EXPIRED" || data.status === "token_expired") && !retryWithPoW) {
+        // Handle Token Expiration transparent retry (Masum yavaş kullanıcı koruması - capped at 1 retry)
+        if ((data.code === "EXPIRED" || data.status === "token_expired") && !retryWithPoW && !_retried) {
           console.log("[Synapse Shield] Challenge token expired. Refreshing token and retrying seamlessly...");
           await this.refreshChallenge();
           await new Promise((resolve) => setTimeout(resolve, 1600));
-          return await this.submit(url, false, powData);
+          return await this.submit(url, false, powData, true);
         }
 
         // Handle Smart Challenge (PoW) on Gray Area Classification
@@ -513,14 +513,14 @@
             });
             if (minT < challengeTs && minT !== Infinity) {
               const shift = challengeTs - minT + 50;
-              this.mouseMovements.forEach((e) => { if (e.t) e.t += shift; });
-              this.clicks.forEach((e) => { if (e.t) e.t += shift; });
+              this.mouseMovements.forEach((e) => { if (typeof e.t === "number") e.t += shift; });
+              this.clicks.forEach((e) => { if (typeof e.t === "number") e.t += shift; });
               this.keystrokes.forEach((e) => {
-                if (e.t) e.t += shift;
-                if (e.down) e.down += shift;
-                if (e.up) e.up += shift;
+                if (typeof e.t === "number") e.t += shift;
+                if (typeof e.down === "number") e.down += shift;
+                if (typeof e.up === "number") e.up += shift;
               });
-              this.scrolls.forEach((e) => { if (e.t) e.t += shift; });
+              this.scrolls.forEach((e) => { if (typeof e.t === "number") e.t += shift; });
             }
           }
 
