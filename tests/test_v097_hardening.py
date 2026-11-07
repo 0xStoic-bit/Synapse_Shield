@@ -26,7 +26,7 @@ from synapse_shield.tokens import generate_challenge
 
 
 def test_version_and_type_stubs():
-    assert __version__ == "0.10.4"
+    assert __version__ == "0.10.5"
     pkg_dir = Path(__file__).resolve().parent.parent / "src" / "synapse_shield"
     assert (pkg_dir / "py.typed").exists(), "py.typed file is missing"
     assert (pkg_dir / "synapse_core_rs.pyi").exists(), "synapse_core_rs.pyi type stub is missing"
@@ -166,7 +166,7 @@ def test_fastapi_header_token_and_256kb_limit():
         "challenge": ch_data["challenge"],
         "telemetry": {
             "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
         },
     }
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()

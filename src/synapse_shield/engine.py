@@ -145,13 +145,19 @@ def analyze_behavior(
 
     # 2.9 Sıfır Etkileşim Kontrolü (Zero-Event Detection)
     # Gerçek bir kullanıcının fare, dokunma, tuş, kaydırma veya tıklama olmadan istek üretmesi imkansızdır
-    total_interactive_events = (
+    # Kaydırma tek başına bir gönderim niyeti değildir: fare/tıklama/tuş/dokunma olmadan yalnızca
+    # scroll olayı gelen istek (form/API gönderimi) sıfır etkileşim sayılır. Erişilebilirlik modunda
+    # (ekran okuyucu, anahtar cihazlar) scroll geçerli bir etkileşim olarak kalır.
+    deliberate_events = (
         features.get("mouse_points", 0)
         + features.get("click_count", 0)
         + features.get("key_count", 0)
-        + features.get("scroll_count", 0)
         + features.get("touch_event_count", 0)
     )
+    scroll_events = features.get("scroll_count", 0)
+    scroll_only = deliberate_events == 0 and scroll_events > 0 and not accessibility_mode
+    total_interactive_events = deliberate_events + (0 if scroll_only else scroll_events)
+    features["scroll_only_submission"] = scroll_only
     features["total_interactive_events"] = total_interactive_events
     if total_interactive_events == 0:
         if total_risk == 0.0:
@@ -161,6 +167,8 @@ def analyze_behavior(
             )
         else:
             reasons.append("Zero user interaction telemetry detected.")
+        if scroll_only:
+            reasons.append("DESKTOP_SCROLL_ONLY_SUBMISSION: only scroll events were recorded (no mouse, click, key or touch).")
 
     # 3. Faresiz veya Yetersiz Masaüstü Hareketi (Teleport / Macro Click)
     is_touch = bool(browser_data.get("touch_supported", False))
@@ -297,6 +305,23 @@ def analyze_behavior(
                 f"Unnatural mathematical smoothness: Missing physiological 8-12Hz Jerk tremor (avg_jerk: {features['avg_jerk']:.7f}) [+{risk_add:.1f}]."
             )
 
+        # D2. Kısa mesafe sıfır-entropi çizgisi (<= 30px): düzlük, hız ve zamanlama aynı anda kusursuzsa
+        # fiziksel olarak imkansızdır. Mesafe tabanlı kurallar bu aralıkta devre dışı kaldığı için ayrı kural.
+        if (
+            not is_touch
+            and features["mouse_points"] >= 4
+            and 5.0 < features["total_distance"] <= 30.0
+            and features["straightness"] >= 0.99999
+            and features["velocity_var"] < 1e-6
+            and features["dt_var"] < 0.01
+        ):
+            risk_add = 60.0 * acc_multiplier
+            total_risk += risk_add
+            reasons.append(
+                f"Zero-entropy micro-trajectory: perfectly straight, constant-speed, fixed-interval short movement "
+                f"({features['total_distance']:.1f}px, {features['mouse_points']} points) [+{risk_add:.1f}]."
+            )
+
         # E. Deterministik Zamanlayıcı (dt_var == 0)
         if features["mouse_points"] >= 10 and features["dt_var"] < 0.01:
             total_risk += 35.0
@@ -430,6 +455,10 @@ def analyze_behavior(
 
     # 6.5 Oturum Düzeyinde Kinetik Değişmezlik (Session Behavioral Invariance)
     # Aynı oturumdan gelen ardışık isteklerde kinetik parametrelerin robotik sabitliği
+    # Gerçek bir yörünge içermeyen kayıtlar (tekil dokunuş/tıklama: total_distance == 0) varsayılan
+    # yer tutucu değerler taşır; bunların "aynılığı" botu değil, kullanıcının tekrar dokunduğunu gösterir.
+    if session_history:
+        session_history = [h for h in session_history if "total_distance" not in h or float(h["total_distance"] or 0.0) > 0.0]
     if session_history and len(session_history) >= 3:
         s_jerks = [float(h.get("avg_jerk", 0.0)) for h in session_history if "avg_jerk" in h]
         s_straightness = [float(h.get("straightness", 0.0)) for h in session_history if "straightness" in h]

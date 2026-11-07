@@ -48,6 +48,8 @@ dump.rdb
 *.json
 !package.json
 !tsconfig.json
+!sdk-tests/package-lock.json
+sdk-tests/coverage/
 
 # Test Çıktıları ve Ekran Görüntüleri
 *.png
@@ -114,8 +116,13 @@ secret*.txt
 credentials.json
 
 # Ajan ve Yerel Script Dosyaları
+CLAUDE.md
+.claude/
 GEMINI_DIRECTIVE.md
 generate_pdf.py
 *.pdf
 collab_test.*
 src/collab_test.*
+
+# mutmut çalışma klasörü
+mutants/

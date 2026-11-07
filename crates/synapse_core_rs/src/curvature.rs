@@ -213,3 +213,150 @@ pub fn compute_curvature_scalar(
         out_kappa[i] = num / denom;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministic xorshift PRNG so tests need no external crates.
+    struct Rng(u64);
+    impl Rng {
+        fn next_f64(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+        fn range(&mut self, lo: f64, hi: f64) -> f64 {
+            lo + (hi - lo) * self.next_f64()
+        }
+    }
+
+    fn arc(radius: f64, n: usize, step_rad: f64, dt_ms: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let x = (0..n).map(|i| radius * (i as f64 * step_rad).cos()).collect();
+        let y = (0..n).map(|i| radius * (i as f64 * step_rad).sin()).collect();
+        let t = (0..n).map(|i| i as f64 * dt_ms).collect();
+        (x, y, t)
+    }
+
+    #[test]
+    fn fewer_than_four_points_returns_default() {
+        let m = evaluate_curvature_naturalness(&[0.0, 1.0, 2.0], &[0.0, 1.0, 2.0], &[0.0, 10.0, 20.0]);
+        assert_eq!(m.curvature_score, 0.0);
+        assert_eq!(m.mean_curvature, 0.0);
+    }
+
+    #[test]
+    fn mismatched_slice_lengths_use_shortest() {
+        let (x, y, t) = arc(100.0, 40, 0.05, 10.0);
+        let full = evaluate_curvature_naturalness(&x[..20], &y[..20], &t[..20]);
+        let ragged = evaluate_curvature_naturalness(&x, &y[..20], &t);
+        assert_eq!(full.mean_curvature, ragged.mean_curvature);
+    }
+
+    #[test]
+    fn straight_line_is_flagged_as_bot() {
+        let x: Vec<f64> = (0..30).map(|i| i as f64 * 5.0).collect();
+        let y: Vec<f64> = (0..30).map(|i| i as f64 * 2.0).collect();
+        let t: Vec<f64> = (0..30).map(|i| i as f64 * 10.0).collect();
+        let m = evaluate_curvature_naturalness(&x, &y, &t);
+        assert!(m.mean_curvature < 1e-9);
+        assert_eq!(m.curvature_score, 0.95);
+    }
+
+    #[test]
+    fn circular_arc_recovers_geometric_curvature() {
+        // kappa = |v x a| / |v|^3 is parametrisation-invariant: a circle of radius R has kappa = 1/R.
+        for &r in &[50.0, 100.0, 400.0] {
+            let (x, y, t) = arc(r, 60, 0.05, 10.0);
+            let m = evaluate_curvature_naturalness(&x, &y, &t);
+            let rel_err = (m.mean_curvature - 1.0 / r).abs() * r;
+            assert!(rel_err < 0.02, "R={r}: kappa={} expected {}", m.mean_curvature, 1.0 / r);
+        }
+    }
+
+    #[test]
+    fn perfectly_smooth_arc_is_flagged_as_synthetic() {
+        let (x, y, t) = arc(200.0, 60, 0.03, 10.0);
+        let m = evaluate_curvature_naturalness(&x, &y, &t);
+        assert!(m.curvature_score >= 0.90, "analytic curve scored {}", m.curvature_score);
+    }
+
+    // KNOWN GAP (found 2026-11-06): the variance thresholds (> 5.0 / > 10.0) are absolute and
+    // scale-dependent, so per-point jitter is only caught in a narrow amplitude/speed band
+    // (1 of 10 probed configurations). Run with `cargo test -- --ignored` to track the fix.
+    #[test]
+    #[ignore = "known detection gap: scale-dependent jitter thresholds"]
+    fn independent_gaussian_like_jitter_is_flagged() {
+        let mut rng = Rng(0x5eed);
+        let x: Vec<f64> = (0..80).map(|i| i as f64 * 3.0 + rng.range(-4.0, 4.0)).collect();
+        let y: Vec<f64> = (0..80).map(|_| rng.range(-4.0, 4.0)).collect();
+        let t: Vec<f64> = (0..80).map(|i| i as f64 * 8.0).collect();
+        let m = evaluate_curvature_naturalness(&x, &y, &t);
+        assert!(m.curvature_score >= 0.75, "per-point jitter scored {}", m.curvature_score);
+    }
+
+    #[test]
+    fn duplicate_timestamps_do_not_produce_nan_or_inf() {
+        let x = [0.0, 1.0, 2.0, 4.0, 7.0, 11.0];
+        let y = [0.0, 2.0, 3.0, 3.0, 5.0, 4.0];
+        let t = [0.0, 0.0, 0.0, 10.0, 10.0, 20.0];
+        let m = evaluate_curvature_naturalness(&x, &y, &t);
+        for v in [m.mean_curvature, m.curvature_var, m.curvature_rate_var, m.curvature_score] {
+            assert!(v.is_finite());
+        }
+    }
+
+    #[test]
+    fn scalar_kernel_matches_closed_form() {
+        let (vx, vy, ax, ay) = ([3.0], [4.0], [1.0], [2.0]);
+        let mut out = [0.0];
+        compute_curvature_scalar(&vx, &vy, &ax, &ay, &mut out);
+        // |3*2 - 4*1| / (25 + 1e-6)^1.5
+        let expected = 2.0 / (25.0f64 + 1e-6).powf(1.5);
+        assert!((out[0] - expected).abs() < 1e-15);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn avx2_kernel_matches_scalar_for_all_remainder_lengths() {
+        if !is_x86_feature_detected!("avx2") {
+            eprintln!("AVX2 not available on this CPU; SIMD parity test skipped");
+            return;
+        }
+        let mut rng = Rng(42);
+        // Lengths 0..=13 cover full 4-lane chunks plus every remainder (0..3).
+        for n in 0..=13usize {
+            let gen = |rng: &mut Rng| (0..n).map(|_| rng.range(-50.0, 50.0)).collect::<Vec<f64>>();
+            let (vx, vy, ax, ay) = (gen(&mut rng), gen(&mut rng), gen(&mut rng), gen(&mut rng));
+            let mut simd = vec![0.0; n];
+            let mut scalar = vec![0.0; n];
+            unsafe { compute_curvature_avx2(&vx, &vy, &ax, &ay, &mut simd) };
+            compute_curvature_scalar(&vx, &vy, &ax, &ay, &mut scalar);
+            for i in 0..n {
+                let tol = 1e-12 * scalar[i].abs().max(1.0);
+                assert!((simd[i] - scalar[i]).abs() <= tol, "n={n} i={i}: {} vs {}", simd[i], scalar[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn raw_pointer_entry_rejects_null_and_short_input() {
+        let v = [1.0, 2.0, 3.0, 4.0, 5.0];
+        unsafe {
+            let m = evaluate_curvature_raw(std::ptr::null(), v.as_ptr(), v.as_ptr(), 5);
+            assert_eq!(m.curvature_score, 0.0);
+            let m = evaluate_curvature_raw(v.as_ptr(), v.as_ptr(), v.as_ptr(), 3);
+            assert_eq!(m.curvature_score, 0.0);
+        }
+    }
+
+    #[test]
+    fn raw_pointer_entry_matches_slice_entry() {
+        let (x, y, t) = arc(120.0, 32, 0.07, 12.0);
+        let a = evaluate_curvature_naturalness(&x, &y, &t);
+        let b = unsafe { evaluate_curvature_raw(x.as_ptr(), y.as_ptr(), t.as_ptr(), x.len()) };
+        assert_eq!(a.mean_curvature, b.mean_curvature);
+        assert_eq!(a.curvature_score, b.curvature_score);
+    }
+}

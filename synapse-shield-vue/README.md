@@ -95,7 +95,7 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.10.4)
+## Features (v0.10.5)
 
 - **Universal Keystroke Zero-PII Shield (v0.10.4):** Automatic client-side masking of all single-character inputs (`rawKey.length === 1 -> "masked"`) and sensitive fields, local digraph frequency computation (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR & KVKK compliant).
 - **SPA Token Lifecycle & Coalescing Mutex (v0.10.3):** Single-use challenge token lifecycle invalidation to eliminate 403 Replay Attack loops in Vue 3 and Nuxt applications.
@@ -106,7 +106,7 @@ const { getProtectedPayload } = useSynapseShield();
 - **Distributed State & Redis Support:** Full compatibility with Synapse Shield multi-worker cluster deployments.
 - **Transient Iframe Prototype Unhooking:** Detects stealth tools tampering with `Function.prototype.toString`.
 - **Zero-Jank Touch Events:** Passive listeners (`touchstart`, `touchmove`, `touchend`) for high-precision mobile biometrics with zero scroll jank.
-- **Dynamic Yielding PoW Solver:** `solvePow()` yields to the UI thread every 1,000 iterations to avoid freezing browser rendering.
+- **Dynamic Yielding PoW Solver:** `solvePow(powSalt, difficulty)` takes the signed `pow_salt` from the server's `challenge_required` response (sha256(salt + nonce), bounded at 20M attempts) and yields to the UI thread every 1,000 iterations to avoid freezing browser rendering. `getProtectedPayload()` consumes the single-use challenge and fetches the next one in the background.
 - **Safe Unicode Base64:** Robust UTF-8 payload encoding across internationalized environments.
 - **Docker Ready Backend:** See the main repository `README.md` for zero-configuration `docker-compose` engine deployment instructions.
 

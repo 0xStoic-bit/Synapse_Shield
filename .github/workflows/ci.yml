@@ -27,15 +27,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[server]"
-          pip install pytest httpx pytest-cov ruff flask django litestar sanic
+          pip install pytest httpx pytest-cov ruff flask django litestar sanic sanic-testing \
+            redis fakeredis prometheus-client
 
       - name: Check code formatting with ruff
         run: |
           ruff check src tests
 
+      # Rust/Python parity tests are skipped when the native core is missing. Fail loudly
+      # instead, so a broken maturin build can never turn the parity suite into silent skips.
+      - name: Verify native Rust core is loaded
+        run: |
+          python -c "from synapse_shield import synapse_core_rs as r; assert r.is_rust_core_active(), 'Rust core inactive'; print('Rust core active')"
+
+      # Line + branch coverage floor. Raise it as coverage grows; never lower it to make CI pass.
       - name: Test with pytest and coverage
         run: |
-          pytest tests --cov=synapse_shield --cov-report=xml --cov-report=term-missing -v
+          pytest tests --cov=synapse_shield --cov-branch --cov-fail-under=85 \
+            --cov-report=xml --cov-report=term-missing -v -rsxX
 
       - name: Upload test coverage
         uses: actions/upload-artifact@v4
@@ -43,3 +52,64 @@ jobs:
         with:
           name: coverage-report-${{ matrix.python-version }}
           path: coverage.xml
+
+  rust:
+    name: Rust core unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (PyO3 build interpreter)
+        id: py
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/synapse_core_rs/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('crates/synapse_core_rs/Cargo.toml') }}
+
+      - name: cargo test
+        working-directory: crates/synapse_core_rs
+        env:
+          PYO3_PYTHON: ${{ steps.py.outputs.python-path }}
+          # The test binary links libpython (extension-module is off for `cargo test`); make it findable.
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
+        run: cargo test --all-targets
+
+  sdk:
+    name: JS SDK tests (Vanilla / React / Vue)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk-tests/package-lock.json
+
+      - name: Install SDK test dependencies
+        working-directory: sdk-tests
+        run: npm ci
+
+      - name: Zero-PII contract & token lifecycle tests
+        working-directory: sdk-tests
+        run: npx vitest run --coverage
+
+      - name: Type-check React SDK
+        working-directory: synapse-shield-react
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit -p .
+
+      - name: Type-check Vue SDK
+        working-directory: synapse-shield-vue
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit -p .

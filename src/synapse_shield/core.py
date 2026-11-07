@@ -38,6 +38,8 @@ except ImportError:
     synapse_shadow_requests_total = None
 
 MAX_PAYLOAD_SIZE = 262_144  # 256 KB
+# Methods that change state. DELETE has no body, so its token travels in the X-Synapse-Token header.
+PROTECTED_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 
 def get_trusted_proxies() -> set[str]:
@@ -370,18 +372,22 @@ def evaluate_synapse_request_sync(
 
     # Record kinematic session features
     features = details.get("features", {}) if isinstance(details, dict) else {}
-    storage.record_session_telemetry(
-        session_id,
-        {
-            "avg_jerk": features.get("avg_jerk", 0.0),
-            "straightness": features.get("straightness", 1.0),
-            "total_distance": features.get("total_distance", 0.0),
-            "submovement_count": features.get("submovement_count", 0),
-            "spectral_purity": features.get("spectral_purity", 0.0),
-        },
-        max_history=10,
-        window_sec=300,
-    )
+    # Yalnızca gerçek bir yörünge (>= 3 nokta, mesafe > 0) kaydedilir. Tekil dokunuş/tıklama varsayılan
+    # yer tutucu değerler (jerk 0, düzlük 1, mesafe 0) üretir; bunları saklamak gerçek mobil ve
+    # erişilebilirlik kullanıcılarını 4. istekte "oturum değişmezliği" ile bot sanmaya yol açıyordu.
+    if features.get("mouse_points", 0) >= 3 and features.get("total_distance", 0.0) > 0:
+        storage.record_session_telemetry(
+            session_id,
+            {
+                "avg_jerk": features.get("avg_jerk", 0.0),
+                "straightness": features.get("straightness", 1.0),
+                "total_distance": features.get("total_distance", 0.0),
+                "submovement_count": features.get("submovement_count", 0),
+                "spectral_purity": features.get("spectral_purity", 0.0),
+            },
+            max_history=10,
+            window_sec=300,
+        )
 
     if METRICS_ENABLED and synapse_inference_latency_seconds is not None:
         synapse_inference_latency_seconds.observe(latency)

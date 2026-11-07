@@ -36,16 +36,30 @@ class C:
     END = "\033[0m"
 
 
-def get_challenge():
+def _attack_headers(name: str, ip_suffix: int) -> dict:
+    """Headers shared by the challenge fetch and the scored request.
+
+    Challenges are bound to client IP + User-Agent (v0.10.1). Fetching the challenge with
+    different headers than the attack itself makes *every* request fail as TOKEN_RELAY_ATTACK,
+    so the suite would never reach (or measure) the biometric layers.
+    """
+    return {
+        "User-Agent": f"SynapseShield-RedTeamBot/2.0 ({name})",
+        "x-forwarded-for": f"192.168.1.{ip_suffix}",
+    }
+
+
+def get_challenge(name: str = "challenge", ip_suffix: int = 1):
     try:
-        with urllib.request.urlopen(CHALLENGE_URL) as resp:
+        req = urllib.request.Request(CHALLENGE_URL, headers=_attack_headers(name, ip_suffix))
+        with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read().decode("utf-8")).get("challenge")
     except Exception:
         return None
 
 
-def make_token(telemetry: dict, wait_sec: float = 1.6) -> str:
-    ch = get_challenge()
+def make_token(telemetry: dict, wait_sec: float = 1.6, name: str = "challenge", ip_suffix: int = 1) -> str:
+    ch = get_challenge(name, ip_suffix)
     if not ch:
         return ""
     if wait_sec > 0:
@@ -70,7 +84,7 @@ def clear_bans():
 def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
     # Eğer payload içinde 'token' yoksa ve 'raw' flag verilmemişse, geçerli token zarfı oluştur
     if "token" not in payload and not payload.get("__raw__"):
-        token_str = make_token(payload)
+        token_str = make_token(payload, name=name, ip_suffix=ip_suffix)
         post_data = {"token": token_str}
     elif payload.get("__raw__"):
         p = payload.copy()
@@ -83,11 +97,7 @@ def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
     req = urllib.request.Request(
         TARGET_URL,
         data=data,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": f"SynapseShield-RedTeamBot/2.0 ({name})",
-            "x-forwarded-for": f"192.168.1.{ip_suffix}",
-        },
+        headers={"Content-Type": "application/json", **_attack_headers(name, ip_suffix)},
     )
     t_start = time.perf_counter()
     try:
@@ -101,6 +111,14 @@ def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
         try:
             body = json.loads(e.read().decode("utf-8"))
             body["network_latency_ms"] = round((t_end - t_start) * 1000, 2)
+            body["http_status"] = e.code
+            # Gateway rejections (missing/forged/replayed token, bans) return only
+            # {"detail": ...} without a verdict. An HTTP 4xx/5xx refusal IS a block.
+            if "classification" not in body:
+                body["classification"] = "Bot"
+                body.setdefault("bot_score", 100.0)
+                detail = body.get("detail") or body.get("error")
+                body.setdefault("reasons", [f"HTTP {e.code}: {detail}" if detail else f"HTTP {e.code}"])
             return body
         except Exception:
             return {"status": "error", "bot_score": 100.0, "classification": "Bot", "reasons": [f"HTTP {e.code}: {e.reason}"], "network_latency_ms": round((t_end - t_start) * 1000, 2)}
@@ -138,7 +156,7 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
 
 def main():
     print(f"\n{C.BOLD}{C.YELLOW}╔═══════════════════════════════════════════════════════════════════════╗{C.END}")
-    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.9.4 — LIVE RED TEAM PEN-TEST ATTACK SUITE     ║{C.END}")
+    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.10.5 — LIVE RED TEAM PEN-TEST ATTACK SUITE     ║{C.END}")
     print(f"{C.BOLD}{C.YELLOW}╚═══════════════════════════════════════════════════════════════════════╝{C.END}\n")
 
     clear_bans()
@@ -196,39 +214,58 @@ def main():
     print_result(6, "Sentetik Mobil Emülasyon (Screen < 768px + maxTouchPoints = 0)", res_mob_bot, expected_blocked=True)
 
     # 7. Doğal İnsan Mobil Ziyaretçisi (Fleshy Finger Compliance)
+    # SDK şeması: dokunmalar mouse_movements içinde source="touch" + r (yarıçap) + f (kuvvet),
+    # parmak kaldırma clicks içinde tap_duration_ms ile gelir (synapse-sdk.js touch* olayları).
     human_touch = [
-        {"x": 150 + i * 3, "y": 300 + i * 5, "t": t + i * 20, "radiusX": 8.0 + random.uniform(-1.5, 1.5), "force": 0.6}
-        for i in range(15)
+        {
+            "x": round(150 + i * 6 + random.gauss(0, 1.5)),
+            "y": round(300 + i * 9 + math.sin(i / 2) * 4 + random.gauss(0, 1.5)),
+            "t": t + i * 22 + random.randint(0, 6),
+            "r": round(9.0 + random.uniform(-1.5, 1.5), 3),
+            "f": round(0.55 + random.uniform(-0.1, 0.1), 3),
+            "source": "touch",
+        }
+        for i in range(25)
     ]
     res_mob_human = send_attack(
         "MobileHuman",
         {
-            "touch_events": human_touch,
+            "mouse_movements": human_touch,
+            "clicks": [{"x": 300, "y": 520, "t": t + 700, "r": 9.4, "tap_duration_ms": 96, "source": "touch"}],
             "browser": {
                 "webdriver": False,
                 "screen_width": 390,
                 "screen_height": 844,
+                "device_pixel_ratio": 3.0,
+                "touch_supported": True,
                 "max_touch_points": 5,
-            }
+                "motion_variance": 0.42,
+                "webgl_renderer": "Apple GPU",
+                "plugins_length": 0,
+            },
         },
         ip_suffix=55,
     )
     print_result(7, "Mobil İnsan Parmak Deformasyonu (Fleshy Finger Compliance)", res_mob_human, expected_blocked=False)
 
     # 8. Doğal Masaüstü İnsan Ziyaretçisi (Control)
-    human_pts = [
-        {
-            "x": round(100 + i * 15 + random.gauss(0, 2.5)),
+    # İnsan kontrol grubu: düzensiz örnekleme aralığı (sabit 25 ms bir bot imzasıdır) ve
+    # hedefe yaklaşırken yavaşlama (Fitts). Tıklama yolun bittiği noktada yapılır.
+    human_pts = []
+    ht = t
+    for i in range(40):
+        progress = 1 - (1 - i / 39) ** 2  # ease-out: son bölümde adımlar küçülür
+        human_pts.append({
+            "x": round(100 + progress * 600 + random.gauss(0, 2.5)),
             "y": round(150 + math.sin(i / 3) * 20 + random.gauss(0, 2.5)),
-            "t": t + i * 25,
-        }
-        for i in range(40)
-    ]
+            "t": ht,
+        })
+        ht += random.randint(14, 38)
     res_human = send_attack(
         "Human",
         {
             "mouse_movements": human_pts,
-            "clicks": [{"x": 700, "y": 200, "t": t + 1000}],
+            "clicks": [{"x": human_pts[-1]["x"], "y": human_pts[-1]["y"], "t": ht + 120}],
             "browser": {"webdriver": False, "screen_width": 1920, "screen_height": 1080, "max_touch_points": 0}
         },
         ip_suffix=60,
@@ -237,16 +274,18 @@ def main():
 
     # 9. Replay Attack (Aynı Token'ı 2 Kez Kullanma)
     print(f"\n{C.YELLOW}[*] Replay Attack Testi: Gerçek bir token çalınıp 2. kez gönderiliyor...{C.END}")
-    ch = get_challenge()
+    # Aynı istemci kimliği (IP + UA) kullanılır: ikinci isteğin Relay değil Replay
+    # savunmasına takıldığını ölçmek için.
+    ch = get_challenge("Replay", 70)
     if ch:
         time.sleep(1.6)
         envelope = {"challenge": ch, "telemetry": {"mouse_movements": human_pts}, "created_at": int(time.time() * 1000)}
         valid_token = base64.b64encode(json.dumps(envelope).encode()).decode()
 
         # 1. Gönderim (Başarılı)
-        send_attack("Replay-1", {"token": valid_token}, ip_suffix=70)
+        send_attack("Replay", {"token": valid_token}, ip_suffix=70)
         # 2. Gönderim (Replay - ENGELLENMELİ!)
-        res_replay = send_attack("Replay-2", {"token": valid_token}, ip_suffix=70)
+        res_replay = send_attack("Replay", {"token": valid_token}, ip_suffix=70)
         print_result(9, "Replay Attack (Aynı Token'ı Tekrar Kullanma)", res_replay, expected_blocked=True)
 
     print(f"\n{C.BOLD}{C.GREEN}🎯 TÜM 9 RED TEAM GÜVENLİK TESTİ BAŞARIYLA TAMAMLANDI!{C.END}\n")

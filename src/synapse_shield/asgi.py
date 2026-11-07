@@ -10,6 +10,7 @@ import json
 from typing import Any, Callable
 
 from synapse_shield.core import (
+    PROTECTED_METHODS,
     MAX_PAYLOAD_SIZE,
     evaluate_synapse_request,
     resolve_client_ip,
@@ -67,7 +68,7 @@ class SynapseShieldASGIMiddleware:
             return
 
         method = scope.get("method", "GET").upper()
-        if method not in ("POST", "PUT", "PATCH"):
+        if method not in PROTECTED_METHODS:
             await self.app(scope, receive, send)
             return
 

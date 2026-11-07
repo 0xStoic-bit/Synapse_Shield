@@ -10,6 +10,7 @@ from typing import Any
 import urllib.request
 import urllib.error
 import urllib.parse
+import hashlib
 import hmac
 
 # pyrefly: ignore [missing-import]
@@ -24,6 +25,7 @@ from collections import OrderedDict
 from synapse_shield._version import __version__
 from synapse_shield.core import anonymize_ip, get_trusted_proxies, resolve_client_ip
 from synapse_shield.engine import analyze_behavior
+from synapse_shield.privacy import sanitize_keystrokes
 from synapse_shield.storage import get_storage
 from synapse_shield.tokens import (
     generate_challenge,
@@ -311,6 +313,7 @@ def save_log(
     features: dict[str, Any],
     telemetry: dict[str, Any],
 ):
+    ip = mask_ip(ip)  # honour SYNAPSE_PRIVACY_MODE: raw client IPs are never persisted in the log table
     conn = get_connection()
     cursor = conn.cursor()
     now = datetime.now(timezone.utc).isoformat()
@@ -344,6 +347,7 @@ def save_log(
 
 
 def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reasons: list[str]):
+    ip = mask_ip(ip)  # outbound to Discord/Telegram: never send the raw client IP
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -521,7 +525,11 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    token = body.get("token")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    # Same token / PoW transport as every framework adapter: JSON body or X-Synapse-* headers.
+    token = body.get("token") or request.headers.get("x-synapse-token")
     if not token:
         raise HTTPException(status_code=403, detail="[Synapse Shield] Missing token.")
 
@@ -564,14 +572,17 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
         raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
 
-    pow_nonce = body.get("pow_nonce")
-    pow_salt = body.get("pow_salt")
+    pow_nonce = body.get("pow_nonce") or request.headers.get("x-synapse-pow-nonce")
+    pow_salt = body.get("pow_salt") or request.headers.get("x-synapse-pow-salt")
 
     # Son 60 saniyedeki bot vuruşlarını kontrol et ve is_ip_penalized durumunu aktifleştir
     strike_count = await asyncio.to_thread(get_storage().get_bot_strike_count, ip, 60)
     is_ip_penalized = strike_count >= 1
 
-    session_id = f"ip_{ip}"
+    # Same session key as core.py: IP + User-Agent hash, so users behind one CGNAT/Eduroam address do not
+    # share (and poison) each other's behavioural history.
+    ua_hash = hashlib.sha256((user_agent or "unknown_ua").encode("utf-8")).hexdigest()[:16]
+    session_id = f"ip_{ip}_{ua_hash}"
     session_history = await asyncio.to_thread(get_storage().get_session_telemetries, session_id, 300)
 
     bot_score, classification, reasons, details = await asyncio.to_thread(
@@ -606,23 +617,30 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             threat_type = "CLEAN_HUMAN"
             reasons.append("Gray area PoW Challenge successfully solved (Risk reduced).")
         else:
-            return {"status": "challenge_required", "pow_difficulty": 4, "pow_salt": generate_pow_salt(client_ip=ip)}
+            # Risk-adaptive difficulty, identical to core.py: the closer to the block threshold, the harder.
+            pow_diff = 5 if bot_score >= 45.0 else 4
+            return {
+                "status": "challenge_required",
+                "pow_difficulty": pow_diff,
+                "pow_salt": generate_pow_salt(client_ip=ip, difficulty=pow_diff),
+            }
 
     # Atomik ceza takibi
     record_ip_decision(ip, is_bot=(classification == "Bot"))
 
     # Oturum düzeyinde telemetri geçmişini kaydet (Replay & Invariance Koruması)
-    background_tasks.add_task(
-        get_storage().record_session_telemetry,
-        session_id,
-        {
-            "avg_jerk": feat.get("avg_jerk", 0.0),
-            "straightness": feat.get("straightness", 0.0),
-            "total_distance": feat.get("total_distance", 0.0),
-        },
-        10,
-        300,
-    )
+    if feat.get("mouse_points", 0) >= 3 and feat.get("total_distance", 0.0) > 0:
+        background_tasks.add_task(
+            get_storage().record_session_telemetry,
+            session_id,
+            {
+                "avg_jerk": feat.get("avg_jerk", 0.0),
+                "straightness": feat.get("straightness", 0.0),
+                "total_distance": feat.get("total_distance", 0.0),
+            },
+            10,
+            300,
+        )
 
     background_tasks.add_task(
         save_log,
@@ -637,7 +655,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     )
 
     if classification == "Bot":
-        background_tasks.add_task(manager.broadcast, f"[BOT {bot_score:.1f}%] -> {threat_type} (IP: {ip})")
+        background_tasks.add_task(manager.broadcast, f"[BOT {bot_score:.1f}%] -> {threat_type} (IP: {mask_ip(ip)})")
         background_tasks.add_task(asyncio.to_thread, send_webhook_notification, ip, threat_type, bot_score, reasons)
 
     return {
@@ -811,7 +829,9 @@ async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
 
 
 @app.get("/metrics")
-async def get_metrics():
+async def get_metrics(request: Request):
+    # Exposes live nonce / ban counters and the L1 rotation timing: admin only (X-Admin-Secret or Bearer).
+    verify_admin(request)
     from . import synapse_core_rs
     
     metrics = {
@@ -934,7 +954,8 @@ async def collect_dataset(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     mouse_movements = json.dumps(body.get("mouse_movements", []))
-    keystrokes = json.dumps(body.get("keystrokes", []))
+    # Zero-PII: raw characters from legacy SDKs must never be written to the dataset store.
+    keystrokes = json.dumps(sanitize_keystrokes(body.get("keystrokes", [])))
     clicks = json.dumps(body.get("clicks", []))
     scrolls = json.dumps(body.get("scrolls", []))
     browser = json.dumps(body.get("browser", {}))

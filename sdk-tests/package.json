@@ -1,0 +1,19 @@
+{
+  "name": "synapse-shield-sdk-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser-side (jsdom) test suite for the Synapse Shield Vanilla JS, React and Vue SDKs",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
+    "jsdom": "^26.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vitest": "^3.2.4",
+    "vue": "^3.5.13"
+  }
+}

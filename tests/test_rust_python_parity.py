@@ -148,3 +148,73 @@ def test_mobile_features_rust_python_parity():
         assert py_feat["touch_radius_var"] == pytest.approx(rust_feat["touch_radius_var"], abs=1e-4)
         assert py_feat["keystroke_score"] == pytest.approx(rust_feat["keystroke_score"], abs=1e-4)
 
+
+def _sdk_masked_keystrokes(gaps_and_flags, dwells):
+    """Build keystrokes exactly as the v0.10.4+ SDKs send them: key="masked" plus is_freq_digraph."""
+    ks = []
+    t = 1000.0
+    for (gap, is_freq), dwell in zip(gaps_and_flags, dwells):
+        t += gap
+        ks.append({"type": "down", "key": "masked", "t": t, "is_freq_digraph": is_freq})
+        ks.append({"type": "up", "key": "masked", "t": t + dwell, "duration_ms": dwell, "is_freq_digraph": is_freq})
+    return ks
+
+
+@pytest.mark.skipif(not HAS_RUST, reason="Rust core (synapse_core_rs) required for parity test")
+def test_masked_sdk_digraph_flag_rust_python_parity():
+    """Regression: the Rust core used to ignore the SDK's client-side is_freq_digraph flag
+    (Python 0.40 vs Rust 0.00 on the same masked telemetry). Fixed 2026-11-06."""
+    # Frequent digraphs typed *slower* than rare ones: no linguistic muscle memory (+0.40 in Python).
+    gaps_and_flags = [
+        (0.0, False), (300.0, True), (130.0, False), (280.0, True), (150.0, False),
+        (320.0, True), (95.0, False), (260.0, True), (170.0, False), (140.0, False),
+    ]
+    dwells = [92.0, 118.0, 76.0, 131.0, 104.0, 88.0, 112.0, 97.0, 125.0, 83.0]
+    telemetry = {
+        "mouse_movements": [],
+        "clicks": [],
+        "keystrokes": _sdk_masked_keystrokes(gaps_and_flags, dwells),
+        "scrolls": [],
+        "browser": {"touch_supported": False},
+    }
+    rust_feat = extract_features(telemetry)
+    py_feat = extract_features(telemetry, force_python=True)
+    assert py_feat["keystroke_score"] == pytest.approx(rust_feat["keystroke_score"], abs=1e-4)
+
+
+
+@pytest.mark.skipif(not HAS_RUST, reason="Rust core (synapse_core_rs) required for parity test")
+def test_masked_sdk_keystrokes_differential_fuzz():
+    """Differential fuzzing on SDK-shaped (masked + is_freq_digraph) keystrokes.
+
+    Before the fix, 25 of 60 random samples scored differently in Rust and Python. Covers typed
+    down/up pairs, untyped legacy events, missing/None flags, IME keys and Turkish letters.
+    """
+    rng = random.Random(20261106)
+    for _ in range(200):
+        n = rng.randint(3, 25)
+        ks, t = [], 1000.0
+        style = rng.choice(["typed", "untyped"])
+        for i in range(n):
+            t += rng.uniform(20.0, 400.0)
+            dwell = rng.uniform(5.0, 200.0)
+            key = rng.choice(["masked", "masked", "masked", "Unidentified", "Process", "ş", "a", "Enter"])
+            flag = rng.choice([True, False, None, "absent"])
+            if style == "typed":
+                down = {"type": "down", "key": key, "t": t}
+                up = {"type": "up", "key": key, "t": t + dwell, "duration_ms": dwell}
+                if flag != "absent":
+                    down["is_freq_digraph"] = flag
+                    if rng.random() < 0.5:
+                        up["is_freq_digraph"] = flag
+                ks += [down, up]
+            else:
+                ev = {"key": key, "t": t, "up": t + dwell}
+                if flag != "absent":
+                    ev["is_freq_digraph"] = flag
+                ks.append(ev)
+        telemetry = {"mouse_movements": [], "clicks": [], "keystrokes": ks, "scrolls": [],
+                     "browser": {"touch_supported": False}}
+        rust = extract_features(telemetry)
+        py = extract_features(telemetry, force_python=True)
+        assert py["keystroke_score"] == pytest.approx(rust["keystroke_score"], abs=1e-4), ks

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "synapse-shield"
-version = "0.10.4"
+version = "0.10.5"
 authors = [
   { name="Mustafa Güngör", email="" },
 ]
@@ -51,6 +51,7 @@ synapse-shield = "synapse_shield.cli:main"
 
 [tool.maturin]
 manifest-path = "crates/synapse_core_rs/Cargo.toml"
+features = ["pyo3/extension-module"]
 python-source = "src"
 module-name = "synapse_shield.synapse_core_rs"
 include = [
@@ -76,6 +77,27 @@ filterwarnings = [
     "ignore::DeprecationWarning:fastapi.*",
     "ignore::UserWarning:fastapi.*",
     "ignore::PendingDeprecationWarning"
+]
+
+# Mutation testing of the security core (Linux/WSL only; mutmut 3 has no native Windows support).
+# Run: mutmut run && mutmut results    (CI: .github/workflows/mutation.yml, weekly + manual)
+[tool.mutmut]
+source_paths = ["src/"]
+only_mutate = [
+    "src/synapse_shield/tokens.py",
+    "src/synapse_shield/core.py",
+    "src/synapse_shield/storage.py",
+]
+mutate_only_covered_lines = true
+also_copy = ["tests/"]
+pytest_add_cli_args = ["-p", "no:cacheprovider", "-q"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_crypto_core_edges.py",
+    "tests/test_tokens.py",
+    "tests/test_storage.py",
+    "tests/test_storage_backends.py",
+    "tests/test_security_patches.py",
+    "tests/test_framework_contract.py",
 ]
 
 [tool.ruff]

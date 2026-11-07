@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.10.0 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
+ * Synapse Shield SDK v0.10.5 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
  * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (Desktop + Mobile SDK v2.0)
  */
 
@@ -74,6 +74,25 @@
     "st", "io", "le", "is", "ou", "ar", "as", "de", "rt", "ve",
     "la", "le", "ik", "ak", "el", "al", "ma", "me", "ba", "ka"
   ]);
+
+  // Zero-PII: only keys on a closed allow-list of UI Events control keys ("Enter", "ArrowLeft",
+  // "Unidentified", "F1", ...) may leave the browser by name. Anything else is printed text and is
+  // masked — including values longer than one UTF-16 unit (emoji, ligature keys such as "لا",
+  // combining sequences, and Turkish "İ" whose lower-case form is two code units).
+  const NAMED_KEYS = new Set([
+    "enter", "backspace", "tab", "shift", "control", "alt", "altgraph", "meta",
+    "capslock", "escape", "arrowleft", "arrowright", "arrowup", "arrowdown", "home", "end",
+    "pageup", "pagedown", "insert", "delete", "dead", "process", "unidentified", "numlock",
+    "scrolllock", "contextmenu", "pause", "printscreen", "clear", "compose", "f1", "f2",
+    "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10",
+    "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18",
+    "f19", "f20", "f21", "f22", "f23", "f24",
+  ]);
+  function telemetryKeyName(key, isSensitive) {
+    if (!key) return "unknown";
+    if (isSensitive || !NAMED_KEYS.has(key.toLowerCase())) return "masked";
+    return key.toLowerCase();
+  }
 
   // Sensitive input detection for Zero-PII keystroke protection (GDPR / HIPAA / PCI-DSS compliance)
   function isSensitiveInput(target) {
@@ -252,9 +271,8 @@
         }
         lastRawKey = rawKey;
 
-        // Zero-PII: mask sensitive inputs and all single characters (letters, numbers, symbols) so raw text is never collected
-        const isSingleChar = rawKey.length === 1;
-        const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+        // Zero-PII: mask sensitive inputs and every printed character so raw text is never collected
+        const keyName = telemetryKeyName(e.key, isSens);
 
         if (!activeKeys[lookupId]) {
           activeKeys[lookupId] = { down: now, isFreq: isFreq, keyName: keyName };
@@ -272,8 +290,7 @@
         const isSens = isSensitiveInput(e.target);
         const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
         const lookupId = e.code || rawKey;
-        const isSingleChar = rawKey.length === 1;
-        const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+        const keyName = telemetryKeyName(e.key, isSens);
         const now = Date.now();
         const keyState = activeKeys[lookupId];
         delete activeKeys[lookupId];

@@ -11,6 +11,7 @@ from typing import Any, Callable
 from flask import g, jsonify, make_response, request
 
 from synapse_shield.core import (
+    PROTECTED_METHODS,
     MAX_PAYLOAD_SIZE,
     evaluate_synapse_request_sync,
     resolve_client_ip,
@@ -21,6 +22,7 @@ def shield_protect_flask(
     max_risk_score: float = 50.0,
     accessibility_mode: bool = False,
     mode: str = "enforce",
+    enable_pow: bool = False,
 ) -> Callable:
     """
     Flask route decorator to enforce Synapse Shield behavioral protection.
@@ -73,6 +75,7 @@ def shield_protect_flask(
                 max_risk_score=max_risk_score,
                 accessibility_mode=accessibility_mode,
                 mode=mode,
+                enable_pow=enable_pow,
                 pow_nonce=str(pow_nonce) if pow_nonce else None,
                 pow_salt=str(pow_salt) if pow_salt else None,
             )
@@ -113,12 +116,14 @@ class SynapseFlaskMiddleware:
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
         mode: str = "enforce",
+        enable_pow: bool = False,
     ) -> None:
         self.app = app
         self.protected_paths = protected_paths or []
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
         self.mode = mode
+        self.enable_pow = enable_pow
 
         if app is not None:
             self.init_app(app)
@@ -127,10 +132,11 @@ class SynapseFlaskMiddleware:
         app.before_request(self._before_request)
 
     def _before_request(self) -> Any:
-        if not self.protected_paths or not any(request.path.startswith(p) for p in self.protected_paths):
+        # Empty / None protected_paths = protect every state-changing route (fail-safe, same in all adapters).
+        if self.protected_paths and not any(request.path.startswith(p) for p in self.protected_paths):
             return None
 
-        if request.method not in ("POST", "PUT", "PATCH"):
+        if request.method not in PROTECTED_METHODS:
             return None
 
         if request.content_length and request.content_length > MAX_PAYLOAD_SIZE:
@@ -166,6 +172,7 @@ class SynapseFlaskMiddleware:
             max_risk_score=self.max_risk_score,
             accessibility_mode=self.accessibility_mode,
             mode=self.mode,
+            enable_pow=self.enable_pow,
             pow_nonce=str(pow_nonce) if pow_nonce else None,
             pow_salt=str(pow_salt) if pow_salt else None,
         )

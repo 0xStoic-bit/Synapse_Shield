@@ -24,6 +24,7 @@ except ImportError:
     JSONResponse = Any  # type: ignore
 
 from synapse_shield.core import (
+    PROTECTED_METHODS,
     MAX_PAYLOAD_SIZE,
     evaluate_synapse_request,
     resolve_client_ip,
@@ -162,12 +163,13 @@ class SynapseShieldMiddleware(BaseHTTPMiddleware):
         self.enable_pow = enable_pow
 
     async def dispatch(self, request: Request, call_next: Callable) -> Any:
-        # Check path filter
-        if not any(request.url.path.startswith(p) for p in self.protected_paths):
+        # Check path filter. Empty / None protected_paths = protect every state-changing route
+        # (fail-safe, same in all adapters).
+        if self.protected_paths and not any(request.url.path.startswith(p) for p in self.protected_paths):
             return await call_next(request)
 
         # Only protect state-changing methods
-        if request.method not in ("POST", "PUT", "PATCH"):
+        if request.method not in PROTECTED_METHODS:
             return await call_next(request)
 
         # 1. Extract Token & Headers

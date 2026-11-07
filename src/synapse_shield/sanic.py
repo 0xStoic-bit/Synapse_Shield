@@ -10,6 +10,7 @@ from functools import wraps
 from typing import Any, Callable
 
 from synapse_shield.core import (
+    PROTECTED_METHODS,
     MAX_PAYLOAD_SIZE,
     evaluate_synapse_request,
     resolve_client_ip,
@@ -29,6 +30,7 @@ def shield_protect_sanic(
     max_risk_score: float = 50.0,
     accessibility_mode: bool = False,
     mode: str = "enforce",
+    enable_pow: bool = False,
 ) -> Callable:
     """
     Decorator to protect Sanic endpoints with Synapse Shield behavioral biometrics.
@@ -90,6 +92,7 @@ def shield_protect_sanic(
                 max_risk_score=max_risk_score,
                 accessibility_mode=accessibility_mode,
                 mode=mode,
+                enable_pow=enable_pow,
                 pow_nonce=str(pow_nonce) if pow_nonce else None,
                 pow_salt=str(pow_salt) if pow_salt else None,
             )
@@ -139,6 +142,7 @@ class SynapseSanicMiddleware:
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
         mode: str = "enforce",
+        enable_pow: bool = False,
     ) -> None:
         if not SANIC_AVAILABLE:
             raise ImportError(
@@ -148,6 +152,7 @@ class SynapseSanicMiddleware:
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
         self.mode = mode
+        self.enable_pow = enable_pow
 
     async def __call__(self, request: SanicRequest) -> Any:
         path = getattr(request, "path", "")
@@ -155,7 +160,7 @@ class SynapseSanicMiddleware:
             return None
 
         method = getattr(request, "method", "GET").upper()
-        if method not in ("POST", "PUT", "PATCH"):
+        if method not in PROTECTED_METHODS:
             return None
 
         # 256 KB Check
@@ -193,6 +198,7 @@ class SynapseSanicMiddleware:
             max_risk_score=self.max_risk_score,
             accessibility_mode=self.accessibility_mode,
             mode=self.mode,
+            enable_pow=self.enable_pow,
             pow_nonce=str(pow_nonce) if pow_nonce else None,
             pow_salt=str(pow_salt) if pow_salt else None,
         )

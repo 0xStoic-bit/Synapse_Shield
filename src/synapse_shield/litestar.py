@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable
 
-from synapse_shield.core import evaluate_synapse_request, resolve_client_ip
+from synapse_shield.core import PROTECTED_METHODS, MAX_PAYLOAD_SIZE, evaluate_synapse_request, resolve_client_ip
 
 if TYPE_CHECKING:
     from litestar.connection import ASGIConnection
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from litestar.types import Receive, Scope, Send
 
 try:
-    from litestar.exceptions import NotAuthorizedException, PermissionDeniedException
+    from litestar.exceptions import HTTPException, NotAuthorizedException, PermissionDeniedException
     from litestar.middleware.base import AbstractMiddleware
     LITESTAR_AVAILABLE = True
 except ImportError:
@@ -25,6 +25,13 @@ except ImportError:
         def __init__(self, detail: Any = None, *args: Any, **kwargs: Any) -> None:
             super().__init__(detail, *args)
             self.detail = detail
+
+    class HTTPException(Exception):
+        def __init__(self, detail: Any = None, *args: Any, status_code: int = 500, headers: Any = None, **kwargs: Any) -> None:
+            super().__init__(detail, *args)
+            self.detail = detail
+            self.status_code = status_code
+            self.headers = headers
 
     class PermissionDeniedException(Exception):
         def __init__(self, detail: Any = None, *args: Any, **kwargs: Any) -> None:
@@ -36,6 +43,7 @@ def synapse_guard(
     max_risk_score: float = 50.0,
     accessibility_mode: bool = False,
     mode: str = "enforce",
+    enable_pow: bool = False,
 ) -> Callable:
     """
     Idiomatic Litestar Guard to protect specific routes or controllers.
@@ -58,12 +66,27 @@ def synapse_guard(
         client_ip = resolve_client_ip(client_host, connection.headers)
         user_agent = connection.headers.get("user-agent", "unknown")
 
+        declared_length = connection.headers.get("content-length")
+        if declared_length and declared_length.isdigit() and int(declared_length) > MAX_PAYLOAD_SIZE:
+            raise HTTPException(
+                status_code=413, detail={"error": "Payload Too Large: Maximum allowed size is 256 KB"}
+            )
+
         token = connection.headers.get("x-synapse-token")
         pow_nonce = connection.headers.get("x-synapse-pow-nonce")
         pow_salt = connection.headers.get("x-synapse-pow-salt")
 
         if (not token or not pow_nonce) and hasattr(connection, "json") and callable(connection.json):
             try:
+                raw_body = b""
+                try:
+                    raw_body = await connection.body()
+                except Exception:
+                    raw_body = b""
+                if isinstance(raw_body, (bytes, bytearray)) and len(raw_body) > MAX_PAYLOAD_SIZE:
+                    raise HTTPException(
+                        status_code=413, detail={"error": "Payload Too Large: Maximum allowed size is 256 KB"}
+                    )
                 body = await connection.json()
                 if isinstance(body, dict):
                     if not token:
@@ -72,6 +95,8 @@ def synapse_guard(
                         pow_nonce = body.get("pow_nonce")
                     if not pow_salt:
                         pow_salt = body.get("pow_salt")
+            except HTTPException:
+                raise
             except Exception:
                 pass
 
@@ -84,9 +109,15 @@ def synapse_guard(
             mode=mode,
             pow_nonce=str(pow_nonce) if pow_nonce else None,
             pow_salt=str(pow_salt) if pow_salt else None,
+            enable_pow=enable_pow,
         )
 
         if not decision.allowed:
+            if decision.status_code == 429:
+                # Proof-of-work challenge: the client must see 429 + challenge body, not a 403 denial.
+                raise HTTPException(
+                    status_code=429, detail=decision.to_dict(), headers=decision.headers
+                )
             raise PermissionDeniedException(detail=decision.to_dict())
 
         # Attach telemetry to connection state for downstream route access
@@ -125,6 +156,7 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
         max_risk_score: float = 50.0,
         accessibility_mode: bool = False,
         mode: str = "enforce",
+        enable_pow: bool = False,
     ) -> None:
         if not LITESTAR_AVAILABLE:
             raise ImportError(
@@ -135,6 +167,18 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
         self.max_risk_score = max_risk_score
         self.accessibility_mode = accessibility_mode
         self.mode = mode
+        self.enable_pow = enable_pow
+        # Built once, not per request.
+        from synapse_shield.asgi import SynapseShieldASGIMiddleware
+
+        self._asgi_handler = SynapseShieldASGIMiddleware(
+            self.app,
+            protected_paths=self.protected_paths,
+            max_risk_score=self.max_risk_score,
+            accessibility_mode=self.accessibility_mode,
+            mode=self.mode,
+            enable_pow=self.enable_pow,
+        )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -147,17 +191,9 @@ class LitestarSynapseMiddleware(AbstractMiddleware):
             return
 
         method = scope.get("method", "GET").upper()
-        if method not in ("POST", "PUT", "PATCH"):
+        if method not in PROTECTED_METHODS:
             await self.app(scope, receive, send)
             return
 
         # Use universal ASGI replayable engine
-        from synapse_shield.asgi import SynapseShieldASGIMiddleware
-        asgi_handler = SynapseShieldASGIMiddleware(
-            self.app,
-            protected_paths=self.protected_paths,
-            max_risk_score=self.max_risk_score,
-            accessibility_mode=self.accessibility_mode,
-            mode=self.mode,
-        )
-        await asgi_handler(scope, receive, send)
+        await self._asgi_handler(scope, receive, send)

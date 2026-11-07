@@ -20,7 +20,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v0102) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v0105) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -34,11 +34,11 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.10.4)
+## ✨ Key Features & Security Architecture (v0.10.5)
 
 | Feature | Description |
 | :--- | :--- |
-| 🛡️ **Zero-PII Keystroke Shield & SPA Lifecycle** | Universal client-side masking of single-character inputs (`rawKey.length === 1 -> key: "masked"`) and sensitive fields alongside client-side linguistic digraph scoring (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR Art. 5(1)(c) & KVKK Art. 4 compliance across Vanilla JS, React, and Vue). Single-use token lifecycle invalidation preventing 403 replay loops in SPAs. Dynamic cryptographically signed PoW difficulty (`salt.ts.diff.sig`), telemetry window shifting on PoW retry to prevent zero-event 403 blocks, CIDR trusted reverse proxy resolution (`10.0.0.0/8`, `172.16.0.0/12`), CGNAT User-Agent session isolation, and desktop IME dwell bypass prevention (v0.10.4). |
+| 🛡️ **Zero-PII Keystroke Shield & SPA Lifecycle** | Universal client-side masking of every printed character — only keys on a closed allow-list of UI Events control keys (`Enter`, `ArrowLeft`, `Unidentified`, `F1`–`F24`, …) are sent by name, so emoji, ligature keys (`لا`), combining sequences, Turkish `İ` and whole words delivered by word completion or IME (`Mustafa`) are masked too — and of sensitive fields alongside client-side linguistic digraph scoring (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR Art. 5(1)(c) & KVKK Art. 4 compliance across Vanilla JS, React, and Vue). Single-use token lifecycle invalidation preventing 403 replay loops in SPAs. Dynamic cryptographically signed PoW difficulty (`salt.ts.diff.sig`), telemetry window shifting on PoW retry to prevent zero-event 403 blocks, CIDR trusted reverse proxy resolution (`10.0.0.0/8`, `172.16.0.0/12`), CGNAT User-Agent session isolation, and desktop IME dwell bypass prevention (v0.10.4). |
 | 🔐 **Client Network Binding & Token Relay Defense** | Cryptographic client device and network subnet binding (`nonce.ts.bind_hash.sig`). Defeats automated token relay and token harvesting farms by binding challenges to `/24` IPv4 and `/64` IPv6 subnets alongside case-normalized User-Agents with roaming tolerance. Includes thread-safe leak-free SQLite worker connection lifecycle management and the new `synapse-shield doctor` diagnostic audit CLI (v0.10.1). |
 | 📱 **Mobile SDK v2.0 & Anti-Emulator Biometrics** | End-to-end mobile biometric telemetry across Vanilla JS, React, and Vue: Tap Hold Time (`touchend - touchstart` duration & variance), passive gyroscope/accelerometer micro-tremor (`motion_variance`), WebGL GPU cross-validation (`is_mobile_gpu_mismatch` catching `SwiftShader`/`NVIDIA` on mobile viewports +85 Risk), Android Gboard/IME soft-keyboard support (`key="Unidentified"`), and zero false positives on Single-Tap and Flick-Scroll + Tap interactions (v0.10.0). |
 | 🛡️ **Kinematic Hardening, Dynamic Jitter & PoW Defense** | Effective capacitive touch validation (anti-spoofing +75 Risk), constant touch radius trap (+55 Risk), hard bot violation veto & IP-bound PoW challenges (35.0-55.0 gray area), fuzzy trajectory replay detection ($\delta < 0.015$), click-to-cursor spatial alignment ($\Delta d \le 50\text{px}$), secret-keyed dynamic threshold jitter ($\pm 5\%$), and anti-poisoning active learning limits (v0.9.9). |
@@ -169,6 +169,8 @@ pip install -e .
 python test_suite.py
 ```
 
+See [🧪 Testing](#-testing) for the full Python, Rust and JS SDK test suites.
+
 Visit [http://127.0.0.1:8000](http://127.0.0.1:8000/) in your browser to launch the **Live Security Cockpit**.
 
 ### Option 3: Docker Deployment (Recommended)
@@ -223,6 +225,8 @@ app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/auth"])
 async def login(request: Request):
     return {"status": "authenticated"}
 ```
+
+> **`protected_paths` semantics (all adapters):** the middleware checks only state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`; a body-less `DELETE` sends its token in the `X-Synapse-Token` header) whose path starts with one of the listed prefixes. **If the list is empty or missing, every `POST`/`PUT`/`PATCH` route is protected.** This fail-safe default is the same in FastAPI, raw ASGI, Django, Flask, Sanic and Litestar. Up to v0.10.4, Flask, FastAPI and Django protected *nothing* when the list was empty, so list your paths explicitly if you relied on that.
 
 ### 2. Django & Flask Integration
 
@@ -392,6 +396,45 @@ export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 
 ---
 
+## 🧪 Testing
+
+Synapse Shield is tested in three layers. CI runs all three on every push and pull request (`.github/workflows/ci.yml`).
+
+| Layer | Suite | What it guards |
+| :--- | :--- | :--- |
+| 🐍 Python | `tests/` (pytest) | API, tokens, engine, Rust ↔ Python parity. One security contract (no token → 403, replay → 403, bot → 403, shadow mode, 256 KB limit) runs against the **real** FastAPI, Flask, Sanic and Litestar pipelines. Redis storage runs on `fakeredis` with real command semantics, including the Redis → SQLite failover. The 9-vector red-team suite (`synapse-shield test`) runs end-to-end in-process, and each verdict is asserted |
+| 🦀 Rust core | `#[cfg(test)]` modules in `crates/synapse_core_rs/src/` | Keystroke dynamics (incl. IME majority rule), curvature (AVX2 ↔ scalar parity), kinematics, nonce cache |
+| 🌐 JS SDKs | `sdk-tests/` (Vitest + jsdom) | One Zero-PII contract run against **Vanilla JS, React and Vue**: no typed character ever leaves the browser, plus token lifecycle |
+
+```bash
+# Python (CI fails if the native Rust core is not loaded, so parity tests can never silently skip)
+pip install -e ".[all]" && pip install pytest pytest-cov httpx sanic-testing fakeredis
+pytest tests -rsxX --cov=synapse_shield --cov-branch --cov-fail-under=85
+
+# Rust core (point PyO3 at the interpreter you build against)
+cd crates/synapse_core_rs
+PYO3_PYTHON=$(which python) cargo test --all-targets
+
+# Browser SDKs
+cd sdk-tests && npm ci && npx vitest run
+```
+
+> **Local tip:** after editing any `.rs` file, rebuild the extension with `maturin develop --release`. Otherwise pytest silently runs against the previously compiled `.pyd` / `.so`.
+
+**Coverage floor.** CI fails if Python line + branch coverage drops below **85%**. The security core is held higher: `tokens.py` 99%, `storage.py` 95%, `core.py` 92%.
+
+**Mutation testing.** Coverage only shows that a line ran. Mutation testing checks that the tests would notice if the line were wrong. [`mutmut`](https://github.com/boxed/mutmut) mutates `tokens.py`, `core.py` and `storage.py`; config is in `[tool.mutmut]` in `pyproject.toml`. It runs weekly and on demand in `.github/workflows/mutation.yml`. mutmut 3 needs Linux or WSL:
+
+```bash
+pip install "mutmut>=3.3,<4" && mutmut run && mutmut results
+```
+
+Last local measurement (mutmut 2.5.1, 1,145 evaluated mutants): about 88% killed. Treat it as approximate; the weekly CI run is authoritative.
+
+Known gaps are kept visible instead of hidden: they are marked `xfail(strict=True)` (pytest) or `#[ignore = "..."]` (Rust) with the reason in the test, so the suite flips to failing the moment behaviour changes.
+
+---
+
 ## 🤖 Attack Simulation Benchmarks
 
 Run the full adversarial suite anytime:
@@ -400,15 +443,19 @@ Run the full adversarial suite anytime:
 synapse-shield test
 ```
 
-| Attack Vector          | Simulated Signature              | Detection Mechanism               | Decision | Risk Score | Latency |
-| ---------------------- | -------------------------------- | --------------------------------- | -------- | ---------- | ------- |
-| **Selenium Crawler**   | `navigator.webdriver = true`     | WebDriver API Detection           | 🔴 BLOCK | 100.0%     | 0.01 ms |
-| **Linear Bot**         | Straightness = 1.000 & Zero Jerk | Straightness > 0.985 & Jerk ~ 0   | 🔴 BLOCK | 100.0%     | 0.18 ms |
-| **Bézier Stealth Bot** | Mathematical curved trajectory   | Fitts's Law + Zero Accel Variance | 🔴 BLOCK | 65.0%      | 0.22 ms |
-| **Robotic Auto-Typer** | Fixed-interval key injections    | Keystroke Variance < 1.0 ms²      | 🔴 BLOCK | 50.0%      | 0.15 ms |
-| **Poisson Flooder**    | 8 rapid requests in <500 ms      | Poisson anomaly (P > 99%)         | 🔴 BLOCK | 60.0%      | 0.08 ms |
-| **Replay Attack**      | Re-sending captured valid token  | Single-use HMAC Nonce reuse       | 🔴 BLOCK | 100.0%     | 0.05 ms |
-| **Natural Human**      | Organic curves with tremors      | Biologic Jerk & Deceleration      | 🟢 ALLOW | 0.0%       | 0.24 ms |
+Measured on 2026-11-06 (v0.10.5). Reproduce with `python scripts/measure_readme_benchmarks.py`, which needs no server and sends nothing off the machine. Decision and risk come from a real `POST /api/score`. Latency is the median engine time (`analyze_behavior`) over 200 runs.
+
+| Attack Vector          | Simulated Signature                     | Detection Mechanism                              | Decision                 | Risk Score  | Latency |
+| ---------------------- | --------------------------------------- | ------------------------------------------------ | ------------------------ | ----------- | ------- |
+| **Selenium Crawler**   | `navigator.webdriver = true`            | WebDriver API detection                          | 🔴 BLOCK                 | 100.0%      | 0.13 ms |
+| **Linear Bot**         | Straightness = 1.000 & zero jerk        | Straightness + velocity variance                 | 🔴 BLOCK                 | 100.0%      | 0.20 ms |
+| **Bézier Stealth Bot** | Quadratic Bézier, fixed 20 ms timer     | Fixed-interval timer + synthetic tremor          | 🔴 BLOCK                 | 100.0%      | 0.22 ms |
+| **Robotic Auto-Typer** | Fixed 50 ms key injections, no mouse    | Keystroke biometrics + missing mouse telemetry   | 🔴 BLOCK                 | 100.0%      | 0.20 ms |
+| **Burst Flooder**      | 8 human-looking requests in ~315 ms     | Poisson frequency score (suppressed for organic kinematics) | 🟡 FLAG only (0/8 blocked) | 25.0% | 0.20 ms |
+| **Replay Attack**      | Re-sending a captured valid token       | Single-use HMAC nonce                            | 🔴 BLOCK                 | 100.0%      | —       |
+| **Natural Human**      | Ease-out curve, tremor, jittered timing | Biologic jerk & deceleration                     | 🟢 ALLOW (50/50 seeds)   | 0.0% (max)  | 0.32 ms |
+
+> **Burst flooding is not blocked on its own.** When the trajectories look organic, the Poisson frequency signal only raises the risk score. Hard blocking starts at the extreme-rate limit (`SYNAPSE_MAX_REQ_10S`, default 100 requests per 10 s, which leads to a 15-minute ban) or after 4 bot verdicts in 60 s. Earlier versions of this table listed this row as `BLOCK 60%`. That figure could not be reproduced: the bundled attack suite had been rejecting every request at the token-binding layer since v0.10.1, so the table did not reflect the biometric layers.
 
 ---
 
@@ -448,7 +495,7 @@ Synapse Shield is featured and discussed across global security and developer co
 Synapse_Shield/
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml             # Automated CI matrix (Python 3.10, 3.11, 3.12)
+│       ├── ci.yml             # CI: Python 3.10–3.12 matrix + Rust unit tests + JS SDK tests
 │       └── wheels.yml         # Multi-Platform Native Binary Wheel Builder (Linux, macOS, Windows)
 ├── crates/
 │   └── synapse_core_rs/       # High-Performance Native Rust Core (AVX2/NEON SIMD & PyO3)
@@ -483,6 +530,11 @@ Synapse_Shield/
 │   │   └── index.ts
 │   ├── package.json
 │   └── tsconfig.json
+├── synapse-shield-vue/        # Vue 3 / Nuxt 3 SDK Package
+├── sdk-tests/                 # Vitest + jsdom suite for Vanilla JS, React & Vue SDKs
+│   └── tests/
+│       ├── zero_pii_contract.test.js   # Same Zero-PII contract run against all 3 SDKs
+│       └── vanilla_token_lifecycle.test.js
 ├── tests/                     # Modular Pytest Suite
 │   ├── test_features.py
 │   ├── test_tokens.py

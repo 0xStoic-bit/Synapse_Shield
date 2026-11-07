@@ -20,7 +20,7 @@
 
 <br/>
 
-[核心特性](#-核心特性与安全架构-v0102) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on)
+[核心特性](#-核心特性与安全架构-v0105) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on)
 
 </div>
 
@@ -34,11 +34,11 @@
 
 ---
 
-## ✨ 核心特性与安全架构 (v0.10.4)
+## ✨ 核心特性与安全架构 (v0.10.5)
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
-| 🛡️ **Zero-PII 击键隐私盾与 SPA 声明周期** | 全框架（原生 JS、React、Vue 3）单字符输入脱敏（所有单个字符替换为 `key: "masked"`），并在前端内存直接评估高频双字符动力学（`is_freq_digraph`），网络传输 **0 字节个人文字与隐私数据**（完全符合 GDPR 第 5(1)(c) 条与 KVKK 第 4 条数据最小化原则）。单次使用 Challenge 令牌自动失效机制，彻底根除 SPA（React / Vue / Next.js）第二请求 403 重放误拦截。PoW 动态难度 HMAC 签名 (`salt.ts.diff.sig`)，PoW 重试遥测时间戳平移对齐（杜绝 403 零事件拦截），CIDR 反向代理白名单解析 (`10.0.0.0/8`, `172.16.0.0/12`)，CGNAT 校园网/NAT 会话隔离及桌面端 IME 击键停顿绕过修复 (v0.10.4)。 |
+| 🛡️ **Zero-PII 击键隐私盾与 SPA 声明周期** | 全框架（原生 JS、React、Vue 3）可打印字符脱敏（仅 `Enter`、`ArrowLeft`、`Unidentified` 等标准命名按键保留名称，其余所有字符——包括 emoji、连字按键 `لا`、组合字符序列与土耳其语 `İ`——均替换为 `key: "masked"`），并在前端内存直接评估高频双字符动力学（`is_freq_digraph`），网络传输 **0 字节个人文字与隐私数据**（完全符合 GDPR 第 5(1)(c) 条与 KVKK 第 4 条数据最小化原则）。单次使用 Challenge 令牌自动失效机制，彻底根除 SPA（React / Vue / Next.js）第二请求 403 重放误拦截。PoW 动态难度 HMAC 签名 (`salt.ts.diff.sig`)，PoW 重试遥测时间戳平移对齐（杜绝 403 零事件拦截），CIDR 反向代理白名单解析 (`10.0.0.0/8`, `172.16.0.0/12`)，CGNAT 校园网/NAT 会话隔离及桌面端 IME 击键停顿绕过修复 (v0.10.4)。 |
 | 🔐 **客户端网络绑定与 Token Relay 防御** | 密码学客户端设备与网络子网双向绑定机制（`nonce.ts.bind_hash.sig`）。通过将 challenge 令牌绑定至 `/24` IPv4 与 `/64` IPv6 子网及大小写归一化 User-Agent，结合漫游容错机制，彻底封杀自动化 Token Relay 与跨 IP 集中式打码/收割农场攻击。内置防悬挂无泄漏的 SQLite Worker 线程生命周期管理与全新的 `synapse-shield doctor` 系统诊断体检 CLI 工具 (v0.10.1)。 |
 | 📱 **移动端 SDK v2.0 与反模拟器生物识别** | 全面覆盖原生 JS、React 与 Vue 的移动端生物特征遥测：按压保持时间（`touchend - touchstart` 均值与方差）、免权限陀螺仪/加速度计微颤（`motion_variance`）、WebGL 渲染器跨维校验（`is_mobile_gpu_mismatch` 精准拦截伪装移动视口的 `SwiftShader`/桌面显卡 +85 Risk）、Android Gboard/IME 软键盘适配（`key="Unidentified"`），彻底消除移动端单次轻触（Single-Tap）与滑动后点击的误报 (v0.10.0)。 |
 | 🛡️ **运动学深度加固、动态抖动与 PoW 防御** | 真实电容触控有效性校验（防御桌面端伪造触控 +75 Risk）、固定触控半径陷阱（方差为 0 判定为模拟器 +55 Risk）、致命违规硬封禁否决与绑定 IP 的 PoW 挑战机制（限定 35.0-55.0 灰色区间）、多维模糊轨迹重放检测 ($\delta < 0.015$)、点击与指针终点空间距离校准 ($\Delta d \le 50\text{px}$)、基于密钥的动态阈值抖动 ($\pm 5\%$) 以及训练集防投毒单 IP 样本配额限制 (v0.9.9)。 |
@@ -224,6 +224,8 @@ async def login(request: Request):
 ```
 
 ---
+
+> **`protected_paths` 语义（所有适配器一致）：** 中间件只检查路径以所列前缀开头的状态变更请求（`POST`、`PUT`、`PATCH`、`DELETE`；无请求体的 `DELETE` 通过 `X-Synapse-Token` 请求头携带令牌）。**若列表为空或未设置，所有 `POST`/`PUT`/`PATCH` 路由都会受到保护。** 这一故障安全默认值在 FastAPI、原生 ASGI、Django、Flask、Sanic 与 Litestar 中完全相同。v0.10.4 及更早版本中，Flask、FastAPI 与 Django 在列表为空时 *不保护任何路由*；如果你依赖这种行为，请显式列出需要保护的路径。
 
 ### 2. Django & Flask 接入
 
@@ -415,6 +417,41 @@ export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 
 ---
 
+## 🧪 测试体系 (Testing)
+
+Synapse Shield 采用三层测试，CI 在每次 push 与 pull request 时全部运行（`.github/workflows/ci.yml`）。
+
+| 层级 | 测试套件 | 覆盖范围 |
+| :--- | :--- | :--- |
+| 🐍 Python | `tests/`（pytest） | API、令牌、引擎、Rust ↔ Python 一致性。同一份安全契约（无令牌 → 403、重放 → 403、机器人 → 403、影子模式、256 KB 限制）在 **真实的** FastAPI、Flask、Sanic 与 Litestar 请求管线中运行。Redis 存储通过 `fakeredis` 以真实命令语义测试，包括 Redis → SQLite 故障转移。9 向量红队套件（`synapse-shield test`）在进程内端到端运行，并逐一断言每个判定 |
+| 🦀 Rust 核心 | `crates/synapse_core_rs/src/` 中的 `#[cfg(test)]` 模块 | 击键动力学（含 IME 多数规则）、曲率（AVX2 ↔ 标量一致性）、运动学、Nonce 缓存 |
+| 🌐 JS SDK | `sdk-tests/`（Vitest + jsdom） | 同一份 Zero-PII 契约同时验证 **原生 JS、React 与 Vue**：任何键入字符都不会离开浏览器；另含令牌生命周期测试 |
+
+```bash
+# Python（若原生 Rust 核心未加载，CI 将直接失败，避免一致性测试被静默跳过）
+pip install -e ".[all]" && pip install pytest pytest-cov httpx sanic-testing fakeredis
+pytest tests -rsxX --cov=synapse_shield --cov-branch --cov-fail-under=85
+
+# Rust 核心
+cd crates/synapse_core_rs
+PYO3_PYTHON=$(which python) cargo test --all-targets
+
+# 浏览器 SDK
+cd sdk-tests && npm ci && npx vitest run
+```
+
+> **本地提示：** 修改任何 `.rs` 文件后，请执行 `maturin develop --release` 重新编译扩展，否则 pytest 会继续使用旧的 `.pyd` / `.so`。
+
+**覆盖率下限。** 若 Python 行 + 分支覆盖率低于 **85%**，CI 将失败。安全核心要求更高：`tokens.py` 99%、`storage.py` 95%、`core.py` 92%。
+
+**变异测试。** 覆盖率只说明某行代码被执行过；变异测试检查的是：如果这行代码写错了，测试能否发现。[`mutmut`](https://github.com/boxed/mutmut) 对 `tokens.py`、`core.py` 与 `storage.py` 进行变异，配置位于 `pyproject.toml` 的 `[tool.mutmut]`。它每周运行一次，也可在 `.github/workflows/mutation.yml` 中手动触发。mutmut 3 需要 Linux 或 WSL：
+
+```bash
+pip install "mutmut>=3.3,<4" && mutmut run && mutmut results
+```
+
+---
+
 ## 🤖 对抗攻击仿真基准测试 (Attack Simulation Benchmarks)
 
 随时在控制台运行完整的红蓝对抗仿真基准套件：
@@ -423,15 +460,19 @@ export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 synapse-shield test
 ```
 
+2026-11-06 实测（v0.10.5）。可通过 `python scripts/measure_readme_benchmarks.py` 复现，无需启动服务器，数据不会离开本机。裁决与风险评分来自真实的 `POST /api/score`；延迟为评分引擎（`analyze_behavior`）200 次运行的中位数。
+
 | 攻击向量 (Attack Vector) | 模拟行为特征 (Simulated Signature) | 核心识别与拦截机制 | 风控裁决 | 风险评分 | 处理延迟 |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **Selenium 爬虫脚本** | `navigator.webdriver = true` | WebDriver 原型与环境变量篡改嗅探 | 🔴 **BLOCK** | **100.0%** | **0.01 ms** |
-| **直线型机器人 (Linear)** | 直线度 Straightness = 1.000，Jerk = 0 | 直线度超标阈值及无生理抖动特征 | 🔴 **BLOCK** | **100.0%** | **0.18 ms** |
-| **贝塞尔平滑隐形脚本** | 数学拟合的平滑加减速轨迹 | 菲茨定律减速失真 + 差异化曲率方差极低 | 🔴 **BLOCK** | **90.0%** | **0.22 ms** |
-| **机械打字注入脚本** | 固定时间间隔（如 50ms）按键注入 | 击键时差方差 $\text{Var}(T_f) < 1.0\text{ ms}^2$ | 🔴 **BLOCK** | **85.0%** | **0.15 ms** |
-| **泊松洪水并发注入** | 500 毫秒内发起 8+ 次快速请求 | 泊松累积分布概率超限 ($P > 99\%$) | 🔴 **BLOCK** | **60.0%** | **0.08 ms** |
-| **重放攻击 (Replay Attack)** | 窃取已使用的合法验证 Token 重发 | 单次加密 Nonce 数据库原子失效机制 | 🔴 **BLOCK** | **100.0%** | **0.05 ms** |
-| **真人自然操作** | 包含生理加加速度与末端减速的有机曲线 | 符合生物动力学 Jerk 与菲茨定律分布 | 🟢 **ALLOW** | **0.0%** | **0.24 ms** |
+| **Selenium 爬虫脚本** | `navigator.webdriver = true` | WebDriver 接口检测 | 🔴 **BLOCK** | **100.0%** | **0.13 ms** |
+| **直线型机器人 (Linear)** | 直线度 = 1.000，Jerk = 0 | 直线度 + 速度方差 | 🔴 **BLOCK** | **100.0%** | **0.20 ms** |
+| **贝塞尔平滑隐形脚本** | 二次贝塞尔曲线，固定 20 ms 采样 | 固定间隔计时器 + 合成震颤检测 | 🔴 **BLOCK** | **100.0%** | **0.22 ms** |
+| **机械打字注入脚本** | 固定 50 ms 按键注入，无鼠标轨迹 | 击键生物特征 + 缺失鼠标遥测 | 🔴 **BLOCK** | **100.0%** | **0.20 ms** |
+| **突发洪水请求** | 约 315 ms 内发起 8 次看似真人的请求 | 泊松频率评分（轨迹为有机特征时被抑制） | 🟡 **仅标记**（0/8 被拦截） | **25.0%** | **0.20 ms** |
+| **重放攻击 (Replay Attack)** | 重发已截获的合法 Token | 一次性 HMAC Nonce | 🔴 **BLOCK** | **100.0%** | — |
+| **真人自然操作** | 缓出曲线、生理震颤、不规则采样间隔 | 生物 Jerk 与末端减速 | 🟢 **ALLOW**（50/50 个随机种子） | **0.0%（最大值）** | **0.32 ms** |
+
+> **突发洪水不会被单独拦截。** 当轨迹呈现有机特征时，泊松频率信号只会提高风险评分。硬拦截从极端频率限制开始：`SYNAPSE_MAX_REQ_10S`，默认每 10 秒 100 次请求，触发后封禁 15 分钟；或在 60 秒内出现 4 次机器人判定时触发。本表旧版本将此行标为 `BLOCK 60%`，该数值无法复现：自 v0.10.1 起，内置攻击套件的每个请求都在令牌绑定层被拒绝，因此旧表并未反映生物特征层的检测结果。
 
 ---
 
@@ -485,7 +526,7 @@ Synapse Shield 受到了全球安全与前沿技术社区的关注与技术剖�
 Synapse_Shield/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml             # 自动化 CI 测试矩阵 (Python 3.10, 3.11, 3.12)
+│       └── ci.yml             # CI：Python 3.10–3.12 矩阵 + Rust 单元测试 + JS SDK 测试
 ├── crates/                    # 原生 Rust 高性能底层模块
 │   └── synapse_core_rs/       # PyO3 + AVX2 SIMD 运动学核心扩展
 │       ├── Cargo.toml
@@ -525,7 +566,8 @@ Synapse_Shield/
 │   ├── src/
 │   │   ├── SynapseProtect.vue # Vue 3 / Nuxt 3 专属无感防护组件
 │   │   └── useSynapseShield.ts# Vue 3 Composable
-├── tests/                     # Pytest 模块化测试套件 (91/91 测试全通过)
+├── sdk-tests/                 # Vitest + jsdom：原生 JS / React / Vue 三端统一 Zero-PII 契约测试
+├── tests/                     # Pytest 模块化测试套件
 │   ├── test_features.py
 │   ├── test_tokens.py
 │   ├── test_engine.py

@@ -19,7 +19,7 @@ def test_sdk_static_serving():
     assert response.status_code == 200
     assert "application/javascript" in response.headers.get("content-type", "")
     content = response.text
-    assert "Synapse Shield SDK v0.10." in content
+    assert "Synapse Shield SDK v0.10.5" in content
     assert "safeBtoa" in content
     assert "solvePoW" in content
     assert "touchstart" in content
@@ -85,14 +85,14 @@ def test_pow_gray_area_and_fresh_retry(mock_predict):
     chal1_res = client.get("/api/challenge")
     challenge1 = chal1_res.json()["challenge"]
 
-    # Telemetry designed for gray area: is_webgl_hooked adds +45.0 risk without hard bot violation
+    # Telemetry designed for gray area: is_webgl_hooked adds +45.0 risk (exactly on the >= 45 step: difficulty 5, as in core.py) without hard bot violation
     telemetry = {
         "mouse_movements": [
             {"x": 100, "y": 100, "t": 1000},
-            {"x": 105, "y": 105, "t": 1050},
-            {"x": 110, "y": 110, "t": 1100},
-            {"x": 115, "y": 115, "t": 1150},
-            {"x": 120, "y": 120, "t": 1200},
+            {"x": 105, "y": 105, "t": 1053},
+            {"x": 110, "y": 110, "t": 1098},
+            {"x": 115, "y": 115, "t": 1152},
+            {"x": 120, "y": 120, "t": 1203},
         ],
         "clicks": [{"x": 120, "y": 120, "t": 1250}],
         "keystrokes": [],
@@ -121,16 +121,17 @@ def test_pow_gray_area_and_fresh_retry(mock_predict):
     data1 = res1.json()
     assert data1["status"] == "challenge_required"
     assert "pow_salt" in data1
-    assert data1["pow_difficulty"] == 4
+    assert data1["pow_difficulty"] == 5  # risk 45.0 is on the >= 45 step (parity with core.py)
 
     pow_salt = data1["pow_salt"]
 
     # 2. Solve PoW
     nonce = 0
     found_nonce = None
-    while nonce < 1_000_000:
+    prefix = "0" * data1["pow_difficulty"]
+    while nonce < 20_000_000:
         hash_val = hashlib.sha256((pow_salt + str(nonce)).encode()).hexdigest()
-        if hash_val.startswith("0000"):
+        if hash_val.startswith(prefix):
             found_nonce = str(nonce)
             break
         nonce += 1
@@ -174,10 +175,10 @@ def test_pow_replay_attack_rejection_on_reused_token(mock_predict):
     telemetry = {
         "mouse_movements": [
             {"x": 100, "y": 100, "t": 1000},
-            {"x": 105, "y": 105, "t": 1050},
-            {"x": 110, "y": 110, "t": 1100},
-            {"x": 115, "y": 115, "t": 1150},
-            {"x": 120, "y": 120, "t": 1200},
+            {"x": 105, "y": 105, "t": 1053},
+            {"x": 110, "y": 110, "t": 1098},
+            {"x": 115, "y": 115, "t": 1152},
+            {"x": 120, "y": 120, "t": 1203},
         ],
         "clicks": [{"x": 120, "y": 120, "t": 1250}],
         "keystrokes": [],

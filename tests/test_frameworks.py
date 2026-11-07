@@ -35,7 +35,7 @@ def test_flask_middleware():
         "challenge": ch_data["challenge"],
         "telemetry": {
             "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
         },
     }
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
@@ -50,7 +50,7 @@ def test_flask_middleware():
         "challenge": ch_data_header["challenge"],
         "telemetry": {
             "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
         },
     }
     tok_b64_header = base64.b64encode(json.dumps(tok_envelope_header).encode()).decode()
@@ -123,7 +123,7 @@ def test_django_middleware():
         "challenge": ch_data["challenge"],
         "telemetry": {
             "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+            "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
         },
     }
     tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
@@ -204,7 +204,7 @@ def test_asgi_middleware_stream_replay_and_protection():
             "challenge": ch_data["challenge"],
             "telemetry": {
                 "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-                "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+                "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
             },
         }
         tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
@@ -247,6 +247,7 @@ def test_sanic_integration_mock():
 
         import synapse_shield.sanic as sanic_mod
         original_avail = sanic_mod.SANIC_AVAILABLE
+        original_json = sanic_mod.sanic_json
         sanic_mod.SANIC_AVAILABLE = True
         sanic_mod.sanic_json = lambda body, status=200: {"body": body, "status": status}
 
@@ -267,7 +268,7 @@ def test_sanic_integration_mock():
                 "challenge": ch_data["challenge"],
                 "telemetry": {
                     "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-                    "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+                    "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
                 },
             }
             tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()
@@ -279,6 +280,7 @@ def test_sanic_integration_mock():
             assert req.ctx.synapse_telemetry is not None
         finally:
             sanic_mod.SANIC_AVAILABLE = original_avail
+            sanic_mod.sanic_json = original_json  # leaking the stub broke every later Sanic test
 
     asyncio.run(_run())
 
@@ -316,7 +318,7 @@ def test_litestar_integration_mock():
                 "challenge": ch_data["challenge"],
                 "telemetry": {
                     "browser": {"webdriver": False, "plugins_length": 3, "screen_width": 1920, "screen_height": 1080},
-                    "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20} for i in range(20)],
+                    "mouse_movements": [{"x": 100 + i, "y": 100 + i, "t": i * 20 + (i * 7) % 5} for i in range(20)],
                 },
             }
             tok_b64 = base64.b64encode(json.dumps(tok_envelope).encode()).decode()

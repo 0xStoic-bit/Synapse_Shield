@@ -168,7 +168,8 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
         if let Ok(Some(keystrokes)) = dict.get_item("keystrokes") {
             if let Ok(list) = keystrokes.downcast::<PyList>() {
                 let limit = list.len().min(150);
-                let mut pending_downs: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+                let mut pending_downs: std::collections::HashMap<String, Vec<(f64, Option<bool>)>> =
+                    std::collections::HashMap::new();
 
                 for i in 0..limit {
                     if let Ok(item) = list.get_item(i) {
@@ -198,10 +199,16 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                                     .flatten()
                                     .and_then(|v| v.extract::<String>().ok());
 
+                                let flag = freq_digraph_flag(k_dict, true);
                                 if event_type.as_deref() == Some("up") {
+                                    let mut down_freq = flag;
                                     let down_t = if let Some(queue) = pending_downs.get_mut(&key_str) {
                                         if !queue.is_empty() {
-                                            Some(queue.remove(0))
+                                            let (d, stored) = queue.remove(0);
+                                            if stored.is_some() {
+                                                down_freq = stored;
+                                            }
+                                            Some(d)
                                         } else {
                                             None
                                         }
@@ -222,10 +229,11 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                                             key: key_str,
                                             down: d_val,
                                             up: Some(t),
+                                            is_freq_digraph: down_freq,
                                         });
                                     }
                                 } else if event_type.as_deref() == Some("down") {
-                                    pending_downs.entry(key_str).or_default().push(t);
+                                    pending_downs.entry(key_str).or_default().push((t, flag));
                                 } else {
                                     raw.keystrokes.push(KeyPoint { t });
                                     let up_opt = k_dict
@@ -246,6 +254,7 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
                                         key: key_str,
                                         down: t,
                                         up: up_opt,
+                                        is_freq_digraph: freq_digraph_flag(k_dict, false),
                                     });
                                 }
                             }
@@ -255,12 +264,13 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
 
                 // Push any remaining unmatched keydowns
                 for (key_str, downs) in pending_downs {
-                    for d_val in downs {
+                    for (d_val, stored) in downs {
                         raw.keystrokes.push(KeyPoint { t: d_val });
                         raw.detailed_keystrokes.push(DetailedKeystroke {
                             key: key_str.clone(),
                             down: d_val,
                             up: None,
+                            is_freq_digraph: stored,
                         });
                     }
                 }
@@ -316,7 +326,7 @@ fn is_rust_core_active() -> bool {
 
 #[pyfunction]
 fn get_core_version() -> &'static str {
-    "0.10.0-native-rust"
+    "0.10.5-native-rust"
 }
 
 #[pyfunction]
@@ -376,6 +386,17 @@ fn evaluate_curvature_zerocopy_rs<'py>(
     Ok(dict)
 }
 
+/// Reads the SDK's client-side `is_freq_digraph` flag (Zero-PII mode: raw keys are masked).
+/// Mirrors features.py: typed down/up events use `k.get(...)` (an explicit None counts as absent);
+/// untyped events use `"is_freq_digraph" in k` followed by `bool(...)` (an explicit None is False).
+fn freq_digraph_flag(d: &Bound<'_, PyDict>, none_is_absent: bool) -> Option<bool> {
+    match d.get_item("is_freq_digraph") {
+        Ok(Some(v)) if v.is_none() => if none_is_absent { None } else { Some(false) },
+        Ok(Some(v)) => v.is_truthy().ok(),
+        _ => None,
+    }
+}
+
 #[pyfunction]
 fn evaluate_keystroke_dynamics_rs<'py>(
     py: Python<'py>,
@@ -390,6 +411,7 @@ fn evaluate_keystroke_dynamics_rs<'py>(
                         key: tuple.0,
                         down: tuple.1,
                         up: tuple.2,
+                        is_freq_digraph: None,
                     });
                 } else if let Ok(dict) = item.downcast::<PyDict>() {
                     let is_up_event = dict
@@ -439,6 +461,7 @@ fn evaluate_keystroke_dynamics_rs<'py>(
                             key: key_str,
                             down,
                             up: up_opt,
+                            is_freq_digraph: freq_digraph_flag(dict, false),
                         });
                     }
                 }

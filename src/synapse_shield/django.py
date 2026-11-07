@@ -12,6 +12,7 @@ from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 
 from synapse_shield.core import (
+    PROTECTED_METHODS,
     MAX_PAYLOAD_SIZE,
     evaluate_synapse_request_sync,
     resolve_client_ip,
@@ -32,6 +33,7 @@ class SynapseShieldMiddleware(MiddlewareMixin):
         SYNAPSE_SHIELD_MAX_RISK = 50.0
         SYNAPSE_SHIELD_ACCESSIBILITY = False
         SYNAPSE_SHIELD_MODE = 'enforce'  # or 'shadow'
+        SYNAPSE_SHIELD_ENABLE_POW = False  # gray-area proof-of-work challenge
     """
 
     def __init__(self, get_response: Any = None) -> None:
@@ -42,15 +44,15 @@ class SynapseShieldMiddleware(MiddlewareMixin):
         self.max_risk_score = getattr(settings, "SYNAPSE_SHIELD_MAX_RISK", 50.0)
         self.accessibility_mode = getattr(settings, "SYNAPSE_SHIELD_ACCESSIBILITY", False)
         self.mode = getattr(settings, "SYNAPSE_SHIELD_MODE", "enforce")
+        self.enable_pow = bool(getattr(settings, "SYNAPSE_SHIELD_ENABLE_POW", False))
 
     def process_request(self, request: Any) -> JsonResponse | None:
-        if not self.protected_paths:
+        # Empty / missing SYNAPSE_SHIELD_PROTECTED_PATHS = protect every state-changing route
+        # (fail-safe, same in all adapters).
+        if self.protected_paths and not any(request.path.startswith(p) for p in self.protected_paths):
             return None
 
-        if not any(request.path.startswith(p) for p in self.protected_paths):
-            return None
-
-        if request.method not in ("POST", "PUT", "PATCH"):
+        if request.method not in PROTECTED_METHODS:
             return None
 
         # 1. 256 KB Memory DoS Protection
@@ -100,6 +102,7 @@ class SynapseShieldMiddleware(MiddlewareMixin):
             max_risk_score=self.max_risk_score,
             accessibility_mode=self.accessibility_mode,
             mode=self.mode,
+            enable_pow=self.enable_pow,
             pow_nonce=str(pow_nonce) if pow_nonce else None,
             pow_salt=str(pow_salt) if pow_salt else None,
         )

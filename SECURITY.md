@@ -6,9 +6,11 @@ Synapse Shield is currently in active production development. We strongly recomm
 
 | Version | Supported          | Status |
 | ------- | ------------------ | ------ |
-| 0.9.x   | :white_check_mark: | **Current Stable** (Active Hardening & SIMD Rust Core) |
-| 0.8.x   | :warning:          | Maintenance Only (Critical Security Patches) |
-| < 0.8.0 | :x:                | End of Life (Unsupported) |
+| 0.10.x  | :white_check_mark: | **Current Stable** (Zero-PII keystroke shield, client binding, Rust core) |
+| 0.9.x   | :warning:          | Maintenance Only (Critical Security Patches) |
+| < 0.9.0 | :x:                | End of Life (Unsupported) |
+
+> **Browser SDK note:** SDK builds up to and including 0.10.4 can send typed characters in clear text for multi-unit keys (emoji, Turkish `İ`, ligature keys). Starting with 0.10.5, the server masks every key that is not on a closed allow-list of control keys (`Enter`, `ArrowLeft`, `F1`–`F24`, …) after token verification, so older clients no longer leak text past the gateway. Upgrading the SDK is still recommended.
 
 ## Reporting a Vulnerability
 

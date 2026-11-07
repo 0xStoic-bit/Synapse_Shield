@@ -19,6 +19,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from synapse_shield.privacy import sanitize_telemetry
 from synapse_shield.storage import get_storage
 
 logger = logging.getLogger("synapse_shield")
@@ -72,6 +73,9 @@ def _load_or_generate_secret_key() -> bytes:
 
 
 SECRET_KEY = _load_or_generate_secret_key()
+
+
+_EVENT_TIME_FIELDS = ("t", "down", "up", "time")
 
 
 def _ensure_table(conn):
@@ -195,8 +199,15 @@ def verify_and_consume_token(
     except Exception:
         return False, "Geçersiz token formatı / Base64 hatası", {}
 
+    # Yapısal tip doğrulaması: geçerli JSON ama yanlış tipte zarf ([], null, "x", challenge=123)
+    # daha önce AttributeError fırlatıp HTTP 500'e yol açıyor ve bot vuruşu/ban sayacını atlıyordu.
+    if not isinstance(payload, dict):
+        return False, "Geçersiz token formatı / Base64 hatası", {}
+
     challenge = payload.get("challenge", "")
     telemetry = payload.get("telemetry", {})
+    if not isinstance(challenge, str):
+        return False, "Bozuk challenge yapısı", {}
 
     parts = challenge.split(".")
     if len(parts) == 3:
@@ -244,6 +255,13 @@ def verify_and_consume_token(
     if not is_valid_nonce:
         return False, "Yeniden Oynatma Saldırısı: Bu token zaten kullanıldı! (Replay Detected)", {}
 
+    # Telemetri tip doğrulaması nonce TÜKETİLDİKTEN sonra yapılır: bozuk gövdeli bir istek de
+    # challenge'ı yakar, böylece aynı challenge ile "düzeltip tekrar dene" (Probe & Retry) olmaz.
+    if not isinstance(telemetry, dict) or any(
+        not isinstance(telemetry.get(k, []), list) for k in ("mouse_movements", "keystrokes", "clicks", "scrolls")
+    ):
+        return False, "Geçersiz telemetri yapısı (Malformed Telemetry)", {}
+
     now_ms = int(time.time() * 1000)
     elapsed_ms = now_ms - ts
     elapsed_sec = elapsed_ms / 1000.0
@@ -269,9 +287,19 @@ def verify_and_consume_token(
         timestamps: list[float] = []
         for e in events:
             if isinstance(e, dict):
-                t_val = e.get("t")
-                if t_val is not None:
-                    if isinstance(t_val, (int, float)) and not math.isnan(t_val) and not math.isinf(t_val):
+                # The feature extractors (features.py, lib.rs) read "t", "down", "up" and "time"; every one of
+                # them must satisfy the freshness window, otherwise events carrying only "down"/"up" would
+                # skip the check. bool is an int subclass in Python and is never a valid timestamp.
+                for field in _EVENT_TIME_FIELDS:
+                    t_val = e.get(field)
+                    if t_val is None:
+                        continue
+                    if (
+                        isinstance(t_val, (int, float))
+                        and not isinstance(t_val, bool)
+                        and not math.isnan(t_val)
+                        and not math.isinf(t_val)
+                    ):
                         timestamps.append(float(t_val))
                     else:
                         return (
@@ -314,7 +342,9 @@ def verify_and_consume_token(
     # 5. Süresi Dolan Nonce'ları Temizle
     _cleanup_expired_nonces()
 
-    return True, "Geçerli", telemetry
+    # 6. Sunucu tarafı Zero-PII koruması: eski SDK'ların gönderdiği ham karakterler buradan
+    # sonra hiçbir katmana (skorlama, uygulama handler'ı, log) ulaşmaz.
+    return True, "Geçerli", sanitize_telemetry(telemetry)
 
 
 def generate_pow_salt(client_ip: str | None = None, difficulty: int = 4) -> str:

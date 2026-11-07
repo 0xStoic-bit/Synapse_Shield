@@ -135,14 +135,16 @@ async def replay_attack_plugin(shared_state: Dict[str, Any]):
         import json
     except ImportError:
         return
-    ch = await asyncio.to_thread(get_challenge)
+    # Same IP + UA for challenge and both sends, so the 2nd send is stopped by the
+    # single-use nonce (replay), not by client binding (relay).
+    ch = await asyncio.to_thread(get_challenge, "Replay Attack Plugin", 206)
     if not ch:
         return
     await asyncio.sleep(1.6)
     envelope = {"challenge": ch, "telemetry": {}, "created_at": int(time.time() * 1000)}
     valid_token = base64.b64encode(json.dumps(envelope).encode()).decode()
-    await asyncio.to_thread(send_attack, "Replay Attack (1st)", {"token": valid_token}, 206)
-    return await asyncio.to_thread(send_attack, "Replay Attack Plugin (2nd)", {"token": valid_token}, 206)
+    await asyncio.to_thread(send_attack, "Replay Attack Plugin", {"token": valid_token}, 206)
+    return await asyncio.to_thread(send_attack, "Replay Attack Plugin", {"token": valid_token}, 206)
 
 
 @redteam_attack(category="tamper", weight=28)

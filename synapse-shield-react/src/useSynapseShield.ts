@@ -90,9 +90,28 @@ const FREQUENT_DIGRAPHS = new Set([
   "th", "er", "on", "an", "re", "he", "in", "ed", "nd", "ha",
   "at", "en", "es", "of", "or", "nt", "ea", "ti", "to", "it",
   "st", "io", "le", "is", "ou", "ar", "as", "de", "rt", "ve",
-  "er", "en", "da", "de", "an", "ar", "in", "te", "la", "le",
+  "er", "en", "de", "an", "ar", "in", "la", "le",
   "ik", "ak", "el", "al", "ma", "me", "ba", "ka"
 ]);
+
+// Zero-PII: only standard named keys (UI Events "key" values such as "Enter", "ArrowLeft",
+// "Unidentified", "F1") may leave the browser by name. Anything else is printed text and is
+// masked — including values longer than one UTF-16 unit (emoji, ligature keys such as "لا",
+// combining sequences, and Turkish "İ" whose lower-case form is two code units).
+const NAMED_KEYS: ReadonlySet<string> = new Set([
+  "enter", "backspace", "tab", "shift", "control", "alt", "altgraph", "meta",
+  "capslock", "escape", "arrowleft", "arrowright", "arrowup", "arrowdown", "home", "end",
+  "pageup", "pagedown", "insert", "delete", "dead", "process", "unidentified", "numlock",
+  "scrolllock", "contextmenu", "pause", "printscreen", "clear", "compose", "f1", "f2",
+  "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10",
+  "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18",
+  "f19", "f20", "f21", "f22", "f23", "f24",
+]);
+export function telemetryKeyName(key: string | undefined | null, isSensitive: boolean): string {
+  if (!key) return "unknown";
+  if (isSensitive || !NAMED_KEYS.has(key.toLowerCase())) return "masked";
+  return key.toLowerCase();
+}
 
 function isSensitiveInput(target: any): boolean {
   if (!target) return false;
@@ -121,7 +140,9 @@ function isSensitiveInput(target: any): boolean {
 }
 
 export function useSynapseShield() {
-  const [currentChallenge, setCurrentChallenge] = useState<string | null>(null);
+  const [, setCurrentChallenge] = useState<string | null>(null);
+  // Held in a ref so that consuming it (single-use) takes effect immediately, not on the next render.
+  const challengeRef = useRef<string | null>(null);
   
   const telemetry = useRef<SynapseTelemetry>({
     mouse_movements: [],
@@ -151,6 +172,7 @@ export function useSynapseShield() {
       const res = await fetch('/api/challenge');
       if (res.ok) {
         const data = await res.json();
+        challengeRef.current = data.challenge;
         setCurrentChallenge(data.challenge);
       }
     } catch (e) {
@@ -335,8 +357,7 @@ export function useSynapseShield() {
       }
       lastRawKey = rawKey;
 
-      const isSingleChar = rawKey.length === 1;
-      const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+      const keyName = telemetryKeyName(e.key, isSens);
 
       if (!activeKeys[lookupId]) {
         activeKeys[lookupId] = { down: now, isFreq };
@@ -354,8 +375,7 @@ export function useSynapseShield() {
       const isSens = isSensitiveInput(e.target);
       const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
       const lookupId = e.code || rawKey;
-      const isSingleChar = rawKey.length === 1;
-      const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+      const keyName = telemetryKeyName(e.key, isSens);
       const now = Date.now();
       const keyState = activeKeys[lookupId];
       delete activeKeys[lookupId];
@@ -428,16 +448,22 @@ export function useSynapseShield() {
       telemetry.current.browser.motion_variance = 0;
     }
 
-    if (currentChallenge) {
+    const challenge = challengeRef.current;
+    if (challenge) {
       const envelope = {
-        challenge: currentChallenge,
+        challenge,
         telemetry: telemetry.current,
         created_at: Date.now(),
       };
+      // The challenge is single-use: consume it and fetch the next one in the background so a second
+      // submission in the same SPA session does not replay it (HTTP 403).
+      challengeRef.current = null;
+      setCurrentChallenge(null);
+      void refreshChallenge();
       return { token: safeBtoa(JSON.stringify(envelope)) };
     }
     return { telemetry: telemetry.current };
-  }, [currentChallenge]);
+  }, [refreshChallenge]);
 
   return { getProtectedPayload, refreshChallenge, reset };
 }

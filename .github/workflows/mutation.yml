@@ -1,0 +1,53 @@
+name: Mutation testing (security core)
+
+# Mutation testing is slow, so it does not run on every push.
+# It mutates tokens.py, core.py and storage.py (see [tool.mutmut] in pyproject.toml) and checks
+# that the security test suite notices each change. Surviving mutants = untested behaviour.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"  # Mondays 03:00 UTC
+
+jobs:
+  mutmut:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[server]"
+          pip install pytest httpx flask django litestar sanic sanic-testing \
+            redis fakeredis prometheus-client "mutmut>=3.3,<4"
+
+      - name: Run mutmut
+        run: mutmut run --max-children 4 || true
+
+      - name: Report
+        run: |
+          mutmut results --all true > mutmut-results.txt || mutmut results > mutmut-results.txt
+          tail -n 60 mutmut-results.txt
+          python - <<'EOF'
+          import json, pathlib
+          stats = json.loads(pathlib.Path("mutants/mutmut-cicd-stats.json").read_text()) \
+              if pathlib.Path("mutants/mutmut-cicd-stats.json").exists() else {}
+          print("stats:", stats)
+          EOF
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-results
+          path: |
+            mutmut-results.txt
+            mutants/mutmut-cicd-stats.json
+          if-no-files-found: ignore

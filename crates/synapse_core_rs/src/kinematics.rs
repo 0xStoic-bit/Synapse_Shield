@@ -476,3 +476,178 @@ fn compute_spectral_features(velocities: &[f64], avg_vel: f64, feat: &mut Extrac
         feat.spectral_entropy = 1.0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pt(x: f64, y: f64, t: f64) -> MousePoint {
+        MousePoint { x, y, t, r: 0.0, f: 0.0, is_touch_source: false }
+    }
+
+    fn uniform_line(n: usize) -> Vec<MousePoint> {
+        (0..n).map(|i| pt(i as f64 * 10.0, 0.0, i as f64 * 10.0)).collect()
+    }
+
+    #[test]
+    fn empty_telemetry_yields_defaults() {
+        let f = compute_kinematics(&RawTelemetry::default());
+        assert_eq!(f.mouse_points, 0);
+        assert_eq!(f.key_count, 0);
+        assert_eq!(f.straightness, 1.0);
+        assert_eq!(f.submovement_count, 0);
+        assert!(!f.is_mobile_gpu_mismatch);
+    }
+
+    #[test]
+    fn uniform_straight_line_kinematics() {
+        let raw = RawTelemetry { mouse_movements: uniform_line(12), ..Default::default() };
+        let f = compute_kinematics(&raw);
+        assert_eq!(f.mouse_points, 12);
+        assert!((f.total_distance - 110.0).abs() < 1e-9);
+        assert!((f.straightness - 1.0).abs() < 1e-12);
+        assert!((f.avg_velocity - 1.0).abs() < 1e-12, "10 px / 10 ms = 1 px/ms");
+        assert!(f.velocity_var < 1e-12);
+        assert!(f.avg_jerk.abs() < 1e-12, "constant velocity has zero jerk");
+        assert!((f.terminal_decel_ratio - 1.0).abs() < 1e-12, "no terminal deceleration");
+        assert_eq!(f.submovement_count, 1);
+        assert_eq!(f.curvature_score, 0.95, "straight line flagged by curvature engine");
+    }
+
+    #[test]
+    fn out_of_order_points_are_sorted_by_time() {
+        let ordered = uniform_line(10);
+        let mut shuffled = ordered.clone();
+        shuffled.swap(1, 7);
+        shuffled.swap(3, 9);
+        shuffled.reverse();
+        let a = compute_kinematics(&RawTelemetry { mouse_movements: ordered, ..Default::default() });
+        let b = compute_kinematics(&RawTelemetry { mouse_movements: shuffled, ..Default::default() });
+        assert_eq!(a.total_distance, b.total_distance);
+        assert_eq!(a.avg_velocity, b.avg_velocity);
+        assert_eq!(a.straightness, b.straightness);
+    }
+
+    #[test]
+    fn trajectory_is_capped_at_300_points() {
+        let raw = RawTelemetry { mouse_movements: uniform_line(1_000), ..Default::default() };
+        let f = compute_kinematics(&raw);
+        assert_eq!(f.mouse_points, 1_000, "reported count is the raw count");
+        assert!((f.total_distance - 2_990.0).abs() < 1e-9, "distance computed over first 300 points only");
+    }
+
+    #[test]
+    fn decelerating_approach_lowers_terminal_ratio() {
+        // Fast ballistic phase then slow corrective approach (Fitts's law profile).
+        let mut moves = Vec::new();
+        let mut x = 0.0;
+        for i in 0..20 {
+            let step = if i < 15 { 20.0 } else { 2.0 };
+            moves.push(pt(x, 0.0, i as f64 * 10.0));
+            x += step;
+        }
+        let f = compute_kinematics(&RawTelemetry { mouse_movements: moves, ..Default::default() });
+        assert!(f.terminal_decel_ratio < 0.5, "ratio {}", f.terminal_decel_ratio);
+    }
+
+    #[test]
+    fn coincident_timestamps_stay_finite() {
+        let moves = vec![pt(0.0, 0.0, 5.0), pt(3.0, 4.0, 5.0), pt(6.0, 8.0, 5.0), pt(9.0, 12.0, 5.0)];
+        let f = compute_kinematics(&RawTelemetry { mouse_movements: moves, ..Default::default() });
+        for v in [f.avg_velocity, f.max_velocity, f.avg_acceleration, f.avg_jerk, f.velocity_var] {
+            assert!(v.is_finite());
+        }
+    }
+
+    #[test]
+    fn mobile_viewport_with_desktop_or_emulator_gpu_is_flagged() {
+        let base = RawTelemetry { touch_supported: true, screen_width: 390.0, ..Default::default() };
+        for gpu in ["Google SwiftShader", "ANGLE (NVIDIA GeForce RTX 3080)", "llvmpipe (LLVM 15)"] {
+            let f = compute_kinematics(&RawTelemetry { webgl_renderer: gpu.into(), ..base.clone() });
+            assert!(f.is_mobile_gpu_mismatch, "{gpu} not flagged");
+        }
+        for gpu in ["Apple GPU", "Adreno (TM) 740", "Mali-G78"] {
+            let f = compute_kinematics(&RawTelemetry { webgl_renderer: gpu.into(), ..base.clone() });
+            assert!(!f.is_mobile_gpu_mismatch, "{gpu} wrongly flagged");
+        }
+        // Desktop viewport and non-touch devices are never flagged.
+        let desktop = RawTelemetry { screen_width: 1440.0, webgl_renderer: "NVIDIA".into(), ..base.clone() };
+        assert!(!compute_kinematics(&desktop).is_mobile_gpu_mismatch);
+        let no_touch = RawTelemetry { touch_supported: false, webgl_renderer: "SwiftShader".into(), ..base };
+        assert!(!compute_kinematics(&no_touch).is_mobile_gpu_mismatch);
+    }
+
+    #[test]
+    fn capacitive_touch_statistics() {
+        let mut moves = Vec::new();
+        for (i, (r, f)) in [(10.0, 0.5), (12.0, 0.7), (14.0, 0.0)].iter().enumerate() {
+            moves.push(MousePoint { x: i as f64, y: 0.0, t: i as f64 * 16.0, r: *r, f: *f, is_touch_source: true });
+        }
+        let feat = compute_kinematics(&RawTelemetry { mouse_movements: moves, ..Default::default() });
+        assert_eq!(feat.touch_event_count, 3);
+        assert!((feat.avg_touch_radius - 12.0).abs() < 1e-12);
+        assert!((feat.touch_radius_var - 8.0 / 3.0).abs() < 1e-12);
+        assert!((feat.avg_touch_force - 0.6).abs() < 1e-12, "zero force samples are excluded");
+    }
+
+    #[test]
+    fn touch_events_without_radius_still_counted() {
+        let moves = vec![MousePoint { x: 0.0, y: 0.0, t: 0.0, r: 0.0, f: 0.0, is_touch_source: true }];
+        let raw = RawTelemetry { mouse_movements: moves, touch_click_count: 2, ..Default::default() };
+        assert_eq!(compute_kinematics(&raw).touch_event_count, 3);
+    }
+
+    #[test]
+    fn tap_duration_statistics() {
+        let raw = RawTelemetry { tap_durations: vec![80.0, 100.0, 120.0], ..Default::default() };
+        let f = compute_kinematics(&raw);
+        assert_eq!(f.tap_count, 3);
+        assert!((f.avg_tap_duration - 100.0).abs() < 1e-12);
+        assert!((f.tap_duration_var - 800.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn legacy_timestamp_keystrokes_detect_fixed_intervals() {
+        let keys = (0..6).map(|i| KeyPoint { t: i as f64 * 100.0 }).collect();
+        let f = compute_kinematics(&RawTelemetry { keystrokes: keys, ..Default::default() });
+        assert_eq!(f.key_count, 6);
+        assert!((f.key_interval_avg - 100.0).abs() < 1e-12);
+        assert_eq!(f.keystroke_score, 0.85);
+    }
+
+    #[test]
+    fn detailed_keystrokes_take_precedence_over_legacy() {
+        let detailed = vec![
+            DetailedKeystroke { key: "masked".into(), down: 0.0, up: Some(90.0), is_freq_digraph: None },
+            DetailedKeystroke { key: "masked".into(), down: 250.0, up: Some(330.0), is_freq_digraph: None },
+        ];
+        let legacy = (0..6).map(|i| KeyPoint { t: i as f64 * 100.0 }).collect();
+        let raw = RawTelemetry { detailed_keystrokes: detailed, keystrokes: legacy, ..Default::default() };
+        let f = compute_kinematics(&raw);
+        assert_eq!(f.key_count, 2);
+        assert!((f.avg_dwell_time - 85.0).abs() < 1e-12);
+        assert_eq!(f.key_interval_avg, f.avg_flight_time);
+    }
+
+    #[test]
+    fn browser_metadata_is_passed_through() {
+        let raw = RawTelemetry {
+            webdriver: true,
+            plugins_length: 0,
+            max_touch_points: 5,
+            device_pixel_ratio: 3.0,
+            motion_variance: 0.42,
+            click_count: 4,
+            scroll_count: 7,
+            ..Default::default()
+        };
+        let f = compute_kinematics(&raw);
+        assert!(f.webdriver);
+        assert_eq!(f.plugins_length, 0);
+        assert_eq!(f.max_touch_points, 5);
+        assert_eq!(f.device_pixel_ratio, 3.0);
+        assert_eq!(f.motion_variance, 0.42);
+        assert_eq!(f.click_count, 4);
+        assert_eq!(f.scroll_count, 7);
+    }
+}

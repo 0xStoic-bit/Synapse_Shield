@@ -99,9 +99,28 @@ const FREQUENT_DIGRAPHS = new Set([
   "th", "er", "on", "an", "re", "he", "in", "ed", "nd", "ha",
   "at", "en", "es", "of", "or", "nt", "ea", "ti", "to", "it",
   "st", "io", "le", "is", "ou", "ar", "as", "de", "rt", "ve",
-  "er", "en", "da", "de", "an", "ar", "in", "te", "la", "le",
+  "er", "en", "de", "an", "ar", "in", "la", "le",
   "ik", "ak", "el", "al", "ma", "me", "ba", "ka"
 ]);
+
+// Zero-PII: only standard named keys (UI Events "key" values such as "Enter", "ArrowLeft",
+// "Unidentified", "F1") may leave the browser by name. Anything else is printed text and is
+// masked — including values longer than one UTF-16 unit (emoji, ligature keys such as "لا",
+// combining sequences, and Turkish "İ" whose lower-case form is two code units).
+const NAMED_KEYS: ReadonlySet<string> = new Set([
+  "enter", "backspace", "tab", "shift", "control", "alt", "altgraph", "meta",
+  "capslock", "escape", "arrowleft", "arrowright", "arrowup", "arrowdown", "home", "end",
+  "pageup", "pagedown", "insert", "delete", "dead", "process", "unidentified", "numlock",
+  "scrolllock", "contextmenu", "pause", "printscreen", "clear", "compose", "f1", "f2",
+  "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10",
+  "f11", "f12", "f13", "f14", "f15", "f16", "f17", "f18",
+  "f19", "f20", "f21", "f22", "f23", "f24",
+]);
+export function telemetryKeyName(key: string | undefined | null, isSensitive: boolean): string {
+  if (!key) return "unknown";
+  if (isSensitive || !NAMED_KEYS.has(key.toLowerCase())) return "masked";
+  return key.toLowerCase();
+}
 
 function isSensitiveInput(target: any): boolean {
   if (!target) return false;
@@ -177,22 +196,28 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     return null;
   };
 
-  const solvePow = async (challengeNonce: string, difficulty: number = 2): Promise<{ salt: string; nonce: number } | null> => {
+  /**
+   * Solves the server's proof-of-work: find `nonce` so that sha256(powSalt + nonce) starts with `difficulty`
+   * zeros. `powSalt` MUST be the signed `pow_salt` from the `challenge_required` response (the server verifies
+   * its HMAC, expiry and difficulty); a client-generated salt can never be accepted.
+   */
+  const solvePow = async (powSalt: string, difficulty: number = 4): Promise<{ salt: string; nonce: number } | null> => {
     if (typeof crypto === 'undefined' || !crypto.subtle) return null;
     isSolvingPow.value = true;
     try {
       const targetPrefix = '0'.repeat(difficulty);
-      const salt = Math.random().toString(36).substring(2, 10);
+      const salt = powSalt;
       let nonce = 0;
+      const maxAttempts = 20_000_000;
       const encoder = new TextEncoder();
 
-      while (true) {
+      while (nonce < maxAttempts) {
         // Yield to browser UI thread periodically to avoid jank
         if (nonce % 1000 === 0 && nonce > 0) {
           await new Promise((r) => setTimeout(r, 0));
         }
 
-        const data = encoder.encode(challengeNonce + salt + nonce);
+        const data = encoder.encode(salt + nonce);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -202,6 +227,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
         }
         nonce++;
       }
+      return null;
     } finally {
       isSolvingPow.value = false;
     }
@@ -236,6 +262,10 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
         envelope.pow_salt = powResult.salt;
         envelope.pow_nonce = powResult.nonce;
       }
+      // The challenge is single-use: consume it and fetch the next one in the background so a second
+      // submission in the same SPA session does not replay it (HTTP 403).
+      currentChallenge.value = null;
+      void refreshChallenge();
       return {
         token: safeBtoa(JSON.stringify(envelope)),
         ...(powResult ? { pow_salt: powResult.salt, pow_nonce: powResult.nonce } : {}),
@@ -363,8 +393,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     }
     lastRawKey = rawKey;
 
-    const isSingleChar = rawKey.length === 1;
-    const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+    const keyName = telemetryKeyName(e.key, isSens);
 
     if (!activeKeys[lookupId]) {
       activeKeys[lookupId] = { down: now, isFreq };
@@ -382,8 +411,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     const isSens = isSensitiveInput(e.target);
     const rawKey = e.key ? (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase() || e.code || "unknown") : "unknown";
     const lookupId = e.code || rawKey;
-    const isSingleChar = rawKey.length === 1;
-    const keyName = (isSens || isSingleChar) ? "masked" : rawKey;
+    const keyName = telemetryKeyName(e.key, isSens);
     const now = Date.now();
     const keyState = activeKeys[lookupId];
     delete activeKeys[lookupId];

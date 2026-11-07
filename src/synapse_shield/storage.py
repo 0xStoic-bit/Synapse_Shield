@@ -576,6 +576,16 @@ class SQLiteStorageBackend(StorageBackend):
             return []
 
 
+def _unique_member(now: float) -> str:
+    """Sorted-set member for one event in a sliding window.
+
+    A timestamp alone is not unique: on coarse clocks (Windows ticks at ~0.5-15 ms) or across
+    concurrent workers, two events can share it, and ZADD would silently merge them into one —
+    undercounting bot strikes and request floods. A random suffix keeps every event distinct.
+    """
+    return f"{now}:{time.time_ns()}:{os.urandom(6).hex()}"
+
+
 class RedisStorageBackend(StorageBackend):
     """Distributed Redis-backed storage provider for high-availability clusters."""
 
@@ -625,7 +635,13 @@ class RedisStorageBackend(StorageBackend):
             self.client.set(key, reason, ex=duration_sec)
         except Exception as e:
             logger.warning("Redis ban_ip failed (%s), falling back to SQLite", e)
+        # Bans are always mirrored into the local fallback. Otherwise a Redis outage would make
+        # is_ip_banned() fall back to a store that never saw the ban, and quarantined IPs would
+        # pass for the duration of the outage (fail-open). Bans are rare, so the write is cheap.
+        try:
             self.fallback.ban_ip(ip, duration_sec=duration_sec, reason=reason)
+        except Exception as e:
+            logger.warning("Fallback ban mirror failed (%s)", e)
 
     def unban_ip(self, ip: str) -> None:
         try:
@@ -633,7 +649,10 @@ class RedisStorageBackend(StorageBackend):
             self.client.delete(key)
         except Exception as e:
             logger.warning("Redis unban_ip failed (%s), falling back to SQLite", e)
+        try:
             self.fallback.unban_ip(ip)
+        except Exception as e:
+            logger.warning("Fallback unban mirror failed (%s)", e)
 
     def record_bot_strike(
         self,
@@ -646,13 +665,11 @@ class RedisStorageBackend(StorageBackend):
         try:
             key = f"synapse:strikes:{ip}"
             now = time.time()
-            now_ns = time.time_ns()
-
             pipeline = self.client.pipeline()
             # 1. Pencere dışındaki eski vuruşları sil
             pipeline.zremrangebyscore(key, 0, now - window_sec)
-            # 2. Yeni vuruşu ekle (benzersiz üye için timestamp_ns kullanılır)
-            pipeline.zadd(key, {f"{now}:{now_ns}": now})
+            # 2. Yeni vuruşu ekle (üye benzersiz olmalı; bkz. _unique_member)
+            pipeline.zadd(key, {_unique_member(now): now})
             # 3. Kayan penceredeki güncel vuruş sayısını al
             pipeline.zcard(key)
             # 4. TTL güncelle (pencerenin 2 katı süre)
@@ -697,10 +714,9 @@ class RedisStorageBackend(StorageBackend):
         try:
             key = f"synapse:req_count:{ip}"
             now = time.time()
-            now_ns = time.time_ns()
             pipeline = self.client.pipeline()
             pipeline.zremrangebyscore(key, 0, now - window_sec)
-            pipeline.zadd(key, {f"{now}:{now_ns}": now})
+            pipeline.zadd(key, {_unique_member(now): now})
             pipeline.zcard(key)
             pipeline.expire(key, window_sec * 2)
             results = pipeline.execute()
