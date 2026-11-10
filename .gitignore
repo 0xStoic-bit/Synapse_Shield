@@ -133,3 +133,6 @@ mutants/
 data/external/
 # Simülatörün özet istatistikleri (ham veri değil) depoda kalmalı
 !research/human_sim/params/*.json
+
+# Sürüm notları yalnızca yerelde tutulur
+CHANGELOG.md
