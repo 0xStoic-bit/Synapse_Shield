@@ -48,6 +48,16 @@ def reload_ai_model() -> bool:
         return False
 
 
+def _superhuman_key_interval(features: dict[str, Any]) -> bool:
+    """Ortalama tuş aralığı insanüstü hızlı mı (0 < aralık < 25 ms)?
+
+    Alt sınır features.py ile aynı: Shift basılıyken ya da tuş örtüşmesinde (rollover) up->down aralığı
+    negatif olur; 0 ise aralık ölçülemedi demektir. İkisi de "insanüstü hız" değildir (v0.10.6).
+    Kural (5. bölüm), Brave istisnası ve tehdit sınıflandırması aynı tanımı kullanır.
+    """
+    return 0.0 < features.get("key_interval_avg", 100.0) < 25.0
+
+
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
     """
     Poisson dağılımı kümülatif anomali skoru (P(X < k)).
@@ -290,7 +300,9 @@ def analyze_behavior(
             reasons.append(f"Near-zero velocity variance observed in mouse path [+{risk_add:.1f}].")
 
         # C. Bézier Eğrisi & Polinomal İvme İmzası (Bézier botlarında < 1.5e-5)
-        if features["total_distance"] > 30 and features["acceleration_var"] < 1.5e-5:
+        # Masaüstüne özgü (D/F/H/I/J gibi): dokunmatikte ayrı alanlara saniyeler arayla yapılan dokunuşlar
+        # (dt ~ 3000 ms) ivme varyansını ~1e-10'a indirir ve gerçek mobil kullanıcıyı +65 ile engellerdi (v0.10.6).
+        if features["total_distance"] > 30 and features["acceleration_var"] < 1.5e-5 and not is_touch:
             risk_add = 65.0 * acc_multiplier
             total_risk += risk_add
             reasons.append(
@@ -423,7 +435,7 @@ def analyze_behavior(
             total_risk += 75.0
             reasons.append("Robotic constant-interval keystroke timing detected.")
 
-        if features.get("key_interval_avg", 100.0) < 25.0:
+        if _superhuman_key_interval(features):
             total_risk += 50.0
             reasons.append(f"Superhuman input frequency (avg typing interval: {features['key_interval_avg']:.1f} ms).")
 
@@ -533,7 +545,7 @@ def analyze_behavior(
 
     # Brave Farbling Override: Sadece ve sadece başka kritik anomali yoksa skoru düşür
     typing_speed_anomaly = features.get("key_count", 0) >= 3 and (
-        features.get("key_interval_var", 50.0) < 2.0 or features.get("key_interval_avg", 100.0) < 25.0
+        features.get("key_interval_var", 50.0) < 2.0 or _superhuman_key_interval(features)
     )
     fitts_violation = (
         not is_touch
@@ -683,7 +695,7 @@ def classify_threat(
 
     # 5. ROBOTIC_KEYSTROKE (Mekanik Klavye Girişi)
     if features.get("key_count", 0) > 3:
-        if features.get("key_interval_var", 100.0) < 4.0 or features.get("key_interval_avg", 100.0) < 25.0:
+        if features.get("key_interval_var", 100.0) < 4.0 or _superhuman_key_interval(features):
             return "ROBOTIC_KEYSTROKE"
 
     # 6. Genel AI veya Kural Anomalisi

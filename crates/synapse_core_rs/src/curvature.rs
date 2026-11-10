@@ -82,20 +82,17 @@ pub fn evaluate_curvature_naturalness(x: &[f64], y: &[f64], t: &[f64]) -> Curvat
     //    slows to a stop, and 1-px quantisation makes direction meaningless there. Real human pointing ends
     //    in slow homing/stops, so the ungated variance was huge for ~67% of real human windows
     //    (SapiMouse replay). Keep only points whose two neighbouring steps are >= CURVATURE_MIN_STEP_PX.
-    let mut gated_k = Vec::with_capacity(k_len);
-    let mut gated_dt = Vec::with_capacity(k_len);
-    let mut last_t: Option<f64> = None;
-    for i in 0..k_len {
-        let s0 = (x[i + 1] - x[i]).hypot(y[i + 1] - y[i]);
-        let s1 = (x[i + 2] - x[i + 1]).hypot(y[i + 2] - y[i + 1]);
-        if s0 >= CURVATURE_MIN_STEP_PX && s1 >= CURVATURE_MIN_STEP_PX {
-            if let Some(lt) = last_t {
-                gated_dt.push(t[i + 2] - lt);
-            }
-            last_t = Some(t[i + 2]);
-            gated_k.push(kappa[i]);
-        }
-    }
+    //    The time between two kept points is the sum of the same dt_a steps the all-points statistic uses,
+    //    so when every point is kept the gated moments equal the all-points moments exactly.
+    let keep: Vec<bool> = (0..k_len)
+        .map(|i| {
+            let s0 = (x[i + 1] - x[i]).hypot(y[i + 1] - y[i]);
+            let s1 = (x[i + 2] - x[i + 1]).hypot(y[i + 2] - y[i + 1]);
+            s0 >= CURVATURE_MIN_STEP_PX && s1 >= CURVATURE_MIN_STEP_PX
+        })
+        .collect();
+    let gated_k: Vec<f64> = kappa.iter().zip(&keep).filter(|(_, &k)| k).map(|(&v, _)| v).collect();
+    let gated_dt = gated_dts(&dt_a, &keep);
     let gated = if gated_k.len() >= CURVATURE_MIN_GATED_POINTS {
         Some(kappa_moments(&gated_k, &gated_dt))
     } else {
@@ -141,6 +138,28 @@ pub fn evaluate_curvature_naturalness(x: &[f64], y: &[f64], t: &[f64]) -> Curvat
 pub const CURVATURE_MIN_STEP_PX: f64 = 5.0;
 /// Fewer moving points than this: the gated statistics are not used.
 pub const CURVATURE_MIN_GATED_POINTS: usize = 10;
+
+/// Time between consecutive kept kappa points: the sum of the `dt_a` steps between them (`dt_a[i]` separates
+/// `kappa[i - 1]` and `kappa[i]`). With every point kept this is exactly `dt_a[1..]`, the all-points spacing,
+/// so the gated and all-points moments are computed identically.
+fn gated_dts(dt_a: &[f64], keep: &[bool]) -> Vec<f64> {
+    let mut out = Vec::with_capacity(keep.len());
+    let mut gap = 0.0;
+    let mut seen = false;
+    for (i, &k) in keep.iter().enumerate() {
+        if i > 0 {
+            gap += dt_a[i];
+        }
+        if k {
+            if seen {
+                out.push(gap);
+            }
+            gap = 0.0;
+            seen = true;
+        }
+    }
+    out
+}
 
 #[derive(Debug, Clone, Copy)]
 struct KappaMoments {
@@ -376,18 +395,37 @@ mod tests {
 
     #[test]
     fn minimum_jerk_with_resting_ends_is_flagged_as_synthetic() {
-        // Analytic minimum-jerk curve: speed is ~0 at both ends, which used to inflate the variance and hide it.
-        let n = 50;
-        let (mut x, mut y, mut t) = (Vec::new(), Vec::new(), Vec::new());
-        for i in 0..n {
-            let u = i as f64 / (n - 1) as f64;
-            let s = 10.0 * u.powi(3) - 15.0 * u.powi(4) + 6.0 * u.powi(5);
-            x.push(100.0 + 600.0 * s);
-            y.push(100.0 + 350.0 * s);
-            t.push(i as f64 * 25.0);
+        // Minimum-jerk bot rounded to 0.01 px: speed is ~0 at both ends, where the rounding noise inflates the
+        // all-points variance. Only the moving-points statistic flags it (the all-points one does not).
+        let r2 = |v: f64| (v * 100.0).round() / 100.0;
+        for &bow in &[0.0, 80.0] {
+            let n = 50;
+            let (mut x, mut y, mut t) = (Vec::new(), Vec::new(), Vec::new());
+            for i in 0..n {
+                let u = i as f64 / (n - 1) as f64;
+                let s = 10.0 * u.powi(3) - 15.0 * u.powi(4) + 6.0 * u.powi(5);
+                x.push(r2(100.0 + 600.0 * s));
+                y.push(r2(100.0 + 350.0 * s + bow * (std::f64::consts::PI * s).sin()));
+                t.push(i as f64 * 25.0);
+            }
+            let m = evaluate_curvature_naturalness(&x, &y, &t);
+            assert!(m.curvature_var > 1e-4 && m.curvature_rate_var > 1e-8, "fixture is smooth on all points: {m:?}");
+            assert!(m.curvature_score >= 0.90, "minimum-jerk bot (bow {bow}) scored {}", m.curvature_score);
         }
-        let m = evaluate_curvature_naturalness(&x, &y, &t);
-        assert!(m.curvature_score >= 0.90, "minimum-jerk bot scored {}", m.curvature_score);
+    }
+
+    #[test]
+    fn gated_spacing_equals_all_points_spacing_when_nothing_is_dropped() {
+        let dt_a = [20.0, 16.5, 33.0, 41.5, 25.0, 16.0];
+        assert_eq!(gated_dts(&dt_a, &[true; 6]), dt_a[1..].to_vec());
+    }
+
+    #[test]
+    fn gated_spacing_sums_the_steps_of_dropped_points() {
+        let dt_a = [20.0, 16.5, 33.0, 41.5, 25.0, 16.0];
+        // kept 0 -> 2: 16.5 + 33.0; 2 -> 3: 41.5; 3 -> 5: 25.0 + 16.0
+        assert_eq!(gated_dts(&dt_a, &[true, false, true, true, false, true]), vec![49.5, 41.5, 41.0]);
+        assert_eq!(gated_dts(&dt_a, &[false, false, true, false, false, true]), vec![82.5]);
     }
 
     #[test]

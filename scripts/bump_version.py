@@ -36,17 +36,19 @@ try:
 except FileNotFoundError:
     pass
 
-# 2. __init__.py güncelle
-init_path = "src/synapse_shield/__init__.py"
+# 2. _version.py güncelle (__init__.py sürümü buradan içe aktarır: `from ._version import __version__`)
+init_path = "src/synapse_shield/_version.py"
 try:
     with open(init_path, "r", encoding="utf-8") as f:
         content = f.read()
-    content = re.sub(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', content)
+    content, n_sub = re.subn(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"', content)
+    if n_sub != 1:
+        sys.exit(f"✘ {init_path}: __version__ satırı bulunamadı, sürüm senkronize edilemedi")
     with open(init_path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"✔ {init_path} -> {new_version}")
 except FileNotFoundError:
-    pass
+    sys.exit(f"✘ {init_path} bulunamadı, sürüm senkronize edilemedi")
 
 # 3. synapse-shield-react package.json & README.md
 for pkg_path in ["synapse-shield-react/package.json", "synapse-shield-vue/package.json"]:
@@ -72,7 +74,7 @@ try:
 except FileNotFoundError:
     pass
 
-# 5. test_sdk.py assertion
+# 5. test_sdk.py & test_v097_hardening.py assertions
 test_sdk_path = "tests/test_sdk.py"
 try:
     with open(test_sdk_path, "r", encoding="utf-8") as f:
@@ -81,6 +83,17 @@ try:
     with open(test_sdk_path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"✔ {test_sdk_path} -> {new_version}")
+except FileNotFoundError:
+    pass
+
+test_v097_path = "tests/test_v097_hardening.py"
+try:
+    with open(test_v097_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    content = re.sub(r'assert __version__ == "[^"]+"', f'assert __version__ == "{new_version}"', content)
+    with open(test_v097_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"✔ {test_v097_path} -> {new_version}")
 except FileNotFoundError:
     pass
 

@@ -22,20 +22,22 @@ BROWSER = {"webdriver": False, "screen_width": 1920, "screen_height": 1080, "plu
 
 
 def main() -> None:
-    random.seed(5)
-    total_b = total_n = 0
-    for name, lst in bots().items():
-        b = 0
-        for moves in lst:
-            last = moves[-1]
-            tel = {"mouse_movements": moves, "clicks": [{"x": last["x"], "y": last["y"], "t": last["t"] + 80}],
-                   "keystrokes": [], "scrolls": [], "browser": dict(BROWSER)}
-            _, decision, _, _ = analyze_behavior(tel)
-            b += decision == "Bot"
-        total_b += b
-        total_n += len(lst)
-        print(f"{name:10s} n={len(lst):4d}  Bot: {100 * b / len(lst):5.1f}%")
-    print(f"{'toplam':10s} n={total_n:4d}  Bot: {100 * total_b / total_n:5.1f}%")
+    for integer in (False, True):
+        print(f"--- bot koordinatları: {'tam sayı px (tarayıcı gibi)' if integer else '0,01 px (üretici)'} ---")
+        random.seed(5)
+        total_b = total_n = 0
+        for name, lst in bots(integer=integer).items():
+            b = 0
+            for moves in lst:
+                last = moves[-1]
+                tel = {"mouse_movements": moves, "clicks": [{"x": last["x"], "y": last["y"], "t": last["t"] + 80}],
+                       "keystrokes": [], "scrolls": [], "browser": dict(BROWSER)}
+                _, decision, _, _ = analyze_behavior(tel)
+                b += decision == "Bot"
+            total_b += b
+            total_n += len(lst)
+            print(f"{name:10s} n={len(lst):4d}  Bot: {100 * b / len(lst):5.1f}%")
+        print(f"{'toplam':10s} n={total_n:4d}  Bot: {100 * total_b / total_n:5.1f}%")
 
 
 if __name__ == "__main__":

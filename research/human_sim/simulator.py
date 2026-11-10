@@ -271,10 +271,17 @@ def aimed_movement(rng: np.random.Generator, p: Person, p0, p1, t0: float) -> tu
     noise = np.cumsum(lp * speed[:, None] * p.noise_k, axis=0)
     ramp = np.clip((ts - t0) / max(1.0, t_end - t0), 0, 1)[:, None]
     noise = noise - ramp * noise[-1]  # hedefte sıfıra iner
-    f_tr = rng.uniform(8.0, 12.0)
-    ph = rng.uniform(0, 2 * math.pi, size=2)
-    tremor = p.tremor_amp * np.column_stack([np.sin(2 * math.pi * f_tr * ts / 1000.0 + ph[0]),
-                                             np.sin(2 * math.pi * f_tr * ts / 1000.0 + ph[1])])
+    # Fizyolojik titreme tek frekanslı bir sinüs değil, 8-12 Hz'lik dar bantlı gürültüdür (genliği ve fazı
+    # sürekli kayar). Bant içinde rastgele frekans ve fazlı 16 bileşenin toplamı; RMS tek sinüsle aynı tutulur.
+    k = 16
+    freqs = rng.uniform(8.0, 12.0, size=(2, k))
+    phs = rng.uniform(0, 2 * math.pi, size=(2, k))
+    wts = rng.rayleigh(1.0, size=(2, k))
+    tr = np.column_stack([
+        (wts[j] * np.sin(2 * math.pi * np.outer(ts / 1000.0, freqs[j]) + phs[j])).sum(axis=1) for j in range(2)
+    ])
+    tr /= np.sqrt(0.5 * (wts**2).sum(axis=1))[None, :]
+    tremor = p.tremor_amp * tr / math.sqrt(2.0)
     pos = pos + noise + tremor
 
     return browser_sample(rng, p, ts, pos), t_end

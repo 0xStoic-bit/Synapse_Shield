@@ -5,6 +5,24 @@ All notable changes to the Synapse Shield project will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.6] - 2026-11-10
+### Real-Human Empirical Calibration & False-Positive Remediation
+- **[Critical] Real-human empirical calibration & differential curvature gating fix (`crates/synapse_core_rs/src/curvature.rs`, `src/synapse_shield/features.py`):**
+  - First-time calibration and measurement against empirical real-world human interaction datasets: **SapiMouse** (120 participants; 4,844 6-second windows and 1,507 20-second windows) and **CMU Keystroke** (51 participants × 400 repetitions; 20,400 typing sessions).
+  - Remedied differential curvature stopping artefacts: near-stop points (1px adjustments across 150–550ms intervals) caused synthetic velocity singularities in $\kappa = \frac{|\dot{x}\ddot{y} - \dot{y}\ddot{x}|}{(\dot{x}^2 + \dot{y}^2)^{3/2}}$ ($\kappa \approx 30\text{–}100$), triggering the chaotic curvature rule on 67.3% of real-human interactions in v0.10.5.
+  - Implemented moving-point step gating (minimum 5px distance across adjacent steps, $\ge 10$ moving points) for chaotic branches, reducing real-human false positive rate from **68.0% to 1.4%** on 6-second windows (and from 87.8% to 2.7% on 20-second windows).
+  - Maintained 100% bot detection across all standard and integer-quantized bot profiles.
+  - Added cumulative `_gated_dts` / `gated_dts` to preserve exact derivative timing across dropped stationary points, ensuring complete parity between all-points and gated calculations when no points are dropped.
+- **[High] Mobile tap isolation on polynomial acceleration rule 4.C (`src/synapse_shield/engine.py`):**
+  - Rule 4.C now explicitly enforces `and not is_touch`, preventing discrete multi-second mobile taps from collapsing acceleration variance to $\approx 10^{-10}$ and erroneously triggering +65 risk. Reduces simulated mobile false-positive rate from ~98% to 2.3%.
+- **[High] Unified superhuman keystroke frequency gate (`src/synapse_shield/engine.py`):**
+  - Unified `0.0 < key_interval_avg < 25.0` via `_superhuman_key_interval()` across detection rule 5, Brave Farbling override exemption, and threat labeling (`ROBOTIC_KEYSTROKE`).
+  - Rollover typing (negative flight times due to key overlap / Shift holds) and unmeasurable intervals (0.0) no longer strip the Brave privacy cap or mislabel sessions as robotic.
+- **[Medium] Open-data human simulation & evaluation suite (`research/human_sim/`):**
+  - Added full replay pipeline (`replay_sapimouse.py`), statistical parameter extractions (`analyze_sapimouse.py`, `analyze_cmu.py`), biomechanical population simulator (`simulator.py`), bot TPR evaluator (`bot_tpr.py`), and curvature parameter study (`curvature_study.py`).
+- **[Medium] Version synchronization hardening (`scripts/bump_version.py`):**
+  - Added synchronization of `src/synapse_shield/_version.py` with strict failure if `_version.py` or the `__version__` line is missing.
+
 ## [0.10.5] - 2026-11-07
 ### Test Infrastructure & Zero-PII Leak Fix
 - **[Critical] Zero-PII keystroke leak closed in all three SDKs (Vanilla JS, React, Vue):**

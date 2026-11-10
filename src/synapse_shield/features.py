@@ -62,6 +62,24 @@ def _kappa_moments(kappa: np.ndarray, dts: np.ndarray) -> tuple[float, float, fl
     return mean_k, var_k, var_dk, float(np.mean(kappa > 0.1))
 
 
+def _gated_dts(dt_a: np.ndarray, keep: np.ndarray) -> np.ndarray:
+    """Time between consecutive kept kappa points: the sum of the dt_a steps between them (dt_a[i] separates
+    kappa[i-1] and kappa[i]). With every point kept this is exactly dt_a[1:], the all-points spacing.
+    Sequential summation keeps parity with the Rust loop."""
+    out = []
+    gap = 0.0
+    seen = False
+    for i in range(len(keep)):
+        if i > 0:
+            gap += float(dt_a[i])
+        if keep[i]:
+            if seen:
+                out.append(gap)
+            gap = 0.0
+            seen = True
+    return np.array(out, dtype=np.float64)
+
+
 def _curvature_metrics(x: Any, y: Any, t: Any) -> dict[str, float]:
     """Differential curvature naturalness; mirrors crates/synapse_core_rs/src/curvature.rs exactly."""
     x_arr = np.asarray(x, dtype=np.float64)
@@ -95,8 +113,7 @@ def _curvature_metrics(x: Any, y: Any, t: Any) -> dict[str, float]:
     keep = (step[:-1] >= CURVATURE_MIN_STEP_PX) & (step[1:] >= CURVATURE_MIN_STEP_PX)
     gated = None
     if int(keep.sum()) >= CURVATURE_MIN_GATED_POINTS:
-        t_kept = t_arr[2:][keep]
-        gated = _kappa_moments(kappa[keep], np.diff(t_kept))
+        gated = _kappa_moments(kappa[keep], _gated_dts(dt_a, keep))
         candidates.append(gated)
 
     if any(m < 1e-6 and v < 1e-7 for m, v, _, _ in candidates):

@@ -156,7 +156,7 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
 
 def main():
     print(f"\n{C.BOLD}{C.YELLOW}╔═══════════════════════════════════════════════════════════════════════╗{C.END}")
-    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.10.5 — LIVE RED TEAM PEN-TEST ATTACK SUITE     ║{C.END}")
+    print(f"{C.BOLD}{C.YELLOW}║   🔴 SYNAPSE SHIELD v0.10.6 — LIVE RED TEAM PEN-TEST ATTACK SUITE     ║{C.END}")
     print(f"{C.BOLD}{C.YELLOW}╚═══════════════════════════════════════════════════════════════════════╝{C.END}\n")
 
     clear_bans()

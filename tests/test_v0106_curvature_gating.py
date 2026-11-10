@@ -56,13 +56,16 @@ def _human_like_moves(rnd: random.Random) -> list[dict]:
     return moves
 
 
-def _min_jerk_moves() -> list[dict]:
+def _min_jerk_moves(bow: float = 80.0) -> list[dict]:
+    """Minimum-jerk bot rounded to 0.01 px (as adversarial.generate_* do). Speed is ~0 at both ends, so the
+    rounding noise there inflates the all-points variance: only the moving-points statistic flags it."""
     moves = []
     n = 50
     for i in range(n):
         u = i / (n - 1)
         s = 10 * u**3 - 15 * u**4 + 6 * u**5
-        moves.append({"x": 100 + 600 * s, "y": 100 + 350 * s + 80 * math.sin(math.pi * s), "t": 1000 + i * 25})
+        moves.append({"x": round(100 + 600 * s, 2), "y": round(100 + 350 * s + bow * math.sin(math.pi * s), 2),
+                      "t": 1000 + i * 25})
     return moves
 
 
@@ -81,9 +84,28 @@ def test_stop_artefacts_are_not_chaotic_curvature(seed):
     assert f["curvature_score"] < 0.75
 
 
-def test_minimum_jerk_with_resting_ends_is_flagged():
-    m = feat._curvature_metrics(*_xyt(_min_jerk_moves()))
+@pytest.mark.parametrize("bow", [0.0, 80.0])
+def test_minimum_jerk_with_resting_ends_is_flagged(bow):
+    m = feat._curvature_metrics(*_xyt(_min_jerk_moves(bow)))
+    # Guard that this fixture really needs the moving-points path: the all-points moments are not smooth.
+    assert m["curvature_var"] > 1e-4 and m["curvature_rate_var"] > 1e-8, m
     assert m["curvature_score"] >= 0.90, m
+
+
+def test_gated_dt_matches_all_points_dt_when_nothing_is_dropped():
+    """Irregular sampling: the gated d(kappa)/dt spacing must be the all-points spacing (dt_a[1:])."""
+    np = feat.np
+    dt_a = np.array([20.0, 16.5, 33.0, 41.5, 25.0, 16.0])
+    assert np.array_equal(feat._gated_dts(dt_a, np.ones(6, bool)), dt_a[1:])
+
+
+def test_gated_dt_sums_the_steps_of_dropped_points():
+    np = feat.np
+    dt_a = np.array([20.0, 16.5, 33.0, 41.5, 25.0, 16.0])
+    keep = np.array([True, False, True, True, False, True])
+    # kept 0 -> 2: 16.5 + 33.0; 2 -> 3: 41.5; 3 -> 5: 25.0 + 16.0
+    assert feat._gated_dts(dt_a, keep).tolist() == [49.5, 41.5, 41.0]
+    assert feat._gated_dts(dt_a, np.array([False, False, True, False, False, True])).tolist() == [82.5]
 
 
 def test_too_few_moving_points_gives_no_chaos_verdict():

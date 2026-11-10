@@ -24,6 +24,7 @@ import numpy as np  # noqa: E402
 import replay_sapimouse as rp  # noqa: E402
 from analyze_sapimouse import DATA, load_session  # noqa: E402
 from synapse_shield import adversarial as adv  # noqa: E402
+from synapse_shield import features as feat  # noqa: E402
 
 
 def curvature_parts(moves: list[dict], min_step_px: float = 0.0) -> dict | None:
@@ -88,7 +89,8 @@ def jitter_bot(rnd: random.Random) -> list[dict]:
             for i in range(80)]
 
 
-def bots() -> dict[str, list[list[dict]]]:
+def bots(integer: bool = False) -> dict[str, list[list[dict]]]:
+    """integer=True: koordinatlar tam sayı piksele yuvarlanır (tarayıcının gönderdiği gibi)."""
     random.seed(1)
     rnd = random.Random(2)
     out: dict[str, list[list[dict]]] = {}
@@ -105,6 +107,8 @@ def bots() -> dict[str, list[list[dict]]]:
             e = (rnd.uniform(400, 900), rnd.uniform(400, 800))
             out[name].append(g(start=s, end=e, steps=rnd.randint(35, 65), duration_ms=rnd.uniform(800, 1800))["mouse_movements"])
     out["jitter"] = [jitter_bot(rnd) for _ in range(400)]
+    if integer:
+        out = {k: [[{"x": round(m["x"]), "y": round(m["y"]), "t": m["t"]} for m in tr] for tr in v] for k, v in out.items()}
     return out
 
 
@@ -120,28 +124,14 @@ def summarize(label: str, rows: list[dict]) -> None:
 
 
 def score_combined(moves: list[dict], gate: float, min_pts: int) -> float:
-    """Önerilen kural: düzgünlük dalları (0.95/0.90) tüm noktalarda VEYA hız eşikli noktalarda;
-    kaos dalları (0.85/0.75) yalnızca hız eşikli noktalarda ve en az min_pts nokta kaldıysa."""
-    a = curvature_parts(moves, 0.0)
-    g = curvature_parts(moves, gate)
-    if not a:
-        return 0.0
-    for p in (a, g if g and g["n"] >= min_pts else None):
-        if p is None:
-            continue
-        if p["mean_k"] < 1e-6 and p["var_k"] < 1e-7:
-            return 0.95
-    for p in (a, g if g and g["n"] >= min_pts else None):
-        if p is None:
-            continue
-        if p["var_dk"] < 1e-8 and p["var_k"] < 1e-4:
-            return 0.90
-    if g and g["n"] >= min_pts:
-        if g["var_dk"] > 5.0 or g["var_k"] > 10.0:
-            return 0.85
-        if g.get("frac_k_gt_01", 0) > 0.5 and g["var_dk"] > 2.0:
-            return 0.75
-    return 0.10
+    """Motorun yeni kuralı (features._curvature_metrics, Rust ile aynı), adım eşiği gate px ile."""
+    old = (feat.CURVATURE_MIN_STEP_PX, feat.CURVATURE_MIN_GATED_POINTS)
+    feat.CURVATURE_MIN_STEP_PX, feat.CURVATURE_MIN_GATED_POINTS = gate, min_pts
+    try:
+        m = sorted(moves, key=lambda d: d["t"])[:300]
+        return feat._curvature_metrics([d["x"] for d in m], [d["y"] for d in m], [d["t"] for d in m])["curvature_score"]
+    finally:
+        feat.CURVATURE_MIN_STEP_PX, feat.CURVATURE_MIN_GATED_POINTS = old
 
 
 def main() -> None:
@@ -152,13 +142,20 @@ def main() -> None:
         summarize("İNSAN (SapiMouse 6 sn)", [curvature_parts(h, gate) for h in H])
         for name, lst in B.items():
             summarize(f"bot:{name}", [curvature_parts(b, gate) for b in lst])
-    print("\n=== Önerilen birleşik kural: skor ≥ 0.75 oranı ===")
-    for gate in (3.0, 4.0, 5.0, 6.0):
-        for min_pts in (5, 10):
-            hs = np.array([score_combined(h, gate, min_pts) for h in H])
-            line = f"eşik={gate:g}px min_nokta={min_pts:2d}  İNSAN {100 * (hs >= 0.75).mean():5.2f}%"
-            for name, lst in B.items():
-                bs = np.array([score_combined(b, gate, min_pts) for b in lst])
+    BI = bots(integer=True)
+    hs0 = np.array([score(curvature_parts(h, 0.0)) for h in H])
+    for label, bset in (("0,01 px (üretici)", B), ("tam sayı px (tarayıcı)", BI)):
+        print(f"\n=== Yalnızca eğrilik kuralı, skor ≥ 0.75 oranı; bot koordinatları: {label} ===")
+        line = f"eski kural        İNSAN {100 * (hs0 >= 0.75).mean():5.2f}%"
+        for name, lst in bset.items():
+            bs = np.array([score(curvature_parts(b, 0.0)) for b in lst])
+            line += f" | {name} {100 * (bs >= 0.75).mean():5.1f}%"
+        print(line)
+        for gate in (3.0, 5.0, 6.0):
+            hs = np.array([score_combined(h, gate, 10) for h in H])
+            line = f"yeni, eşik={gate:g}px   İNSAN {100 * (hs >= 0.75).mean():5.2f}%"
+            for name, lst in bset.items():
+                bs = np.array([score_combined(b, gate, 10) for b in lst])
                 line += f" | {name} {100 * (bs >= 0.75).mean():5.1f}%"
             print(line)
 
