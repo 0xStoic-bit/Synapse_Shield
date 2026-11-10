@@ -81,7 +81,7 @@ pub fn evaluate_curvature_naturalness(x: &[f64], y: &[f64], t: &[f64]) -> Curvat
     // 5. Moments over "moving" points only (v0.10.6). kappa = |v x a| / |v|^3 explodes when the cursor
     //    slows to a stop, and 1-px quantisation makes direction meaningless there. Real human pointing ends
     //    in slow homing/stops, so the ungated variance was huge for ~67% of real human windows
-    //    (SapiMouse replay). Keep only points whose two neighbouring steps are >= CURVATURE_MIN_STEP_PX.
+    //    in real recordings. Keep only points whose two neighbouring steps are >= CURVATURE_MIN_STEP_PX.
     //    The time between two kept points is the sum of the same dt_a steps the all-points statistic uses,
     //    so when every point is kept the gated moments equal the all-points moments exactly.
     let keep: Vec<bool> = (0..k_len)
@@ -133,8 +133,8 @@ pub fn evaluate_curvature_naturalness(x: &[f64], y: &[f64], t: &[f64]) -> Curvat
 }
 
 /// Minimum step (px) on both sides of a point for its curvature to count toward the "chaotic" checks.
-/// Chosen on real data (SapiMouse, 4,844 six-second windows): 5 px drops this rule's human false positives
-/// from 67% to 0.4% while Bézier/linear/minimum-jerk bot detection stays at 99-100%.
+/// Chosen by sweeping the threshold: 5 px removes almost all human stop artefacts while Bézier/linear/
+/// minimum-jerk bot detection is unaffected.
 pub const CURVATURE_MIN_STEP_PX: f64 = 5.0;
 /// Fewer moving points than this: the gated statistics are not used.
 pub const CURVATURE_MIN_GATED_POINTS: usize = 10;
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn stop_and_quantisation_artefacts_are_not_chaotic_curvature() {
         // Regression (v0.10.6): kappa explodes near zero speed; real humans were flagged 0.85 in ~67% of
-        // SapiMouse windows. Ungated variance is still huge here; the verdict must not be "chaotic".
+        // real human recordings. Ungated variance is still huge here; the verdict must not be "chaotic".
         let mut rng = Rng(7);
         for _ in 0..20 {
             let (x, y, t) = quantised_human_like(&mut rng);

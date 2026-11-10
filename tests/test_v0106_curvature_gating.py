@@ -1,7 +1,7 @@
 """v0.10.6: the "chaotic curvature" check must ignore stop/quantisation artefacts.
 
 kappa = |v x a| / |v|^3 explodes as the cursor slows to a stop; real human pointing ends in slow homing,
-so the ungated variance flagged ~67% of real human windows (SapiMouse replay, research/human_sim).
+so the ungated variance flagged most real human pointing sessions.
 """
 
 import math
@@ -30,7 +30,7 @@ def _human_like_moves(rnd: random.Random) -> list[dict]:
     """What the SDK sends for real human pointing: a curved, decelerating aimed movement (1-px quantised,
     30 ms throttled) that stops near the target, then a few 1-px corrections after 150-550 ms pauses.
     The browser emits nothing while the cursor rests, so each correction is a tiny step over a long gap:
-    |v| is near zero there and kappa = |v x a| / |v|^3 reaches 30-100 (pattern measured on SapiMouse)."""
+    |v| is near zero there and kappa = |v x a| / |v|^3 reaches 30-100 (pattern seen in real recordings)."""
     moves = []
     t = 1000.0
     x0, y0 = 100.0, 200.0

@@ -43,8 +43,8 @@ def evaluate_curvature_zerocopy(x: Any, y: Any, t: Any) -> dict[str, float]:
 
 # Minimum step (px) on both sides of a point for its curvature to count toward the "chaotic" checks (v0.10.6).
 # kappa = |v x a| / |v|^3 explodes as the cursor slows to a stop, and 1-px quantisation makes direction
-# meaningless there. Chosen on real data (SapiMouse, 4,844 six-second windows): 5 px drops this rule's human
-# false positives from 67% to 0.4% while Bezier/linear/minimum-jerk bot detection stays at 99-100%.
+# meaningless there. Chosen by sweeping the threshold: 5 px removes almost all human stop artefacts
+# while Bezier/linear/minimum-jerk bot detection is unaffected.
 CURVATURE_MIN_STEP_PX = 5.0
 # Fewer moving points than this: the gated statistics are not used.
 CURVATURE_MIN_GATED_POINTS = 10
