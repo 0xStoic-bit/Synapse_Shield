@@ -36,50 +36,86 @@ def evaluate_curvature_zerocopy(x: Any, y: Any, t: Any) -> dict[str, float]:
 
     # NumPy fallback
     try:
-        x_arr = np.asarray(x, dtype=np.float64)
-        y_arr = np.asarray(y, dtype=np.float64)
-        t_arr = np.asarray(t, dtype=np.float64)
-        n = min(len(x_arr), len(y_arr), len(t_arr))
-        if n < 4:
-            return {"curvature_score": 0.0, "mean_curvature": 0.0, "curvature_var": 0.0, "curvature_rate_var": 0.0}
-
-        dt = np.maximum(np.diff(t_arr[:n]), 0.1)
-        vx = np.diff(x_arr[:n]) / dt
-        vy = np.diff(y_arr[:n]) / dt
-
-        dt_a = (dt[1:] + dt[:-1]) * 0.5
-        ax = np.diff(vx) / np.maximum(dt_a, 0.1)
-        ay = np.diff(vy) / np.maximum(dt_a, 0.1)
-
-        vx_s = vx[1:]
-        vy_s = vy[1:]
-
-        num = np.abs(vx_s * ay - vy_s * ax)
-        v_sq = vx_s**2 + vy_s**2 + 1e-6
-        denom = v_sq * np.sqrt(v_sq)
-        kappa = num / denom
-
-        mean_k = float(np.mean(kappa))
-        var_k = float(np.var(kappa))
-        d_k = np.diff(kappa) / np.maximum(dt_a[1:], 0.1) if len(kappa) > 1 else np.array([0.0])
-        var_dk = float(np.var(d_k)) if len(d_k) > 0 else 0.0
-
-        score = 0.10
-        if mean_k < 1e-6 and var_k < 1e-7:
-            score = 0.95
-        elif var_dk < 1e-8 and var_k < 1e-4:
-            score = 0.90
-        elif var_dk > 5.0 or var_k > 10.0:
-            score = 0.85
-
-        return {
-            "curvature_score": score,
-            "mean_curvature": mean_k,
-            "curvature_var": var_k,
-            "curvature_rate_var": var_dk,
-        }
+        return _curvature_metrics(x, y, t)
     except Exception:
         return {"curvature_score": 0.0, "mean_curvature": 0.0, "curvature_var": 0.0, "curvature_rate_var": 0.0}
+
+
+# Minimum step (px) on both sides of a point for its curvature to count toward the "chaotic" checks (v0.10.6).
+# kappa = |v x a| / |v|^3 explodes as the cursor slows to a stop, and 1-px quantisation makes direction
+# meaningless there. Chosen on real data (SapiMouse, 4,844 six-second windows): 5 px drops this rule's human
+# false positives from 67% to 0.4% while Bezier/linear/minimum-jerk bot detection stays at 99-100%.
+CURVATURE_MIN_STEP_PX = 5.0
+# Fewer moving points than this: the gated statistics are not used.
+CURVATURE_MIN_GATED_POINTS = 10
+
+
+def _kappa_moments(kappa: np.ndarray, dts: np.ndarray) -> tuple[float, float, float, float]:
+    """(mean, var, var of dkappa/dt, fraction of kappa > 0.1); dts[i-1] is the time between kappa[i-1] and kappa[i]."""
+    mean_k = float(np.mean(kappa))
+    var_k = float(np.var(kappa))
+    if len(kappa) > 1:
+        d_k = np.diff(kappa) / np.maximum(dts[: len(kappa) - 1], 0.1)
+        var_dk = float(np.var(d_k))
+    else:
+        var_dk = 0.0
+    return mean_k, var_k, var_dk, float(np.mean(kappa > 0.1))
+
+
+def _curvature_metrics(x: Any, y: Any, t: Any) -> dict[str, float]:
+    """Differential curvature naturalness; mirrors crates/synapse_core_rs/src/curvature.rs exactly."""
+    x_arr = np.asarray(x, dtype=np.float64)
+    y_arr = np.asarray(y, dtype=np.float64)
+    t_arr = np.asarray(t, dtype=np.float64)
+    n = min(len(x_arr), len(y_arr), len(t_arr))
+    if n < 4:
+        return {"curvature_score": 0.0, "mean_curvature": 0.0, "curvature_var": 0.0, "curvature_rate_var": 0.0}
+    x_arr, y_arr, t_arr = x_arr[:n], y_arr[:n], t_arr[:n]
+
+    dt = np.maximum(np.diff(t_arr), 0.1)
+    dx, dy = np.diff(x_arr), np.diff(y_arr)
+    vx = dx / dt
+    vy = dy / dt
+
+    dt_a = (dt[1:] + dt[:-1]) * 0.5
+    ax = np.diff(vx) / dt_a
+    ay = np.diff(vy) / dt_a
+
+    vx_s = vx[1:]
+    vy_s = vy[1:]
+    num = np.abs(vx_s * ay - vy_s * ax)
+    v_sq = vx_s**2 + vy_s**2 + 1e-6
+    kappa = num / (v_sq * np.sqrt(v_sq))
+
+    candidates = [_kappa_moments(kappa, dt_a[1:])]
+    mean_k, var_k, var_dk, _ = candidates[0]
+
+    # Moments over "moving" points only: both neighbouring steps >= CURVATURE_MIN_STEP_PX.
+    step = np.hypot(dx, dy)
+    keep = (step[:-1] >= CURVATURE_MIN_STEP_PX) & (step[1:] >= CURVATURE_MIN_STEP_PX)
+    gated = None
+    if int(keep.sum()) >= CURVATURE_MIN_GATED_POINTS:
+        t_kept = t_arr[2:][keep]
+        gated = _kappa_moments(kappa[keep], np.diff(t_kept))
+        candidates.append(gated)
+
+    if any(m < 1e-6 and v < 1e-7 for m, v, _, _ in candidates):
+        score = 0.95  # straight line bot
+    elif any(dv < 1e-8 and v < 1e-4 for _, v, dv, _ in candidates):
+        score = 0.90  # analytic Bezier / polynomial / minimum-jerk curve
+    elif gated is not None and (gated[2] > 5.0 or gated[1] > 10.0):
+        score = 0.85  # chaotic curvature while actually moving
+    elif gated is not None and gated[3] > 0.5 and gated[2] > 2.0:
+        score = 0.75
+    else:
+        score = 0.10
+
+    return {
+        "curvature_score": score,
+        "mean_curvature": mean_k,
+        "curvature_var": var_k,
+        "curvature_rate_var": var_dk,
+    }
 
 
 def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> dict[str, Any]:
@@ -525,64 +561,11 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
 
             # 4.2 Diferansiyel Eğrilik Analizi (κ(t) - AI & Bézier Bot Avcısı v0.9.2)
             if len(movements) >= 4:
-                n_m = len(movements)
-                vx_c, vy_c, dt_vc = [], [], []
-                for i in range(1, n_m):
-                    dt_c = max(0.1, movements[i]["t"] - movements[i - 1]["t"])
-                    dt_vc.append(dt_c)
-                    vx_c.append((movements[i]["x"] - movements[i - 1]["x"]) / dt_c)
-                    vy_c.append((movements[i]["y"] - movements[i - 1]["y"]) / dt_c)
-
-                dt_ac, ax_c, ay_c = [], [], []
-                for i in range(1, len(vx_c)):
-                    dta = (dt_vc[i] + dt_vc[i - 1]) * 0.5
-                    dt_ac.append(dta)
-                    ax_c.append((vx_c[i] - vx_c[i - 1]) / max(0.1, dta))
-                    ay_c.append((vy_c[i] - vy_c[i - 1]) / max(0.1, dta))
-
-                kappas = []
-                for i in range(len(ax_c)):
-                    vxs = vx_c[i + 1]
-                    vys = vy_c[i + 1]
-                    num = abs(vxs * ay_c[i] - vys * ax_c[i])
-                    denom = (vxs * vxs + vys * vys + 1e-6) ** 1.5
-                    kappas.append(num / denom)
-
-                if kappas:
-                    k_len = len(kappas)
-                    mean_k = sum(kappas) / k_len
-                    var_k = sum((k - mean_k) ** 2 for k in kappas) / k_len
-
-                    d_kappas = []
-                    for i in range(1, k_len):
-                        dt_k = max(0.1, dt_ac[i])
-                        d_kappas.append((kappas[i] - kappas[i - 1]) / dt_k)
-
-                    if d_kappas:
-                        dk_len = len(d_kappas)
-                        mean_dk = sum(d_kappas) / dk_len
-                        var_dk = sum((dk - mean_dk) ** 2 for dk in d_kappas) / dk_len
-                    else:
-                        var_dk = 0.0
-
-                    c_score = 0.10
-                    if mean_k < 1e-6 and var_k < 1e-7:
-                        c_score = 0.95
-                    elif var_dk < 1e-8 and var_k < 1e-4:
-                        c_score = 0.90
-                    elif var_dk > 5.0 or var_k > 10.0:
-                        c_score = 0.85
-                    else:
-                        high_peaks = sum(1 for k in kappas if k > 0.1)
-                        if high_peaks > (k_len // 2) and var_dk > 2.0:
-                            c_score = 0.75
-                        else:
-                            c_score = 0.10
-
-                    features["curvature_score"] = c_score
-                    features["mean_curvature"] = mean_k
-                    features["curvature_var"] = var_k
-                    features["curvature_rate_var"] = var_dk
+                features.update(
+                    _curvature_metrics(
+                        [m["x"] for m in movements], [m["y"] for m in movements], [m["t"] for m in movements]
+                    )
+                )
 
             distances, dts, velocities = [], [], []
             start_x, start_y = movements[0]["x"], movements[0]["y"]

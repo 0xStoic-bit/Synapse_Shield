@@ -75,58 +75,101 @@ pub fn evaluate_curvature_naturalness(x: &[f64], y: &[f64], t: &[f64]) -> Curvat
         compute_curvature_scalar(vx_slice, vy_slice, &ax, &ay, &mut kappa);
     }
 
-    // 4. Rate of change of curvature: d_kappa / dt
-    let mut d_kappa = Vec::with_capacity(k_len.saturating_sub(1));
-    for i in 1..k_len {
-        let dt = dt_a[i].max(0.1);
-        d_kappa.push((kappa[i] - kappa[i - 1]) / dt);
+    // 4. Moments over every point (reported metrics, unchanged semantics).
+    let all = kappa_moments(&kappa, &dt_a[1..]);
+
+    // 5. Moments over "moving" points only (v0.10.6). kappa = |v x a| / |v|^3 explodes when the cursor
+    //    slows to a stop, and 1-px quantisation makes direction meaningless there. Real human pointing ends
+    //    in slow homing/stops, so the ungated variance was huge for ~67% of real human windows
+    //    (SapiMouse replay). Keep only points whose two neighbouring steps are >= CURVATURE_MIN_STEP_PX.
+    let mut gated_k = Vec::with_capacity(k_len);
+    let mut gated_dt = Vec::with_capacity(k_len);
+    let mut last_t: Option<f64> = None;
+    for i in 0..k_len {
+        let s0 = (x[i + 1] - x[i]).hypot(y[i + 1] - y[i]);
+        let s1 = (x[i + 2] - x[i + 1]).hypot(y[i + 2] - y[i + 1]);
+        if s0 >= CURVATURE_MIN_STEP_PX && s1 >= CURVATURE_MIN_STEP_PX {
+            if let Some(lt) = last_t {
+                gated_dt.push(t[i + 2] - lt);
+            }
+            last_t = Some(t[i + 2]);
+            gated_k.push(kappa[i]);
+        }
     }
-
-    // 5. Statistical moments
-    let kappa_count = kappa.len() as f64;
-    let mean_kappa: f64 = kappa.iter().sum::<f64>() / kappa_count;
-    let var_kappa: f64 = kappa.iter().map(|&k| (k - mean_kappa).powi(2)).sum::<f64>() / kappa_count;
-
-    let var_d_kappa: f64 = if !d_kappa.is_empty() {
-        let d_count = d_kappa.len() as f64;
-        let d_mean: f64 = d_kappa.iter().sum::<f64>() / d_count;
-        d_kappa.iter().map(|&dk| (dk - d_mean).powi(2)).sum::<f64>() / d_count
+    let gated = if gated_k.len() >= CURVATURE_MIN_GATED_POINTS {
+        Some(kappa_moments(&gated_k, &gated_dt))
     } else {
-        0.0
+        None
     };
 
     // 6. Bot vs Human Classification Score (0.0 = human, 1.0 = bot)
-    // - Synthetic Bézier: rate of curvature variance is analytically smooth (< 1e-6)
-    // - Synthetic Gaussian Noise: independent per-point jitter causes variance explosion (> 2.0)
-    // - Natural Human: bounded biological tremor (typically 1e-4 .. 0.5) with physiological damping
-    let score: f64;
-
-    if mean_kappa < 1e-6 && var_kappa < 1e-7 {
+    // - Straight line / analytic Bézier / minimum-jerk: curvature (rate) is analytically smooth. Checked on
+    //   all points OR on moving points (the stop artefacts at the ends hid minimum-jerk bots before).
+    // - Chaotic curvature: only judged on moving points, where it is not a stop/quantisation artefact.
+    let candidates = [Some(all), gated];
+    let score = if candidates.iter().flatten().any(|m| m.mean < 1e-6 && m.var < 1e-7) {
         // Straight line bot
-        score = 0.95;
-    } else if var_d_kappa < 1e-8 && var_kappa < 1e-4 {
+        0.95
+    } else if candidates.iter().flatten().any(|m| m.rate_var < 1e-8 && m.var < 1e-4) {
         // Unnaturally smooth polynomial / Bézier curve without neuromuscular submovements
-        score = 0.90;
-    } else if var_d_kappa > 5.0 || var_kappa > 10.0 {
-        // Unphysical artificial noise / discrete Gaussian jitter
-        score = 0.85;
-    } else {
-        // Check curvature distribution: biological curves show log-normal or localized peaks
-        let high_peak_count = kappa.iter().filter(|&&k| k > 0.1).count();
-        if high_peak_count > (k_len / 2) && var_d_kappa > 2.0 {
-            score = 0.75;
+        0.90
+    } else if let Some(g) = gated {
+        if g.rate_var > 5.0 || g.var > 10.0 {
+            // Unphysical artificial noise / discrete jitter while moving
+            0.85
+        } else if g.high_peak_frac > 0.5 && g.rate_var > 2.0 {
+            0.75
         } else {
             // Natural human motion with neuromuscular damping
-            score = 0.10;
+            0.10
         }
-    }
+    } else {
+        0.10
+    };
 
     CurvatureMetrics {
-        mean_curvature: mean_kappa,
-        curvature_var: var_kappa,
-        curvature_rate_var: var_d_kappa,
-        curvature_score: score.clamp(0.0, 1.0),
+        mean_curvature: all.mean,
+        curvature_var: all.var,
+        curvature_rate_var: all.rate_var,
+        curvature_score: score,
     }
+}
+
+/// Minimum step (px) on both sides of a point for its curvature to count toward the "chaotic" checks.
+/// Chosen on real data (SapiMouse, 4,844 six-second windows): 5 px drops this rule's human false positives
+/// from 67% to 0.4% while Bézier/linear/minimum-jerk bot detection stays at 99-100%.
+pub const CURVATURE_MIN_STEP_PX: f64 = 5.0;
+/// Fewer moving points than this: the gated statistics are not used.
+pub const CURVATURE_MIN_GATED_POINTS: usize = 10;
+
+#[derive(Debug, Clone, Copy)]
+struct KappaMoments {
+    mean: f64,
+    var: f64,
+    rate_var: f64,
+    high_peak_frac: f64,
+}
+
+/// Mean/variance of kappa and variance of d(kappa)/dt; `dts[i - 1]` is the time between `kappa[i - 1]`
+/// and `kappa[i]`.
+fn kappa_moments(kappa: &[f64], dts: &[f64]) -> KappaMoments {
+    let n = kappa.len() as f64;
+    let mean = kappa.iter().sum::<f64>() / n;
+    let var = kappa.iter().map(|&k| (k - mean).powi(2)).sum::<f64>() / n;
+    let mut d = Vec::with_capacity(kappa.len().saturating_sub(1));
+    for i in 1..kappa.len() {
+        let dt = dts[i - 1].max(0.1);
+        d.push((kappa[i] - kappa[i - 1]) / dt);
+    }
+    let rate_var = if d.is_empty() {
+        0.0
+    } else {
+        let dn = d.len() as f64;
+        let dm = d.iter().sum::<f64>() / dn;
+        d.iter().map(|&v| (v - dm).powi(2)).sum::<f64>() / dn
+    };
+    let high_peak_frac = kappa.iter().filter(|&&k| k > 0.1).count() as f64 / n;
+    KappaMoments { mean, var, rate_var, high_peak_frac }
 }
 
 /// Raw pointer implementation for Zero-Copy AVX2 execution directly from Python buffer.
@@ -294,6 +337,68 @@ mod tests {
         let t: Vec<f64> = (0..80).map(|i| i as f64 * 8.0).collect();
         let m = evaluate_curvature_naturalness(&x, &y, &t);
         assert!(m.curvature_score >= 0.75, "per-point jitter scored {}", m.curvature_score);
+    }
+
+    /// Aimed movement as the browser reports it: curved, minimum-jerk speed profile (slow at both ends),
+    /// 1-px quantised, followed by sub-pixel homing jitter while the cursor settles on the target.
+    fn quantised_human_like(rng: &mut Rng) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let (mut x, mut y, mut t) = (Vec::new(), Vec::new(), Vec::new());
+        let n = 40;
+        for i in 0..n {
+            let u = i as f64 / (n - 1) as f64;
+            let s = 10.0 * u.powi(3) - 15.0 * u.powi(4) + 6.0 * u.powi(5);
+            let px = 100.0 + 500.0 * s;
+            let py = 200.0 + 300.0 * s + 60.0 * (std::f64::consts::PI * s).sin() + rng.range(-1.5, 1.5);
+            x.push(px.round());
+            y.push(py.round());
+            t.push(i as f64 * 30.0);
+        }
+        let (lx, ly, lt) = (*x.last().unwrap(), *y.last().unwrap(), *t.last().unwrap());
+        for j in 1..15 {
+            x.push(lx + rng.range(-1.0, 1.0).round());
+            y.push(ly + rng.range(-1.0, 1.0).round());
+            t.push(lt + j as f64 * 30.0);
+        }
+        (x, y, t)
+    }
+
+    #[test]
+    fn stop_and_quantisation_artefacts_are_not_chaotic_curvature() {
+        // Regression (v0.10.6): kappa explodes near zero speed; real humans were flagged 0.85 in ~67% of
+        // SapiMouse windows. Ungated variance is still huge here; the verdict must not be "chaotic".
+        let mut rng = Rng(7);
+        for _ in 0..20 {
+            let (x, y, t) = quantised_human_like(&mut rng);
+            let m = evaluate_curvature_naturalness(&x, &y, &t);
+            assert!(m.curvature_score < 0.75, "human-like path scored {} (var {})", m.curvature_score, m.curvature_var);
+        }
+    }
+
+    #[test]
+    fn minimum_jerk_with_resting_ends_is_flagged_as_synthetic() {
+        // Analytic minimum-jerk curve: speed is ~0 at both ends, which used to inflate the variance and hide it.
+        let n = 50;
+        let (mut x, mut y, mut t) = (Vec::new(), Vec::new(), Vec::new());
+        for i in 0..n {
+            let u = i as f64 / (n - 1) as f64;
+            let s = 10.0 * u.powi(3) - 15.0 * u.powi(4) + 6.0 * u.powi(5);
+            x.push(100.0 + 600.0 * s);
+            y.push(100.0 + 350.0 * s);
+            t.push(i as f64 * 25.0);
+        }
+        let m = evaluate_curvature_naturalness(&x, &y, &t);
+        assert!(m.curvature_score >= 0.90, "minimum-jerk bot scored {}", m.curvature_score);
+    }
+
+    #[test]
+    fn too_few_moving_points_gives_no_chaos_verdict() {
+        // Only sub-5-px steps (a cursor nudged around a spot): the chaos checks have no reliable input.
+        let mut rng = Rng(11);
+        let x: Vec<f64> = (0..30).map(|_| (300.0 + rng.range(-2.0, 2.0)).round()).collect();
+        let y: Vec<f64> = (0..30).map(|_| (300.0 + rng.range(-2.0, 2.0)).round()).collect();
+        let t: Vec<f64> = (0..30).map(|i| i as f64 * 30.0).collect();
+        let m = evaluate_curvature_naturalness(&x, &y, &t);
+        assert!(m.curvature_score < 0.75, "jiggle scored {}", m.curvature_score);
     }
 
     #[test]
