@@ -48,6 +48,27 @@ try:
         registry=registry,
     )
 
+    synapse_shadow_cohort_total = Counter(
+        "synapse_shadow_cohort_total",
+        "Shadow Mode verdicts per coarse input cohort (input class x devicePixelRatio bucket)",
+        ["action", "input", "dpr"],
+        registry=registry,
+    )
+
+    synapse_shadow_rules_total = Counter(
+        "synapse_shadow_rules_total",
+        "Rules behind Shadow Mode block verdicts, per coarse input cohort (stable rule codes)",
+        ["input", "dpr", "rule"],
+        registry=registry,
+    )
+
+    synapse_shadow_outcomes_total = Counter(
+        "synapse_shadow_outcomes_total",
+        "Host-reported session outcomes joined with the Shadow Mode verdict and cohort (no traces stored)",
+        ["simulated_action", "input", "dpr", "outcome"],
+        registry=registry,
+    )
+
     METRICS_ENABLED = True
 except ImportError:
     METRICS_ENABLED = False
@@ -57,3 +78,6 @@ except ImportError:
     synapse_active_bans = None
     synapse_pow_solved_total = None
     synapse_shadow_requests_total = None
+    synapse_shadow_cohort_total = None
+    synapse_shadow_outcomes_total = None
+    synapse_shadow_rules_total = None

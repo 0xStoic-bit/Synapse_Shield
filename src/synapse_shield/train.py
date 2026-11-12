@@ -75,6 +75,10 @@ def load_training_data(
                     continue
                 try:
                     telemetry = json.loads(telemetry_json)
+                    if not isinstance(telemetry, dict) or not any(
+                        telemetry.get(k) for k in ("mouse_movements", "keystrokes", "clicks", "scrolls")
+                    ):
+                        continue  # raw traces are not stored by default (SYNAPSE_STORE_RAW_TELEMETRY)
                     reasons = json.loads(reasons_json) if reasons_json else []
 
                     # Model Zehirleme Koruması (Anti-Poisoning Filter):

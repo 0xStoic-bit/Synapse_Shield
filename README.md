@@ -21,7 +21,7 @@
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v0106) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v0107) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
 
 </div>
 
@@ -35,10 +35,12 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.10.6)
+## ✨ Key Features & Security Architecture (v0.10.7)
 
 | Feature | Description |
 | :--- | :--- |
+| 🔭 **Shadow Cohorts, Rule Codes & Offline Replay (v0.10.7)** | Per-cohort Shadow Mode counters (input class × devicePixelRatio) with stable rule codes (`SynapseDecision.rule_codes`), `report_shadow_outcome()` to learn whether enforcement would have blocked real users, ready-made Grafana + Prometheus alert assets (`deploy/monitoring/`), and `synapse-shield replay` to measure false-positive / detection rate on your own recordings offline. Stutter and fast-typing rules were recalibrated on real human data (real 20 s windows blocked 2.7% → 0.5%; bot detection unchanged). |
+| 🧾 **Honest Tooling & API Contract (v0.10.7)** | `synapse-shield test` / `redteam` exit non-zero when the server is unreachable or a verdict is wrong (no more "all passed" with no server); the human controls use fresh timestamps; `doctor` works on a bare install; `POST /api/score` returns a `decision` (`allow` / `block` / `challenge` / `error`) on every branch; Prometheus exposition on `/metrics/prometheus`; raw traces are **not** stored unless `SYNAPSE_STORE_RAW_TELEMETRY=1`. |
 | 🔬 **Curvature Gating & False-Positive Fixes** | Fixes discrete quantization stopping artifacts in differential curvature $\kappa(t)$: the "chaotic curvature" check now only uses points where the cursor is actually moving (both neighbouring steps ≥ 5 px), so real humans slowing to a stop near a target are no longer flagged. Unified positive lower bound on keystroke frequency (`0 < key_interval_avg < 25ms`) across rules, Brave shields, and threat classification, preventing rollover-typing false positives. Mobile tap isolation (`and not is_touch` on polynomial acceleration rule 4.C). (v0.10.6) |
 | 🛡️ **Zero-PII Keystroke Shield & SPA Lifecycle** | Universal client-side masking of every printed character — only keys on a closed allow-list of UI Events control keys (`Enter`, `ArrowLeft`, `Unidentified`, `F1`–`F24`, …) are sent by name, so emoji, ligature keys (`لا`), combining sequences, Turkish `İ` and whole words delivered by word completion or IME (`Mustafa`) are masked too — and of sensitive fields alongside client-side linguistic digraph scoring (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR Art. 5(1)(c) & KVKK Art. 4 compliance across Vanilla JS, React, and Vue). Single-use token lifecycle invalidation preventing 403 replay loops in SPAs. Dynamic cryptographically signed PoW difficulty (`salt.ts.diff.sig`), telemetry window shifting on PoW retry to prevent zero-event 403 blocks, CIDR trusted reverse proxy resolution (`10.0.0.0/8`, `172.16.0.0/12`), CGNAT User-Agent session isolation, and desktop IME dwell bypass prevention (v0.10.4). |
 | 🔐 **Client Network Binding & Token Relay Defense** | Cryptographic client device and network subnet binding (`nonce.ts.bind_hash.sig`). Defeats automated token relay and token harvesting farms by binding challenges to `/24` IPv4 and `/64` IPv6 subnets alongside case-normalized User-Agents with roaming tolerance. Includes thread-safe leak-free SQLite worker connection lifecycle management and the new `synapse-shield doctor` diagnostic audit CLI (v0.10.1). |
@@ -135,8 +137,10 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 ### Option 1: Install via PyPI
 
 ```bash
-pip install synapse-shield
+pip install "synapse-shield[server]"
 ```
+
+> The bare `pip install synapse-shield` installs only the scoring engine (NumPy). The `[server]` extra adds FastAPI + uvicorn, which `run`, `test` and the cockpit need. Framework adapters come with `[frameworks]` (Django, Flask, Sanic, Litestar), or install everything with `[all]`.
 
 Run the server and live cockpit directly from your terminal:
 
@@ -150,7 +154,7 @@ Run comprehensive system diagnostics & security health audit:
 synapse-shield doctor
 ```
 
-Run the automated 7-vector adversarial security test suite:
+Run the 9-vector adversarial test suite against the running server (start `run` first, in another terminal). It exits non-zero if any verdict is wrong or the server cannot be reached:
 
 ```bash
 synapse-shield test
@@ -159,7 +163,7 @@ synapse-shield test
 Retrain the 1D-CNN AI model autonomously on local SQLite telemetry (Active Learning):
 
 ```bash
-synapse-shield retrain --epochs 5 --lr 0.01
+synapse-shield retrain --epochs 5
 ```
 
 ### Option 2: Clone & Local Development
@@ -167,7 +171,7 @@ synapse-shield retrain --epochs 5 --lr 0.01
 ```bash
 git clone https://github.com/0xStoic-bit/Synapse_Shield.git
 cd Synapse_Shield
-pip install -e .
+pip install -e ".[all]" pytest httpx
 python test_suite.py
 ```
 
@@ -229,6 +233,8 @@ async def login(request: Request):
 ```
 
 > **`protected_paths` semantics (all adapters):** the middleware checks only state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`; a body-less `DELETE` sends its token in the `X-Synapse-Token` header) whose path starts with one of the listed prefixes. **If the list is empty or missing, every `POST`/`PUT`/`PATCH` route is protected.** This fail-safe default is the same in FastAPI, raw ASGI, Django, Flask, Sanic and Litestar. Up to v0.10.4, Flask, FastAPI and Django protected *nothing* when the list was empty, so list your paths explicitly if you relied on that.
+
+> **Calling `POST /api/score` yourself?** Branch on `decision` (`"allow"` / `"block"` / `"challenge"` / `"error"`), not on `status`. `status: "success"` only means the request was scored, and is returned for bots too.
 
 ### 2. Django & Flask Integration
 
@@ -389,14 +395,64 @@ Add the lightweight SDK (`<5 KB`) to your vanilla project:
 
 ### 9. Prometheus Metrics
 
-Enterprise observability out of the box. Automatically exposes latency and block rates.
+Install `pip install "synapse-shield[metrics]"`. The server exposes the Prometheus exposition format on `GET /metrics/prometheus`
+(and on `GET /metrics` when the scraper sends `Accept: text/plain` / OpenMetrics, which Prometheus does; a plain request keeps the JSON
+Rust-state view). Both are admin-protected: send `Authorization: Bearer $SYNAPSE_ADMIN_SECRET` (Prometheus `authorization:` scrape config).
 To enable multi-process support (e.g., Gunicorn workers), set the environment variable:
 
 ```bash
 export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 ```
 
+### Raw telemetry storage
+
+By default the server stores **no raw traces**: a log row keeps the verdict, reasons and the aggregate feature vector, with an empty
+`telemetry` column. Set `SYNAPSE_STORE_RAW_TELEMETRY=1` to keep full traces (mouse coordinates and timings; typed characters are
+always masked) so `synapse-shield retrain` can learn from your own traffic. Without it, use `retrain --bootstrap`.
+
 ---
+
+## 🔬 Shadow Mode: per-cohort false-positive monitoring
+
+A single global block rate can hide one broken group (touch, high-DPI, zoomed browsers). In `mode="shadow"` every
+behavioural verdict is also counted per coarse cohort, with no pointer traces stored:
+
+| Metric | Labels |
+|---|---|
+| `synapse_shadow_cohort_total` | `action` (`allow`/`block`), `input` (`touch`/`pointer`/`keyboard`/`none`), `dpr` (`lt1`/`1x`/`1.25-1.9x`/`2x+`/`unknown`) |
+| `synapse_shadow_outcomes_total` | `simulated_action`, `input`, `dpr`, `outcome` (`completed`/`abandoned`) |
+| `synapse_shadow_rules_total` | `input`, `dpr`, `rule` (stable rule code such as `stutter`, `curvature`, `keystroke_superhuman`) |
+
+`pointer` covers mouse and trackpad (they cannot be told apart reliably); `dpr` also separates zoomed sessions.
+To learn whether enforcing would have blocked real users, report what happened to the session from your own code:
+
+```python
+from synapse_shield import evaluate_synapse_request_sync, report_shadow_outcome
+
+decision = evaluate_synapse_request_sync(ip, ua, token, mode="shadow")
+# ... later, once your app knows the outcome (e.g. the login succeeded):
+report_shadow_outcome(decision, completed=True)
+```
+
+A high `simulated_action="block"` x `outcome="completed"` count in one cohort means enforcement would hurt real
+users there, even if the global rate looks fine.
+
+`SynapseDecision.rule_codes` (and `to_dict()["rule_codes"]`) list the same codes per verdict, so a log line can say *which*
+rule would have blocked.
+
+**Ready-made monitoring** (`deploy/monitoring/`): `grafana-shadow-cohorts.json` (would-block rate per cohort,
+completed-but-would-block, top rules, rule x cohort) and `shadow-alerts.yml` (Prometheus rules that compare cohorts
+with each other and require at least 200 sessions before firing). The PromQL is checked against the metric and
+label names in CI, but not executed; load it in a test Prometheus first.
+
+**Replay your own recordings offline** (no server, no token, no network):
+
+```bash
+synapse-shield replay ./recordings --label human   # false-positive rate, rules and cohorts behind the blocks
+synapse-shield replay ./bots.jsonl --label bot     # detection rate
+```
+
+Input is `.json` / `.jsonl` telemetry (the SDK payload, or an object with a `telemetry` key).
 
 ## 🧪 Testing
 
@@ -445,17 +501,17 @@ Run the full adversarial suite anytime:
 synapse-shield test
 ```
 
-Measured on 2026-11-06 (v0.10.5). Reproduce with `python scripts/measure_readme_benchmarks.py`, which needs no server and sends nothing off the machine. Decision and risk come from a real `POST /api/score`. Latency is the median engine time (`analyze_behavior`) over 200 runs.
+Measured on 2026-11-12 (v0.10.7). Reproduce with `python scripts/measure_readme_benchmarks.py`, which needs no server and sends nothing off the machine. Decision and risk come from a real `POST /api/score`. Latency is the median engine time (`analyze_behavior`) over 200 runs.
 
 | Attack Vector          | Simulated Signature                     | Detection Mechanism                              | Decision                 | Risk Score  | Latency |
 | ---------------------- | --------------------------------------- | ------------------------------------------------ | ------------------------ | ----------- | ------- |
-| **Selenium Crawler**   | `navigator.webdriver = true`            | WebDriver API detection                          | 🔴 BLOCK                 | 100.0%      | 0.13 ms |
-| **Linear Bot**         | Straightness = 1.000 & zero jerk        | Straightness + velocity variance                 | 🔴 BLOCK                 | 100.0%      | 0.20 ms |
-| **Bézier Stealth Bot** | Quadratic Bézier, fixed 20 ms timer     | Fixed-interval timer + synthetic tremor          | 🔴 BLOCK                 | 100.0%      | 0.22 ms |
-| **Robotic Auto-Typer** | Fixed 50 ms key injections, no mouse    | Keystroke biometrics + missing mouse telemetry   | 🔴 BLOCK                 | 100.0%      | 0.20 ms |
-| **Burst Flooder**      | 8 human-looking requests in ~315 ms     | Poisson frequency score (suppressed for organic kinematics) | 🟡 FLAG only (0/8 blocked) | 25.0% | 0.20 ms |
+| **Selenium Crawler**   | `navigator.webdriver = true`            | WebDriver API detection                          | 🔴 BLOCK                 | 100.0%      | 0.12 ms |
+| **Linear Bot**         | Straightness = 1.000 & zero jerk        | Straightness + velocity variance                 | 🔴 BLOCK                 | 100.0%      | 0.24 ms |
+| **Bézier Stealth Bot** | Quadratic Bézier, fixed 20 ms timer     | Fixed-interval timer + synthetic tremor          | 🔴 BLOCK                 | 100.0%      | 0.23 ms |
+| **Robotic Auto-Typer** | Fixed 50 ms key injections, no mouse    | Keystroke biometrics + missing mouse telemetry   | 🔴 BLOCK                 | 100.0%      | 0.14 ms |
+| **Burst Flooder**      | 8 human-looking requests in ~330 ms     | Poisson frequency score (suppressed for organic kinematics) | 🟡 FLAG only (0/8 blocked) | 25.0% | 0.26 ms |
 | **Replay Attack**      | Re-sending a captured valid token       | Single-use HMAC nonce                            | 🔴 BLOCK                 | 100.0%      | —       |
-| **Natural Human**      | Ease-out curve, tremor, jittered timing | Biologic jerk & deceleration                     | 🟢 ALLOW (50/50 seeds)   | 0.0% (max)  | 0.32 ms |
+| **Natural Human**      | Ease-out curve, tremor, jittered timing | Biologic jerk & deceleration                     | 🟢 ALLOW (50/50 seeds)   | 0.0% (max)  | 0.54 ms |
 
 > **Burst flooding is not blocked on its own.** When the trajectories look organic, the Poisson frequency signal only raises the risk score. Hard blocking starts at the extreme-rate limit (`SYNAPSE_MAX_REQ_10S`, default 100 requests per 10 s, which leads to a 15-minute ban) or after 4 bot verdicts in 60 s. Earlier versions of this table listed this row as `BLOCK 60%`. That figure could not be reproduced: the bundled attack suite had been rejecting every request at the token-binding layer since v0.10.1, so the table did not reflect the biometric layers.
 

@@ -101,15 +101,33 @@ def check_cryptographic_engine() -> dict[str, Any]:
 
 
 def check_storage_wal() -> dict[str, Any]:
-    from synapse_shield.main import DB_FILE, get_connection
     from synapse_shield.storage import get_storage
 
+    server_missing = None
+    try:
+        from synapse_shield.main import DB_FILE, get_connection
+    except ImportError as e:
+        # A bare `pip install synapse-shield` has no FastAPI/uvicorn. Audit storage anyway
+        # instead of crashing the whole doctor run with a traceback.
+        import sqlite3
+
+        from synapse_shield.storage import DB_FILE
+
+        server_missing = getattr(e, "name", None) or str(e)
+
+        def get_connection():
+            return sqlite3.connect(DB_FILE, timeout=10)
+
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode;")
         row = cursor.fetchone()
         journal_mode = row[0].lower() if row else "unknown"
+        if server_missing:
+            conn.close()
+            conn = None
 
         storage = get_storage()
         test_nonce = f"doctor_audit_{int(time.time() * 1000)}"
@@ -118,11 +136,17 @@ def check_storage_wal() -> dict[str, Any]:
         replay_ok = c1 is True and c2 is False
 
         is_wal = journal_mode == "wal"
+        msg = f"SQLite DB ok ({DB_FILE}, journal: {journal_mode}, atomic nonce: ok)"
+        if server_missing:
+            msg += (
+                f" | Server extras missing ({server_missing}): "
+                "`synapse-shield run` needs pip install \"synapse-shield[server]\""
+            )
         return {
             "name": "Storage & WAL Replay Defense",
             "passed": replay_ok,
-            "warning": not is_wal,
-            "message": f"SQLite DB ok ({DB_FILE}, journal: {journal_mode}, atomic nonce: ok)",
+            "warning": (not is_wal) or bool(server_missing),
+            "message": msg,
         }
     except Exception as e:
         return {

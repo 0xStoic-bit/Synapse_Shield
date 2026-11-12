@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.10.6 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
+ * Synapse Shield SDK v0.10.7 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
  * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (Desktop + Mobile SDK v2.0)
  */
 

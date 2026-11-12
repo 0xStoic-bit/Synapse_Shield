@@ -25,9 +25,10 @@ def main():
     run_parser = subparsers.add_parser("run", help="Start the Synapse Shield server and cockpit")
     run_parser.add_argument("--host", default="0.0.0.0", help="Host address (default: 0.0.0.0)")
     run_parser.add_argument("--port", type=int, default=8000, help="Port number (default: 8000)")
+    run_parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload (recommended in production)")
 
     # Run Tests Command
-    subparsers.add_parser("test", help="Run the 7-vector Red Team bot attack simulator")
+    subparsers.add_parser("test", help="Run the 9-vector Red Team bot attack simulator against a running server")
 
     # Benchmark Latency & Throughput Command
     bench_parser = subparsers.add_parser(
@@ -65,6 +66,17 @@ def main():
     # Doctor Health Audit Command
     subparsers.add_parser("doctor", help="Run comprehensive system diagnostics & security health audit")
 
+    # Offline replay of recorded telemetry
+    replay_parser = subparsers.add_parser(
+        "replay", help="Replay recorded telemetry (.json/.jsonl, file or folder) and report what would be blocked"
+    )
+    replay_parser.add_argument("path", help="File or directory with telemetry objects")
+    replay_parser.add_argument(
+        "--label", choices=("human", "bot"), default=None, help="Ground truth: report FPR (human) or TPR (bot)"
+    )
+    replay_parser.add_argument("--threshold", type=float, default=50.0, help="Risk score that blocks (default: 50)")
+    replay_parser.add_argument("--json", action="store_true", help="Print the result as JSON")
+
     args = parser.parse_args()
 
     if args.command == "run" or args.command is None:
@@ -76,13 +88,18 @@ def main():
         except ImportError:
             print("❌ Uvicorn is required to run the cockpit server. Install via: pip install 'synapse-shield[server]'")
             sys.exit(1)
-        uvicorn.run("synapse_shield.main:app", host=host, port=port, reload=True)
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            print("❌ FastAPI is required to run the cockpit server. Install via: pip install 'synapse-shield[server]'")
+            sys.exit(1)
+        uvicorn.run("synapse_shield.main:app", host=host, port=port, reload=not getattr(args, "no_reload", False))
     elif args.command == "test":
         try:
             from .live_attacker import main as run_attack_suite
         except ImportError:
             from live_attacker import main as run_attack_suite
-        run_attack_suite()
+        sys.exit(run_attack_suite())
     elif args.command == "benchmark":
         try:
             from .benchmark import run_micro_benchmarks
@@ -97,14 +114,20 @@ def main():
         retrain_fc2(epochs=args.epochs, bootstrap=args.bootstrap, output_path=args.output)
     elif args.command == "redteam":
         import asyncio
+        from . import live_attacker
         from .redteam_plugin import SynapseRedTeamOrchestrator
+
+        if not live_attacker.server_reachable():
+            print(f"❌ Server unreachable: {live_attacker.CHALLENGE_URL}", file=sys.stderr)
+            print("   Start it first: synapse-shield run --port 8000", file=sys.stderr)
+            sys.exit(2)
 
         async def run_redteam():
             orchestrator = SynapseRedTeamOrchestrator()
             if args.category:
-                await orchestrator.run_category(args.category)
-            else:
-                await orchestrator.run_full_scenario()
+                return await orchestrator.run_category(args.category)
+            await orchestrator.run_full_scenario()
+            return None
 
         asyncio.run(run_redteam())
     elif args.command == "telemetry":
@@ -127,6 +150,18 @@ def main():
         except ImportError:
             from doctor import run_doctor
         sys.exit(run_doctor())
+    elif args.command == "replay":
+        import json
+
+        from .replay import format_report, load_telemetry, replay
+
+        try:
+            items = load_telemetry(args.path)
+        except (OSError, ValueError) as e:
+            print(f"❌ Could not read telemetry: {e}", file=sys.stderr)
+            sys.exit(2)
+        result = replay(items, threshold=args.threshold)
+        print(json.dumps(result, indent=2) if args.json else format_report(result, args.label))
 
 
 if __name__ == "__main__":

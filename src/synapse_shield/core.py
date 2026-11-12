@@ -16,7 +16,9 @@ import os
 import time
 from typing import Any
 
+from synapse_shield.cohort import OUTCOME_LABELS, cohort_of
 from synapse_shield.engine import analyze_behavior
+from synapse_shield.rules import rule_codes
 from synapse_shield.storage import get_storage
 from synapse_shield.tokens import SECRET_KEY, generate_pow_salt, verify_and_consume_pow, verify_and_consume_token
 
@@ -27,7 +29,10 @@ try:
         synapse_pow_solved_total,
         synapse_replays_detected_total,
         synapse_requests_total,
+        synapse_shadow_cohort_total,
+        synapse_shadow_outcomes_total,
         synapse_shadow_requests_total,
+        synapse_shadow_rules_total,
     )
 except ImportError:
     METRICS_ENABLED = False
@@ -36,6 +41,9 @@ except ImportError:
     synapse_replays_detected_total = None
     synapse_pow_solved_total = None
     synapse_shadow_requests_total = None
+    synapse_shadow_cohort_total = None
+    synapse_shadow_outcomes_total = None
+    synapse_shadow_rules_total = None
 
 MAX_PAYLOAD_SIZE = 262_144  # 256 KB
 # Methods that change state. DELETE has no body, so its token travels in the X-Synapse-Token header.
@@ -198,6 +206,8 @@ class SynapseDecision:
     shadow_mode: bool = False
     challenge_data: dict[str, Any] | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    cohort: dict[str, str] | None = None  # coarse {"input", "dpr"} labels; set for behavioural verdicts
+    rule_codes: tuple[str, ...] = ()  # stable codes of the rules behind a shadow block
 
     def to_dict(self) -> dict[str, Any]:
         """Convert decision to JSON-serializable dictionary."""
@@ -221,6 +231,10 @@ class SynapseDecision:
             if self.shadow_mode:
                 base["shadow_mode"] = True
                 base["simulated_action"] = "block" if self.action == "shadow_block" else "allow"
+                if self.cohort:
+                    base["cohort"] = self.cohort
+                if self.rule_codes:
+                    base["rule_codes"] = list(self.rule_codes)
                 if self.reasons:
                     base["reasons"] = self.reasons
             return base
@@ -231,6 +245,43 @@ class SynapseDecision:
             "bot_score": f"{self.bot_score}%",
             "reasons": self.reasons,
         }
+
+
+def _count_shadow_cohort(action: str, features: dict[str, Any] | None) -> dict[str, str]:
+    """Label a shadow verdict with its coarse input cohort and count it. Stores no trace data."""
+    cohort = cohort_of(features)
+    if METRICS_ENABLED and synapse_shadow_cohort_total is not None:
+        synapse_shadow_cohort_total.labels(action=action, input=cohort["input"], dpr=cohort["dpr"]).inc()
+    return cohort
+
+
+def _count_shadow_rules(cohort: dict[str, str], reasons: list[str]) -> tuple[str, ...]:
+    """Count which rules produced a shadow block, per cohort, so a broken rule shows up in one group."""
+    codes = rule_codes(reasons)
+    if METRICS_ENABLED and synapse_shadow_rules_total is not None:
+        for code in codes:
+            synapse_shadow_rules_total.labels(input=cohort["input"], dpr=cohort["dpr"], rule=code).inc()
+    return codes
+
+
+def report_shadow_outcome(decision: SynapseDecision, completed: bool) -> bool:
+    """Join a Shadow Mode verdict with what really happened to the session (host-supplied).
+
+    Call it when the host app knows the outcome (e.g. the login/checkout succeeded -> completed=True,
+    the user gave up -> False). Only the verdict and the two coarse cohort labels are used; no pointer
+    trace is read or kept. A high ``simulated_action=block`` x ``completed`` count in one cohort means
+    enforcing would have blocked real users there. Returns False when there is nothing to record.
+    """
+    if not decision.shadow_mode or decision.cohort is None:
+        return False
+    if METRICS_ENABLED and synapse_shadow_outcomes_total is not None:
+        synapse_shadow_outcomes_total.labels(
+            simulated_action="block" if decision.action == "shadow_block" else "allow",
+            input=decision.cohort["input"],
+            dpr=decision.cohort["dpr"],
+            outcome=OUTCOME_LABELS[0] if completed else OUTCOME_LABELS[1],
+        ).inc()
+    return True
 
 
 def evaluate_synapse_request_sync(
@@ -449,6 +500,8 @@ def evaluate_synapse_request_sync(
         if is_shadow:
             if METRICS_ENABLED and synapse_shadow_requests_total is not None:
                 synapse_shadow_requests_total.labels(action="block", classification=classification).inc()
+            cohort = _count_shadow_cohort("block", feat)
+            codes = _count_shadow_rules(cohort, reasons)
             return SynapseDecision(
                 allowed=True,
                 status_code=200,
@@ -462,6 +515,8 @@ def evaluate_synapse_request_sync(
                     "X-Synapse-Decision": "shadow-block",
                     "X-Synapse-Risk-Score": f"{bot_score:.1f}%",
                 },
+                cohort=cohort,
+                rule_codes=codes,
             )
 
         if METRICS_ENABLED and synapse_requests_total is not None:
@@ -483,9 +538,11 @@ def evaluate_synapse_request_sync(
         )
 
     # Legitimate Human
+    cohort = None
     if is_shadow:
         if METRICS_ENABLED and synapse_shadow_requests_total is not None:
             synapse_shadow_requests_total.labels(action="allow", classification=classification).inc()
+        cohort = _count_shadow_cohort("allow", feat)
     elif METRICS_ENABLED and synapse_requests_total is not None:
         synapse_requests_total.labels(status="allow", classification=classification).inc()
 
@@ -502,6 +559,7 @@ def evaluate_synapse_request_sync(
             "X-Synapse-Decision": "allow",
             "X-Synapse-Risk-Score": f"{bot_score:.1f}%",
         },
+        cohort=cohort,
     )
 
 

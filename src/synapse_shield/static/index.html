@@ -533,7 +533,7 @@
         </div>
       </div>
 
-      <!-- Threat Attribution Radar Bar (v0.10.6) -->
+      <!-- Threat Attribution Radar Bar (v0.10.7) -->
       <div id="threat-radar-bar" class="glass-panel p-3 rounded-lg flex flex-wrap items-center justify-between gap-2 font-mono text-xs border border-[#3b494b]/40">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-sm text-[#00f0ff]">radar</span>
@@ -1063,7 +1063,7 @@ app.add_middleware(
         }
       }
 
-      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.10.6)
+      // 4. Canlı Görsel Bot Simülasyon Arenası (v0.10.7)
       let isSimulating = false;
       let lastToken = null;
 
@@ -1387,7 +1387,7 @@ app.add_middleware(
             "material-symbols-outlined text-[#ffb4ab] text-3xl font-bold";
           icon.textContent = "block";
           title.className = "font-bold text-lg text-[#ffb4ab] tracking-tight";
-          title.textContent = "BOT DETECTED (BLOCK 403)";
+          title.textContent = "BOT DETECTED (decision: block)";
           conf.textContent = `Bot Güveni: %${data.bot_score || 100} | Anomali Bayrakları Tetiklendi`;
           speed.textContent = "0.14 ms P99";
         }
@@ -1428,13 +1428,21 @@ app.add_middleware(
 
       async function resetSecurityBans() {
         try {
-          const res = await fetch("/api/clear", { method: "POST" });
-          const data = await res.json();
-          fetchLogs();
+          const adminSecret = localStorage.getItem("synapse_admin_secret") || "";
+          const res = await fetch("/api/clear", {
+            method: "POST",
+            headers: { "X-Admin-Secret": adminSecret },
+          });
           const card = document.getElementById("decision-card");
           const icon = document.getElementById("decision-icon");
           const title = document.getElementById("decision-title");
           const conf = document.getElementById("decision-confidence");
+          if (!res.ok) {
+            title.textContent = `SIFIRLAMA BAŞARISIZ (HTTP ${res.status})`;
+            conf.textContent = "Yetkisiz: admin secret ayarlayın (veya yerel geliştirmede SYNAPSE_DEV_MODE=1).";
+            return;
+          }
+          fetchLogs();
           card.className = "flex items-center justify-between bg-[#1c2438] border border-[#00f0ff]/50 p-4 rounded-lg transition-all glow-cyan";
           icon.className = "material-symbols-outlined text-[#00f0ff] text-3xl font-bold";
           icon.textContent = "lock_open";

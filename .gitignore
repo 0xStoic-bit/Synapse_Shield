@@ -49,6 +49,7 @@ dump.rdb
 !package.json
 !tsconfig.json
 !sdk-tests/package-lock.json
+!deploy/monitoring/*.json
 sdk-tests/coverage/
 
 # Test Çıktıları ve Ekran Görüntüleri
@@ -137,3 +138,6 @@ CHANGELOG.md
 # Araştırma/ölçüm altyapısı ve dış veri setleri yalnızca yerelde tutulur
 research/
 data/external/
+
+# Günlük/dış inceleme raporları yalnızca yerelde tutulur (ör. 12.11.2026_today.md)
+*_today.md

@@ -25,6 +25,7 @@ from collections import OrderedDict
 from synapse_shield._version import __version__
 from synapse_shield.core import anonymize_ip, get_trusted_proxies, resolve_client_ip
 from synapse_shield.engine import analyze_behavior
+from synapse_shield import metrics as prom
 from synapse_shield.privacy import sanitize_keystrokes
 from synapse_shield.storage import get_storage
 from synapse_shield.tokens import (
@@ -303,6 +304,16 @@ def ban_ip(ip: str, minutes: int, reason: str):
     get_storage().ban_ip(ip, duration_sec=minutes * 60, reason=reason)
 
 
+def store_raw_telemetry_enabled() -> bool:
+    """Raw telemetry (mouse coordinates, timings) is NOT persisted unless explicitly opted in.
+
+    Default is zero-raw-storage: the log row keeps the verdict, reasons and the aggregate feature
+    vector only. Set SYNAPSE_STORE_RAW_TELEMETRY=1 to keep full traces for `retrain` (active
+    learning); `synapse-shield retrain --bootstrap` works without it.
+    """
+    return os.environ.get("SYNAPSE_STORE_RAW_TELEMETRY", "0").lower() in ("1", "true", "yes")
+
+
 def save_log(
     ip: str,
     user_agent: str,
@@ -331,7 +342,7 @@ def save_log(
             threat_type,
             json.dumps(reasons),
             json.dumps(features),
-            json.dumps(telemetry),
+            json.dumps(telemetry if store_raw_telemetry_enabled() else {}),
         ),
     )
     # Otomatik temizlik: sadece son 5000 logu tut
@@ -542,6 +553,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
                 status_code=400,
                 content={
                     "status": "token_expired",
+                    "decision": "error",
                     "code": "EXPIRED",
                     "error": "Token expired, please refresh challenge.",
                     "bot_score": 0.0,
@@ -555,10 +567,14 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
             threat_type = "TOKEN_RELAY_ATTACK"
         else:
             threat_type = "REPLAY_ATTACK"
+            if prom.METRICS_ENABLED and prom.synapse_replays_detected_total is not None:
+                prom.synapse_replays_detected_total.inc()
+        _count_request("block", "Bot")
         background_tasks.add_task(save_log, ip, user_agent, 100.0, "Bot", threat_type, [reason], {}, {})
         background_tasks.add_task(asyncio.to_thread, send_webhook_notification, ip, threat_type, 100.0, [reason])
         return {
             "status": "blocked",
+            "decision": "block",
             "bot_score": 100.0,
             "classification": "Bot",
             "threat_type": threat_type,
@@ -619,8 +635,10 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         else:
             # Risk-adaptive difficulty, identical to core.py: the closer to the block threshold, the harder.
             pow_diff = 5 if bot_score >= 45.0 else 4
+            _count_request("challenge", "Unknown")
             return {
                 "status": "challenge_required",
+                "decision": "challenge",
                 "pow_difficulty": pow_diff,
                 "pow_salt": generate_pow_salt(client_ip=ip, difficulty=pow_diff),
             }
@@ -658,8 +676,13 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(manager.broadcast, f"[BOT {bot_score:.1f}%] -> {threat_type} (IP: {mask_ip(ip)})")
         background_tasks.add_task(asyncio.to_thread, send_webhook_notification, ip, threat_type, bot_score, reasons)
 
+    _count_request("block" if classification == "Bot" else "allow", classification)
+
+    # `status` only says the request was scored ("success" even for a bot, kept for backward
+    # compatibility). `decision` is the verdict integrators should branch on.
     return {
         "status": "success",
+        "decision": "block" if classification == "Bot" else "allow",
         "bot_score": bot_score,
         "classification": classification,
         "threat_type": threat_type,
@@ -828,10 +851,33 @@ async def get_logs(request: Request, limit: int = Query(50, ge=1, le=1000)):
     return await asyncio.to_thread(fetch_logs_summary, limit)
 
 
+def _count_request(status_label: str, classification: str) -> None:
+    if prom.METRICS_ENABLED and prom.synapse_requests_total is not None:
+        prom.synapse_requests_total.labels(status=status_label, classification=classification).inc()
+
+
+def _prometheus_response() -> Response:
+    if not prom.METRICS_ENABLED:
+        raise HTTPException(status_code=501, detail="Prometheus support missing: pip install 'synapse-shield[metrics]'")
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(content=generate_latest(prom.registry), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/metrics/prometheus")
+async def get_prometheus_metrics(request: Request):
+    verify_admin(request)
+    return _prometheus_response()
+
+
 @app.get("/metrics")
 async def get_metrics(request: Request):
-    # Exposes live nonce / ban counters and the L1 rotation timing: admin only (X-Admin-Secret or Bearer).
+    # Admin only (X-Admin-Secret or Bearer). Prometheus scrapers (Accept: text/plain / openmetrics)
+    # get the exposition format; everything else keeps the JSON Rust-state view.
     verify_admin(request)
+    accept = request.headers.get("accept", "").lower()
+    if "openmetrics" in accept or ("text/plain" in accept and "application/json" not in accept):
+        return _prometheus_response()
     from . import synapse_core_rs
     
     metrics = {

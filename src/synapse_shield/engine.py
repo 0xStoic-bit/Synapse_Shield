@@ -6,7 +6,7 @@ import hashlib
 import math
 from typing import Any
 
-from .features import MultimodalTokenizer, extract_features
+from .features import SUPERHUMAN_FLIGHT_MAX_VAR, MultimodalTokenizer, extract_features
 from .models import SynapseHybridModel
 from .tokens import SECRET_KEY
 
@@ -48,14 +48,32 @@ def reload_ai_model() -> bool:
         return False
 
 
+# Sub-movement "stutter": the raw peak count grows with window length (71% of real 20 s windows exceed 18),
+# so the verdict also needs a high peak DENSITY (peaks per sample). In replayed real recordings no
+# window that trips the count rule exceeds 0.22 (6 s) or 0.15 (20 s); independent-noise jitter bots ~0.33, alternating-speed
+# bots 0.43-0.48. 0.22 kept the jitter bots at 100% detection while no real window exceeded it.
+STUTTER_MIN_PEAKS = 18
+STUTTER_MIN_PEAK_DENSITY = 0.22
+
+
+# Hızlı gerçek yazarlar (parmaklar örtüşürken) ortalama up->down aralığını 25 ms altına indirir; ama aralıkları
+# geniş dağılır (kayıtlı gerçek yazımda en düşük standart sapma ~47 ms, varyans ~1700 ms²). Otomatik yazıcıların
+# aralığı sabit ya da çok dar jitter'lıdır. Bu yüzden "insanüstü" için ortalama düşük VE varyans dar olmalı.
+SUPERHUMAN_KEY_MAX_VAR_MS2 = SUPERHUMAN_FLIGHT_MAX_VAR
+
+
 def _superhuman_key_interval(features: dict[str, Any]) -> bool:
-    """Ortalama tuş aralığı insanüstü hızlı mı (0 < aralık < 25 ms)?
+    """Ortalama tuş aralığı insanüstü hızlı ve düzenli mi (0 < aralık < 25 ms, varyans < 1000 ms²)?
 
     Alt sınır features.py ile aynı: Shift basılıyken ya da tuş örtüşmesinde (rollover) up->down aralığı
     negatif olur; 0 ise aralık ölçülemedi demektir. İkisi de "insanüstü hız" değildir (v0.10.6).
+    Geniş varyanslı düşük ortalama, rollover yapan hızlı insan yazımıdır (v0.10.7).
     Kural (5. bölüm), Brave istisnası ve tehdit sınıflandırması aynı tanımı kullanır.
     """
-    return 0.0 < features.get("key_interval_avg", 100.0) < 25.0
+    return (
+        0.0 < features.get("key_interval_avg", 100.0) < 25.0
+        and features.get("key_interval_var", 0.0) < SUPERHUMAN_KEY_MAX_VAR_MS2
+    )
 
 
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
@@ -375,7 +393,11 @@ def analyze_behavior(
                 reasons.append(
                     f"Lack of physiological sub-movement decomposition in trajectory (submovement_count: {submoves}, distance: {features['total_distance']:.1f}px) [+{risk_add:.1f}]."
                 )
-            elif features["total_distance"] > 40 and submoves > 18:
+            elif (
+                features["total_distance"] > 40
+                and submoves > STUTTER_MIN_PEAKS
+                and submoves / max(1, features.get("mouse_points", 0)) > STUTTER_MIN_PEAK_DENSITY
+            ):
                 risk_add = 45.0 * acc_multiplier
                 total_risk += risk_add
                 reasons.append(

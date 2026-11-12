@@ -25,6 +25,9 @@ pub struct KeystrokeMetrics {
     pub keystroke_score: f64, // 0.0 (natural human) .. 1.0 (robotic bot)
 }
 
+/// Maximum flight-time variance (ms^2) for the "superhuman typing speed" verdict (parity with features.py).
+pub const SUPERHUMAN_FLIGHT_MAX_VAR: f64 = 1000.0;
+
 /// Evaluates keystroke dynamics telemetry including dwell time, flight time, and digraph entropy.
 pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> KeystrokeMetrics {
     let key_count = keystrokes.len();
@@ -131,8 +134,9 @@ pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> Keystrok
             score += 0.60;
         }
 
-        // Superhuman typing speed (< 25ms average flight time)
-        if avg_flight > 0.0 && avg_flight < 25.0 {
+        // Superhuman typing speed (< 25ms average flight time). Fast real typists with key rollover also
+        // average below 25 ms, but their intervals are widely spread; an auto-typer's are constant or narrow.
+        if avg_flight > 0.0 && avg_flight < 25.0 && var_flight < SUPERHUMAN_FLIGHT_MAX_VAR {
             score += 0.70;
         }
 
@@ -321,6 +325,19 @@ mod tests {
         let m = evaluate_keystroke_dynamics(&seq(&keys, &[5.0, 22.0, 3.0, 30.0]));
         assert!(m.avg_flight_time < 25.0);
         assert!(m.keystroke_score >= 0.70);
+    }
+
+    #[test]
+    fn fast_typist_with_wide_flight_spread_is_not_superhuman() {
+        // Rollover typist: mean up->down flight 12 ms but widely spread (sd ~ 55 ms), as in real recordings.
+        let keys: Vec<(&str, f64)> = [95.0, 130.0, 82.0, 110.0, 101.0, 140.0, 88.0]
+            .iter()
+            .map(|&d| ("masked", d))
+            .collect();
+        let m = evaluate_keystroke_dynamics(&seq(&keys, &[-60.0, 70.0, -35.0, 80.0, -50.0, 75.0]));
+        assert!(m.avg_flight_time > 0.0 && m.avg_flight_time < 25.0, "avg {}", m.avg_flight_time);
+        assert!(m.flight_time_var > SUPERHUMAN_FLIGHT_MAX_VAR, "var {}", m.flight_time_var);
+        assert!(m.keystroke_score < 0.70, "wide-spread fast typing scored {}", m.keystroke_score);
     }
 
     #[test]

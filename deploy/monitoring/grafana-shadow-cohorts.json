@@ -1,0 +1,178 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus", "pluginName": "Prometheus" }
+  ],
+  "title": "Synapse Shield - Shadow Mode cohorts",
+  "uid": "synapse-shadow-cohorts",
+  "description": "Would-block rate per input cohort, host-reported outcomes, and the rules behind shadow blocks. Use it to find one broken group before enabling enforcement.",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "tags": ["synapse-shield", "shadow-mode"],
+  "templating": {
+    "list": [
+      {
+        "name": "input",
+        "label": "Input",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": { "query": "label_values(synapse_shadow_cohort_total, input)", "refId": "input" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      },
+      {
+        "name": "dpr",
+        "label": "DPR / zoom",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": { "query": "label_values(synapse_shadow_cohort_total, dpr)", "refId": "dpr" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Global would-block rate",
+      "description": "Share of behavioural shadow verdicts that would have been blocked. A low global number can hide one broken cohort, so check the panels below.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(synapse_shadow_cohort_total{action=\"block\"}[$__range])) / sum(increase(synapse_shadow_cohort_total[$__range]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Would-block among completed sessions",
+      "description": "False-positive proxy: sessions the host app reports as completed (report_shadow_outcome) that Synapse would have blocked.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(synapse_shadow_outcomes_total{simulated_action=\"block\",outcome=\"completed\"}[$__range])) / sum(increase(synapse_shadow_outcomes_total{outcome=\"completed\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Sessions with a reported outcome",
+      "description": "Needs report_shadow_outcome() calls from your app. Under ~200 per cohort the rates are noise.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(synapse_shadow_outcomes_total[$__range]))" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Behavioural verdicts",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(synapse_shadow_cohort_total[$__range]))" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Would-block rate by cohort",
+      "description": "One line per input x DPR cohort. A cohort far above the others is the one to investigate before enforcing.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{input}} / {{dpr}}",
+          "expr": "sum by (input, dpr) (rate(synapse_shadow_cohort_total{action=\"block\",input=~\"$input\",dpr=~\"$dpr\"}[$__rate_interval])) / sum by (input, dpr) (rate(synapse_shadow_cohort_total{input=~\"$input\",dpr=~\"$dpr\"}[$__rate_interval]))"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Completed sessions that would have been blocked, by cohort",
+      "description": "The number to watch before switching to enforce: real users, by cohort, that the engine would have stopped.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{input}} / {{dpr}}",
+          "expr": "sum by (input, dpr) (increase(synapse_shadow_outcomes_total{simulated_action=\"block\",outcome=\"completed\",input=~\"$input\",dpr=~\"$dpr\"}[1h])) / sum by (input, dpr) (increase(synapse_shadow_outcomes_total{outcome=\"completed\",input=~\"$input\",dpr=~\"$dpr\"}[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Top rules behind shadow blocks",
+      "description": "Which rule produced the would-block verdicts (a verdict can trigger several rules).",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "{{rule}}",
+          "expr": "topk(10, sum by (rule) (increase(synapse_shadow_rules_total{input=~\"$input\",dpr=~\"$dpr\"}[$__range])))"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Rule x cohort (would-block verdicts)",
+      "description": "Find a rule that is concentrated in one cohort, for example 'curvature' only for 2x+ displays.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "expr": "sort_desc(sum by (rule, input, dpr) (increase(synapse_shadow_rules_total{input=~\"$input\",dpr=~\"$dpr\"}[$__range])))"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Behavioural verdict volume by cohort",
+      "description": "Small cohorts give noisy rates; read the rate panels together with this one.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{input}} / {{dpr}}",
+          "expr": "sum by (input, dpr) (rate(synapse_shadow_cohort_total{input=~\"$input\",dpr=~\"$dpr\"}[$__rate_interval]))"
+        }
+      ]
+    }
+  ]
+}

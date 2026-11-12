@@ -1,0 +1,62 @@
+# Prometheus alerting rules for Synapse Shield Shadow Mode (load with rule_files:).
+# They compare cohorts with each other, because a healthy global rate can hide one broken group.
+# Every alert requires a minimum sample size so a handful of sessions cannot page anyone.
+groups:
+  - name: synapse-shadow-cohorts
+    rules:
+      - alert: SynapseShadowCohortFalsePositives
+        # Real users (host-reported as completed) that enforcement would have blocked, per cohort.
+        expr: |
+          (
+            sum by (input, dpr) (increase(synapse_shadow_outcomes_total{simulated_action="block",outcome="completed"}[6h]))
+            /
+            sum by (input, dpr) (increase(synapse_shadow_outcomes_total{outcome="completed"}[6h]))
+          ) > 0.05
+          and
+          sum by (input, dpr) (increase(synapse_shadow_outcomes_total{outcome="completed"}[6h])) >= 200
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shadow Mode would block {{ $value | humanizePercentage }} of completed sessions in cohort {{ $labels.input }}/{{ $labels.dpr }}"
+          description: "Do not enable enforcement for this cohort. Check the 'Rule x cohort' table to see which rule is responsible."
+
+      - alert: SynapseShadowCohortBlockRateOutlier
+        # One cohort blocked far more often than the rest, even without outcome reporting.
+        expr: |
+          (
+            sum by (input, dpr) (increase(synapse_shadow_cohort_total{action="block"}[6h]))
+            /
+            sum by (input, dpr) (increase(synapse_shadow_cohort_total[6h]))
+          ) > 0.10
+          and
+          (
+            sum by (input, dpr) (increase(synapse_shadow_cohort_total{action="block"}[6h]))
+            /
+            sum by (input, dpr) (increase(synapse_shadow_cohort_total[6h]))
+          ) > 3 * scalar(
+            sum(increase(synapse_shadow_cohort_total{action="block"}[6h]))
+            /
+            sum(increase(synapse_shadow_cohort_total[6h]))
+          )
+          and
+          sum by (input, dpr) (increase(synapse_shadow_cohort_total[6h])) >= 200
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cohort {{ $labels.input }}/{{ $labels.dpr }} has a would-block rate over 10% and 3x the global rate"
+          description: "Either this cohort is mostly bots or one rule misreads it. Compare with the rule breakdown before changing thresholds."
+
+      - alert: SynapseShadowNoOutcomeReports
+        # Shadow verdicts flow but the app never calls report_shadow_outcome(): the false-positive panels are empty.
+        expr: |
+          sum(increase(synapse_shadow_cohort_total[6h])) >= 200
+          and
+          sum(increase(synapse_shadow_outcomes_total[6h])) == 0
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "Shadow verdicts are recorded but no session outcomes are reported"
+          description: "Call report_shadow_outcome(decision, completed) from your app when a login or checkout succeeds or is abandoned."

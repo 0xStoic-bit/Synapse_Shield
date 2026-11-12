@@ -41,6 +41,9 @@ def evaluate_curvature_zerocopy(x: Any, y: Any, t: Any) -> dict[str, float]:
         return {"curvature_score": 0.0, "mean_curvature": 0.0, "curvature_var": 0.0, "curvature_rate_var": 0.0}
 
 
+# Fast real typists with key rollover average <25 ms up->down but spread widely (var >> 1000 ms^2); auto-typers do not.
+SUPERHUMAN_FLIGHT_MAX_VAR = 1000.0
+
 # Minimum step (px) on both sides of a point for its curvature to count toward the "chaotic" checks (v0.10.6).
 # kappa = |v x a| / |v|^3 explodes as the cursor slows to a stop, and 1-px quantisation makes direction
 # meaningless there. Chosen by sweeping the threshold: 5 px removes almost all human stop artefacts
@@ -442,7 +445,7 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                 elif features["flight_time_var"] < 15.0 and len(flight_times) >= 4:
                     score += 0.60
 
-                if 0.0 < features["avg_flight_time"] < 25.0:
+                if 0.0 < features["avg_flight_time"] < 25.0 and features["flight_time_var"] < SUPERHUMAN_FLIGHT_MAX_VAR:
                     score += 0.70
 
                 # Mobile Virtual IME check (Gboard / iOS soft keyboard)

@@ -8,6 +8,7 @@ from .core import (
     anonymize_ip,
     evaluate_synapse_request,
     evaluate_synapse_request_sync,
+    report_shadow_outcome,
     resolve_client_ip,
 )
 from .engine import analyze_behavior, poisson_anomaly_score
@@ -32,6 +33,7 @@ __all__ = [
     "evaluate_synapse_request",
     "evaluate_synapse_request_sync",
     "resolve_client_ip",
+    "report_shadow_outcome",
     "anonymize_ip",
     "analyze_behavior",
     "extract_features",

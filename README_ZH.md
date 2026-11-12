@@ -21,7 +21,7 @@
 
 <br/>
 
-[核心特性](#-核心特性与安全架构-v0106) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on)
+[核心特性](#-核心特性与安全架构-v0107) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on)
 
 </div>
 
@@ -35,10 +35,12 @@
 
 ---
 
-## ✨ 核心特性与安全架构 (v0.10.6)
+## ✨ 核心特性与安全架构 (v0.10.7)
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
+| 🔭 **影子队列、规则代码与离线回放 (v0.10.7)** | 影子模式按队列（输入类型 × devicePixelRatio）统计，附稳定规则代码（`SynapseDecision.rule_codes`）；`report_shadow_outcome()` 可上报会话结果，用于判断强制拦截是否会误伤真实用户；提供现成的 Grafana 与 Prometheus 告警资源（`deploy/monitoring/`）；`synapse-shield replay` 可在本机离线评估自有录制数据的误报率/检出率。抖动（stutter）与快速打字规则已按真人数据重新校准（真实 20 秒窗口误拦截 2.7% → 0.5%，机器人检出不变）。 |
+| 🧾 **诚实的工具链与 API 契约 (v0.10.7)** | `synapse-shield test` / `redteam` 在服务不可达或判定错误时以非零状态码退出（不再在无服务时显示"全部通过"）；真人对照用例使用新鲜时间戳；`doctor` 在最小安装下可运行；`POST /api/score` 的每个分支都返回 `decision`（`allow` / `block` / `challenge` / `error`）；Prometheus 格式输出位于 `/metrics/prometheus`；除非设置 `SYNAPSE_STORE_RAW_TELEMETRY=1`，否则**不再**存储原始轨迹。 |
 | 🔬 **曲率门控与误报修复** | 修复微分曲率 $\kappa(t)$ 在低速停顿下的离散量化奇异点问题："混沌曲率"检查现在仅使用光标实际移动的点（相邻两步均 ≥ 5 px），真实用户在目标附近减速停下不再被误判。统一击键频率严格正值下界（`0 < key_interval_avg < 25ms`），消除快速连击（Rollover）误杀 Brave 隐私豁免与误打机器人标签。隔离移动端离散点击的多项式加速度误判（规则 4.C 引入 `and not is_touch`）。(v0.10.6) |
 | 🛡️ **Zero-PII 击键隐私盾与 SPA 声明周期** | 全框架（原生 JS、React、Vue 3）可打印字符脱敏（仅 `Enter`、`ArrowLeft`、`Unidentified` 等标准命名按键保留名称，其余所有字符——包括 emoji、连字按键 `لا`、组合字符序列与土耳其语 `İ`——均替换为 `key: "masked"`），并在前端内存直接评估高频双字符动力学（`is_freq_digraph`），网络传输 **0 字节个人文字与隐私数据**（完全符合 GDPR 第 5(1)(c) 条与 KVKK 第 4 条数据最小化原则）。单次使用 Challenge 令牌自动失效机制，彻底根除 SPA（React / Vue / Next.js）第二请求 403 重放误拦截。PoW 动态难度 HMAC 签名 (`salt.ts.diff.sig`)，PoW 重试遥测时间戳平移对齐（杜绝 403 零事件拦截），CIDR 反向代理白名单解析 (`10.0.0.0/8`, `172.16.0.0/12`)，CGNAT 校园网/NAT 会话隔离及桌面端 IME 击键停顿绕过修复 (v0.10.4)。 |
 | 🔐 **客户端网络绑定与 Token Relay 防御** | 密码学客户端设备与网络子网双向绑定机制（`nonce.ts.bind_hash.sig`）。通过将 challenge 令牌绑定至 `/24` IPv4 与 `/64` IPv6 子网及大小写归一化 User-Agent，结合漫游容错机制，彻底封杀自动化 Token Relay 与跨 IP 集中式打码/收割农场攻击。内置防悬挂无泄漏的 SQLite Worker 线程生命周期管理与全新的 `synapse-shield doctor` 系统诊断体检 CLI 工具 (v0.10.1)。 |
@@ -133,8 +135,10 @@
 ### 方式 1：通过 PyPI 安装运行
 
 ```bash
-pip install synapse-shield
+pip install "synapse-shield[server]"
 ```
+
+> 仅执行 `pip install synapse-shield` 只会安装评分引擎（NumPy）。`run`、`test` 与驾驶舱需要 `[server]` 附加包（FastAPI + uvicorn）。
 
 直接从终端启动防御服务及 3D 实时监控驾驶舱（Cockpit）：
 
@@ -142,7 +146,7 @@ pip install synapse-shield
 synapse-shield run --port 8000
 ```
 
-执行 7 大攻击维度的全自动红队对抗安全测试：
+针对正在运行的服务执行 9 向量红队对抗测试（先在另一个终端运行 `run`；判定错误或服务不可达时以非零状态码退出）：
 
 ```bash
 synapse-shield test
@@ -151,7 +155,7 @@ synapse-shield test
 基于本地 SQLite 累积的真实遥测数据自主重训练 1D-CNN AI 模型（主动学习）：
 
 ```bash
-synapse-shield retrain --epochs 5 --lr 0.01
+synapse-shield retrain --epochs 5
 ```
 
 ---
@@ -161,9 +165,11 @@ synapse-shield retrain --epochs 5 --lr 0.01
 ```bash
 git clone https://github.com/0xStoic-bit/Synapse_Shield.git
 cd Synapse_Shield
-pip install -e .
+pip install -e ".[all]" pytest httpx
 python test_suite.py
 ```
+
+> 直接调用 `POST /api/score` 时，请依据 `decision` 字段（`"allow"` / `"block"` / `"challenge"` / `"error"`）判断，而不是 `status`：`status: "success"` 仅表示请求已被评分，机器人同样会返回该值。
 
 在浏览器中访问 [http://127.0.0.1:8000](http://127.0.0.1:8000/) 即可打开**实时可视化安全驾驶舱（Live Security Cockpit）**。
 
@@ -411,10 +417,25 @@ const handleSubmit = async () => {
 
 ### 9. Prometheus 企业级可观测性
 
-开箱即用的监控指标支持。服务通过 `/metrics` 端点自动暴露拦截率、平均推理延时及异常分布。在 Gunicorn/Uvicorn 多进程生产环境下，指定目录即可聚合：
+先安装 `pip install "synapse-shield[metrics]"`。服务在 `GET /metrics/prometheus` 提供 Prometheus 文本格式（当抓取端发送 `Accept: text/plain` / OpenMetrics 时，`GET /metrics` 也返回该格式；普通请求仍返回 JSON 的 Rust 状态视图）。两者均受管理员保护：请发送 `Authorization: Bearer $SYNAPSE_ADMIN_SECRET`。在 Gunicorn/Uvicorn 多进程生产环境下，指定目录即可聚合：
 
 ```bash
 export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
+```
+
+#### 原始遥测存储
+
+默认情况下，服务器**不存储原始轨迹**：日志行只保留裁决、原因与聚合特征向量，`telemetry` 列为空。设置 `SYNAPSE_STORE_RAW_TELEMETRY=1` 才会保留完整轨迹（鼠标坐标与时间；键入字符始终被脱敏），以便 `synapse-shield retrain` 从自有流量学习；否则请使用 `retrain --bootstrap`。
+
+#### 影子模式：按队列监控误报
+
+全局拦截率可能掩盖某一类用户（触屏、高 DPI、缩放浏览器）的问题。`mode="shadow"` 下，每个行为裁决还会按粗粒度队列计数，且不保存任何指针轨迹：`synapse_shadow_cohort_total`（`action` × `input` × `dpr`）、`synapse_shadow_outcomes_total`、`synapse_shadow_rules_total`（稳定规则代码，如 `stutter`、`curvature`、`keystroke_superhuman`）。在业务代码中用 `report_shadow_outcome(decision, completed=True)` 上报会话结果；`deploy/monitoring/` 提供 Grafana 面板与 Prometheus 告警规则（PromQL 仅做了名称/标签校验，未实际执行，请先在测试 Prometheus 中加载）。
+
+离线回放自己的录制数据（无需服务器、令牌或网络）：
+
+```bash
+synapse-shield replay ./recordings --label human   # 误报率，以及造成拦截的规则与队列
+synapse-shield replay ./bots.jsonl --label bot     # 检出率
 ```
 
 ---
@@ -462,17 +483,17 @@ pip install "mutmut>=3.3,<4" && mutmut run && mutmut results
 synapse-shield test
 ```
 
-2026-11-06 实测（v0.10.5）。可通过 `python scripts/measure_readme_benchmarks.py` 复现，无需启动服务器，数据不会离开本机。裁决与风险评分来自真实的 `POST /api/score`；延迟为评分引擎（`analyze_behavior`）200 次运行的中位数。
+2026-11-12 实测（v0.10.7）。可通过 `python scripts/measure_readme_benchmarks.py` 复现，无需启动服务器，数据不会离开本机。裁决与风险评分来自真实的 `POST /api/score`；延迟为评分引擎（`analyze_behavior`）200 次运行的中位数。
 
 | 攻击向量 (Attack Vector) | 模拟行为特征 (Simulated Signature) | 核心识别与拦截机制 | 风控裁决 | 风险评分 | 处理延迟 |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **Selenium 爬虫脚本** | `navigator.webdriver = true` | WebDriver 接口检测 | 🔴 **BLOCK** | **100.0%** | **0.13 ms** |
-| **直线型机器人 (Linear)** | 直线度 = 1.000，Jerk = 0 | 直线度 + 速度方差 | 🔴 **BLOCK** | **100.0%** | **0.20 ms** |
-| **贝塞尔平滑隐形脚本** | 二次贝塞尔曲线，固定 20 ms 采样 | 固定间隔计时器 + 合成震颤检测 | 🔴 **BLOCK** | **100.0%** | **0.22 ms** |
-| **机械打字注入脚本** | 固定 50 ms 按键注入，无鼠标轨迹 | 击键生物特征 + 缺失鼠标遥测 | 🔴 **BLOCK** | **100.0%** | **0.20 ms** |
-| **突发洪水请求** | 约 315 ms 内发起 8 次看似真人的请求 | 泊松频率评分（轨迹为有机特征时被抑制） | 🟡 **仅标记**（0/8 被拦截） | **25.0%** | **0.20 ms** |
+| **Selenium 爬虫脚本** | `navigator.webdriver = true` | WebDriver 接口检测 | 🔴 **BLOCK** | **100.0%** | **0.12 ms** |
+| **直线型机器人 (Linear)** | 直线度 = 1.000，Jerk = 0 | 直线度 + 速度方差 | 🔴 **BLOCK** | **100.0%** | **0.24 ms** |
+| **贝塞尔平滑隐形脚本** | 二次贝塞尔曲线，固定 20 ms 采样 | 固定间隔计时器 + 合成震颤检测 | 🔴 **BLOCK** | **100.0%** | **0.23 ms** |
+| **机械打字注入脚本** | 固定 50 ms 按键注入，无鼠标轨迹 | 击键生物特征 + 缺失鼠标遥测 | 🔴 **BLOCK** | **100.0%** | **0.14 ms** |
+| **突发洪水请求** | 约 330 ms 内发起 8 次看似真人的请求 | 泊松频率评分（轨迹为有机特征时被抑制） | 🟡 **仅标记**（0/8 被拦截） | **25.0%** | **0.26 ms** |
 | **重放攻击 (Replay Attack)** | 重发已截获的合法 Token | 一次性 HMAC Nonce | 🔴 **BLOCK** | **100.0%** | — |
-| **真人自然操作** | 缓出曲线、生理震颤、不规则采样间隔 | 生物 Jerk 与末端减速 | 🟢 **ALLOW**（50/50 个随机种子） | **0.0%（最大值）** | **0.32 ms** |
+| **真人自然操作** | 缓出曲线、生理震颤、不规则采样间隔 | 生物 Jerk 与末端减速 | 🟢 **ALLOW**（50/50 个随机种子） | **0.0%（最大值）** | **0.54 ms** |
 
 > **突发洪水不会被单独拦截。** 当轨迹呈现有机特征时，泊松频率信号只会提高风险评分。硬拦截从极端频率限制开始：`SYNAPSE_MAX_REQ_10S`，默认每 10 秒 100 次请求，触发后封禁 15 分钟；或在 60 秒内出现 4 次机器人判定时触发。本表旧版本将此行标为 `BLOCK 60%`，该数值无法复现：自 v0.10.1 起，内置攻击套件的每个请求都在令牌绑定层被拒绝，因此旧表并未反映生物特征层的检测结果。
 

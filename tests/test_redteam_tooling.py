@@ -61,7 +61,19 @@ def inprocess_server(monkeypatch):
         return _Resp(r.content)
 
     monkeypatch.setattr(live_attacker.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(live_attacker.time, "sleep", lambda s: None)
+    # Skipping sleeps must not freeze the clock: a no-op sleep hid the Stale Telemetry bug
+    # (the real CLI waits 1.6 s per vector, so suite-start timestamps went stale). Advance a
+    # shared virtual clock instead; the in-process server reads the same time.time().
+    import time as _time
+
+    real_time = _time.time
+    offset = [0.0]
+
+    def fake_sleep(s):
+        offset[0] += s
+
+    monkeypatch.setattr(_time, "time", lambda: real_time() + offset[0])
+    monkeypatch.setattr(live_attacker.time, "sleep", fake_sleep)
     return seen
 
 
@@ -76,15 +88,15 @@ def test_live_attack_suite_verdicts(inprocess_server, monkeypatch, capsys):
 
     def capture(num, title, res, expected_blocked=True):
         results[num] = (title, res, expected_blocked)
-        real_print(num, title, res, expected_blocked)
+        return real_print(num, title, res, expected_blocked)
 
     monkeypatch.setattr(live_attacker, "print_result", capture)
-    # The human control traces are synthetic (sine + Gaussian noise); the curvature engine
-    # occasionally (~1 in 8 seeds) flags them, which is correct. Pin the seed for determinism.
+    # The human control traces are synthetic (sine + Gaussian noise). Pin the seed so this
+    # regression test is deterministic (an unseeded live run also passed 10/10 in review).
     import random
 
     monkeypatch.setattr(live_attacker, "random", random.Random(20261106))
-    live_attacker.main()
+    assert live_attacker.main() == 0
 
     assert sorted(results) == list(range(1, 10)), "all 9 attack vectors must run"
     for num, (title, res, expected_blocked) in results.items():
@@ -114,6 +126,8 @@ def test_send_attack_error_shapes(monkeypatch):
     monkeypatch.setattr(live_attacker.urllib.request, "urlopen", conn_refused)
     res = live_attacker.send_attack("x", {"token": "t"})
     assert res["status"] == "error" and res["network_latency_ms"] == 0.0
+    # A transport failure is not a verdict: it must never be reported as a blocked bot.
+    assert res["classification"] == "Error" and res["bot_score"] == 0.0
     # No server: challenge fetch fails -> empty token, and clear_bans swallows the error.
     assert live_attacker.get_challenge() is None
     assert live_attacker.make_token({}) == ""
@@ -129,6 +143,22 @@ def test_print_result_reports_false_negative_and_threat_tags(capsys):
     out = capsys.readouterr().out
     assert out.count("BAŞARISIZ") == 2
     assert "webdriver" in out
+
+
+def test_live_attack_suite_without_server_fails_loudly(monkeypatch, capsys):
+    def conn_refused(req, *a, **k):
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(live_attacker.urllib.request, "urlopen", conn_refused)
+    assert live_attacker.main() == 2
+    out = capsys.readouterr().out
+    assert "KALKAN BAŞARILI" not in out and "GEÇTİ" not in out
+
+
+def test_print_result_transport_error_is_not_a_pass(capsys):
+    res = {"status": "error", "classification": "Error", "bot_score": 0.0, "reasons": ["refused"]}
+    assert live_attacker.print_result(1, "t", res, expected_blocked=True) is None
+    assert "KALKAN BAŞARILI" not in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------------------------
@@ -257,12 +287,14 @@ def test_cli_dispatches_subcommands(monkeypatch):
     from synapse_shield import benchmark, doctor, train
 
     got: dict = {}
-    monkeypatch.setattr(live_attacker, "main", lambda: got.setdefault("test", True))
+    monkeypatch.setattr(live_attacker, "main", lambda: got.setdefault("test", True) and 0)
     monkeypatch.setattr(benchmark, "run_micro_benchmarks", lambda **k: got.setdefault("benchmark", k))
     monkeypatch.setattr(train, "retrain_fc2", lambda **k: got.setdefault("retrain", k))
     monkeypatch.setattr(doctor, "run_doctor", lambda: 3)
 
-    _run_cli(monkeypatch, "test")
+    with pytest.raises(SystemExit) as test_exit:
+        _run_cli(monkeypatch, "test")
+    assert test_exit.value.code == 0  # the suite's return value becomes the process exit code
     _run_cli(monkeypatch, "benchmark", "-n", "7", "-e", "out.json")
     _run_cli(monkeypatch, "retrain", "--bootstrap", "--epochs", "2", "--output", "w.npz")
     with pytest.raises(SystemExit) as exc:
@@ -285,9 +317,47 @@ def test_cli_redteam_full_and_category(monkeypatch):
             ran.append("full")
 
     monkeypatch.setattr(redteam_plugin, "SynapseRedTeamOrchestrator", FakeOrch)
+    monkeypatch.setattr(live_attacker, "server_reachable", lambda: True)
     _run_cli(monkeypatch, "redteam")
     _run_cli(monkeypatch, "redteam", "--category", "crypto")
     assert ran == ["full", "crypto"]
+
+
+def test_cli_redteam_unreachable_server_exits_2(monkeypatch, capsys):
+    monkeypatch.setattr(live_attacker, "server_reachable", lambda: False)
+    with pytest.raises(SystemExit) as exc:
+        _run_cli(monkeypatch, "redteam")
+    assert exc.value.code == 2
+    assert "unreachable" in capsys.readouterr().err
+
+
+def test_cli_run_no_reload_flag(monkeypatch):
+    calls = []
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=lambda *a, **k: calls.append(k)))
+    _run_cli(monkeypatch, "run", "--no-reload")
+    assert calls[-1]["reload"] is False
+
+
+def test_clear_bans_sends_admin_secret(monkeypatch):
+    seen = {}
+
+    def fake_urlopen(req, *a, **k):
+        seen.update(dict(req.header_items()))
+        return _Resp(b"{}")
+
+    monkeypatch.setattr(live_attacker.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("SYNAPSE_ADMIN_SECRET", "s3cret")
+    live_attacker.clear_bans()
+    assert seen.get("X-admin-secret") == "s3cret"
+
+
+def test_score_decision_field_on_challenge_and_expired_paths():
+    import inspect
+
+    from synapse_shield import main
+
+    src = inspect.getsource(main.score_telemetry)
+    assert '"decision": "challenge"' in src and '"decision": "error"' in src
 
 
 def test_cli_telemetry(monkeypatch, capsys):
