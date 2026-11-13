@@ -17,11 +17,15 @@
 
 <br/>
 
+<a href="https://github.com/0xStoic-bit/Synapse_Shield/stargazers"><img src="https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=00F0FF&labelColor=0D1117" alt="Star Synapse Shield on GitHub"/></a>
+
+<br/>
+
 🌐 [English](README.md) | [简体中文](README_ZH.md)
 
 <br/>
 
-[Key Features](#-key-features--security-architecture-v0107) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage)
+[Key Features](#-key-features--security-architecture-v0107) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage) • [Support](#-support-the-project)
 
 </div>
 
@@ -604,6 +608,22 @@ Synapse_Shield/
 ├── LICENSE                    # MIT License
 └── README.md
 ```
+
+---
+
+## ⭐ Support the Project
+
+If **Synapse Shield** saves you from a CAPTCHA, a bot swarm, or a Cloudflare bill, please consider giving it a star. It takes one click, costs nothing, and is the single best way to help other developers discover the project.
+
+<div align="center">
+
+<a href="https://github.com/0xStoic-bit/Synapse_Shield"><img src="https://img.shields.io/badge/%E2%AD%90%20Star%20Synapse%20Shield%20on%20GitHub-00F0FF?style=for-the-badge&logo=github&logoColor=black" alt="Star Synapse Shield on GitHub"/></a>
+
+[![GitHub stars](https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=social)](https://github.com/0xStoic-bit/Synapse_Shield/stargazers)
+
+</div>
+
+Other ways to help: [open an issue](https://github.com/0xStoic-bit/Synapse_Shield/issues), send a pull request (see [CONTRIBUTING.md](CONTRIBUTING.md)), share it with your team, or [sponsor the project](https://github.com/sponsors/0xStoic-bit).
 
 ---
 

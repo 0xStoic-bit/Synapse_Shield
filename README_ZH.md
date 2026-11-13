@@ -17,11 +17,15 @@
 
 <br/>
 
+<a href="https://github.com/0xStoic-bit/Synapse_Shield/stargazers"><img src="https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=00F0FF&labelColor=0D1117" alt="Star Synapse Shield on GitHub"/></a>
+
+<br/>
+
 🌐 [English](README.md) | [简体中文](README_ZH.md)
 
 <br/>
 
-[核心特性](#-核心特性与安全架构-v0107) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on)
+[核心特性](#-核心特性与安全架构-v0107) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on) • [支持项目](#-支持本项目)
 
 </div>
 
@@ -602,6 +606,22 @@ Synapse_Shield/
 ├── README.md                  # 英文官方文档
 └── README_ZH.md               # 简体中文官方文档
 ```
+
+---
+
+## ⭐ 支持本项目
+
+如果 **Synapse Shield** 帮你省去了验证码、挡住了爬虫机器人，或者省下了一笔 Cloudflare 账单，欢迎给项目点一个 Star。只需一次点击、完全免费，却是让更多开发者发现这个项目的最有效方式。
+
+<div align="center">
+
+<a href="https://github.com/0xStoic-bit/Synapse_Shield"><img src="https://img.shields.io/badge/%E2%AD%90%20Star%20Synapse%20Shield%20on%20GitHub-00F0FF?style=for-the-badge&logo=github&logoColor=black" alt="Star Synapse Shield on GitHub"/></a>
+
+[![GitHub stars](https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=social)](https://github.com/0xStoic-bit/Synapse_Shield/stargazers)
+
+</div>
+
+其他参与方式：[提交 Issue](https://github.com/0xStoic-bit/Synapse_Shield/issues)、发起 Pull Request（见 [CONTRIBUTING.md](CONTRIBUTING.md)）、分享给你的团队，或[赞助本项目](https://github.com/sponsors/0xStoic-bit)。
 
 ---
 
