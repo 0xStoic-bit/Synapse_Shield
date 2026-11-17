@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 
 pub mod curvature;
 pub mod keystrokes;
@@ -14,7 +14,7 @@ use nonce_cache::{
 };
 
 fn features_to_pydict<'py>(py: Python<'py>, feat: &ExtractedFeatures) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("mouse_points", feat.mouse_points)?;
     dict.set_item("total_distance", feat.total_distance)?;
     dict.set_item("straightness", feat.straightness)?;
@@ -65,51 +65,127 @@ fn features_to_pydict<'py>(py: Python<'py>, feat: &ExtractedFeatures) -> PyResul
     Ok(dict)
 }
 
+/// Strict decimal grammar shared with features.py `_NUM_STR_RE`: `[+-]?(digits[.digits*] | .digits)([eE][+-]?digits)?`,
+/// no whitespace/underscores/"inf"/"nan", at most 64 bytes.
+fn is_strict_decimal(s: &str) -> bool {
+    if s.is_empty() || s.len() > 64 {
+        return false;
+    }
+    let b = s.as_bytes();
+    let mut i = 0;
+    if b[i] == b'+' || b[i] == b'-' {
+        i += 1;
+    }
+    let int_start = i;
+    while i < b.len() && b[i].is_ascii_digit() {
+        i += 1;
+    }
+    let int_digits = i - int_start;
+    let mut frac_digits = 0;
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        let fs = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        frac_digits = i - fs;
+    }
+    if int_digits == 0 && frac_digits == 0 {
+        return false;
+    }
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+            i += 1;
+        }
+        let es = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == es {
+            return false;
+        }
+    }
+    i == b.len()
+}
+
+/// Browser numeric field -> finite f64 (parity with features.py `_parse_browser_f64`). bool/None/other -> None.
+fn parse_browser_f64(v: &Bound<'_, PyAny>) -> Option<f64> {
+    if v.is_instance_of::<PyBool>() {
+        return None;
+    }
+    let f = if v.is_instance_of::<PyInt>() || v.is_instance_of::<PyFloat>() {
+        v.extract::<f64>().ok()?
+    } else if v.is_instance_of::<PyString>() {
+        let s = v.extract::<String>().ok()?;
+        if !is_strict_decimal(&s) {
+            return None;
+        }
+        s.parse::<f64>().ok()?
+    } else {
+        return None;
+    };
+    if f.is_finite() {
+        Some(f)
+    } else {
+        None
+    }
+}
+
+/// Browser integer field (parity with `_parse_browser_i64`): ints must fit i64, floats/strings truncate toward zero.
+fn parse_browser_i64(v: &Bound<'_, PyAny>) -> Option<i64> {
+    if v.is_instance_of::<PyInt>() && !v.is_instance_of::<PyBool>() {
+        return v.extract::<i64>().ok();
+    }
+    let f = parse_browser_f64(v)?;
+    if f > -9.2e18 && f < 9.2e18 {
+        Some(f.trunc() as i64)
+    } else {
+        None
+    }
+}
+
+/// Browser boolean field (parity with `_parse_browser_bool`).
+fn parse_browser_bool(v: &Bound<'_, PyAny>) -> bool {
+    if v.is_instance_of::<PyBool>() {
+        return v.extract::<bool>().unwrap_or(false);
+    }
+    if v.is_instance_of::<PyString>() {
+        return v.extract::<String>().map(|s| matches!(s.to_lowercase().as_str(), "true" | "1")).unwrap_or(false);
+    }
+    parse_browser_f64(v).map(|f| f != 0.0).unwrap_or(false)
+}
+
 fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
     let mut raw = RawTelemetry::default();
-    if let Ok(dict) = telemetry.downcast::<PyDict>() {
+    if let Ok(dict) = telemetry.cast::<PyDict>() {
         // 1. Browser info
         if let Ok(Some(browser_val)) = dict.get_item("browser") {
-            if let Ok(browser) = browser_val.downcast::<PyDict>() {
-                if let Ok(Some(wb)) = browser.get_item("webdriver") {
-                    if let Ok(b) = wb.extract::<bool>() {
-                        raw.webdriver = b;
-                    }
-                }
-                let sw = browser.get_item("screen_width").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
-                let sh = browser.get_item("screen_height").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
+            if let Ok(browser) = browser_val.cast::<PyDict>() {
+                let item = |k: &str| browser.get_item(k).ok().flatten();
+                raw.webdriver = item("webdriver").map(|v| parse_browser_bool(&v)).unwrap_or(false);
+                let sw = item("screen_width").and_then(|v| parse_browser_f64(&v)).unwrap_or(0.0);
+                let sh = item("screen_height").and_then(|v| parse_browser_f64(&v)).unwrap_or(0.0);
                 raw.screen_width = sw;
                 raw.screen_height = sh;
-                if sw <= 0.0 || sh <= 0.0 || sw.is_nan() || sh.is_nan() {
+                if sw <= 0.0 || sh <= 0.0 {
                     raw.screen_valid = false;
                 }
-                if let Ok(Some(ts)) = browser.get_item("touch_supported") {
-                    if let Ok(t) = ts.extract::<bool>() {
-                        raw.touch_supported = t;
+                raw.touch_supported = item("touch_supported").map(|v| parse_browser_bool(&v)).unwrap_or(false);
+                if let Some(m) = item("max_touch_points").and_then(|v| parse_browser_i64(&v)) {
+                    raw.max_touch_points = m;
+                }
+                if let Some(p) = item("plugins_length").and_then(|v| parse_browser_i64(&v)) {
+                    raw.plugins_length = p;
+                }
+                if let Some(dpr) = item("device_pixel_ratio").and_then(|v| parse_browser_f64(&v)) {
+                    if dpr > 0.0 {
+                        raw.device_pixel_ratio = dpr;
                     }
                 }
-                if let Ok(Some(mtp)) = browser.get_item("max_touch_points") {
-                    if let Ok(m) = mtp.extract::<i64>() {
-                        raw.max_touch_points = m;
-                    }
-                }
-                if let Ok(Some(pl)) = browser.get_item("plugins_length") {
-                    if let Ok(p) = pl.extract::<i64>() {
-                        raw.plugins_length = p;
-                    }
-                }
-                if let Ok(Some(dpr_val)) = browser.get_item("device_pixel_ratio") {
-                    if let Ok(dpr) = dpr_val.extract::<f64>() {
-                        if dpr > 0.0 && !dpr.is_nan() && !dpr.is_infinite() {
-                            raw.device_pixel_ratio = dpr;
-                        }
-                    }
-                }
-                if let Ok(Some(mv_val)) = browser.get_item("motion_variance") {
-                    if let Ok(mv) = mv_val.extract::<f64>() {
-                        if mv >= 0.0 && !mv.is_nan() && !mv.is_infinite() {
-                            raw.motion_variance = mv;
-                        }
+                if let Some(mv) = item("motion_variance").and_then(|v| parse_browser_f64(&v)) {
+                    if mv >= 0.0 {
+                        raw.motion_variance = mv;
                     }
                 }
                 if let Ok(Some(wgl_val)) = browser.get_item("webgl_renderer") {
@@ -122,12 +198,12 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
 
         // 2. Click count & Touch Tap durations
         if let Ok(Some(clicks)) = dict.get_item("clicks") {
-            if let Ok(list) = clicks.downcast::<PyList>() {
+            if let Ok(list) = clicks.cast::<PyList>() {
                 raw.click_count = list.len();
                 let limit = list.len().min(100);
                 for i in 0..limit {
                     if let Ok(item) = list.get_item(i) {
-                        if let Ok(c_dict) = item.downcast::<PyDict>() {
+                        if let Ok(c_dict) = item.cast::<PyDict>() {
                             let r_val = c_dict.get_item("r").ok().flatten().and_then(|v| v.extract::<f64>().ok()).unwrap_or(0.0);
                             let is_touch_src = c_dict
                                 .get_item("source")
@@ -159,21 +235,21 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
 
         // 3. Scroll count
         if let Ok(Some(scrolls)) = dict.get_item("scrolls") {
-            if let Ok(list) = scrolls.downcast::<PyList>() {
+            if let Ok(list) = scrolls.cast::<PyList>() {
                 raw.scroll_count = list.len();
             }
         }
 
         // 4. Keystrokes (DoS safe: max 150)
         if let Ok(Some(keystrokes)) = dict.get_item("keystrokes") {
-            if let Ok(list) = keystrokes.downcast::<PyList>() {
+            if let Ok(list) = keystrokes.cast::<PyList>() {
                 let limit = list.len().min(150);
                 let mut pending_downs: std::collections::HashMap<String, Vec<(f64, Option<bool>)>> =
                     std::collections::HashMap::new();
 
                 for i in 0..limit {
                     if let Ok(item) = list.get_item(i) {
-                        if let Ok(k_dict) = item.downcast::<PyDict>() {
+                        if let Ok(k_dict) = item.cast::<PyDict>() {
                             let mut t_opt = None;
                             for key_name in &["t", "down", "time"] {
                                 if let Ok(Some(val)) = k_dict.get_item(key_name) {
@@ -279,10 +355,10 @@ fn parse_python_telemetry(telemetry: &Bound<'_, PyAny>) -> RawTelemetry {
 
         // 5. Mouse movements
         if let Ok(Some(mouse)) = dict.get_item("mouse_movements") {
-            if let Ok(list) = mouse.downcast::<PyList>() {
+            if let Ok(list) = mouse.cast::<PyList>() {
                 for i in 0..list.len() {
                     if let Ok(item) = list.get_item(i) {
-                        if let Ok(m_dict) = item.downcast::<PyDict>() {
+                        if let Ok(m_dict) = item.cast::<PyDict>() {
                             let x_res = m_dict.get_item("x").ok().flatten().and_then(|v| v.extract::<f64>().ok());
                             let y_res = m_dict.get_item("y").ok().flatten().and_then(|v| v.extract::<f64>().ok());
                             let t_res = m_dict.get_item("t").ok().flatten().and_then(|v| v.extract::<f64>().ok());
@@ -326,7 +402,7 @@ fn is_rust_core_active() -> bool {
 
 #[pyfunction]
 fn get_core_version() -> &'static str {
-    "0.10.7-native-rust"
+    "0.11.0-native-rust"
 }
 
 #[pyfunction]
@@ -344,7 +420,7 @@ fn evaluate_curvature_naturalness_rs<'py>(
     t: Vec<f64>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let cm = crate::curvature::evaluate_curvature_naturalness(&x, &y, &t);
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("curvature_score", cm.curvature_score)?;
     dict.set_item("mean_curvature", cm.mean_curvature)?;
     dict.set_item("curvature_var", cm.curvature_var)?;
@@ -364,7 +440,7 @@ fn evaluate_curvature_zerocopy_rs<'py>(
     let t_buf = t_obj.extract::<Vec<f64>>()?;
 
     let len = x_buf.len().min(y_buf.len()).min(t_buf.len());
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     if len < 4 {
         dict.set_item("curvature_score", 0.0)?;
         dict.set_item("mean_curvature", 0.0)?;
@@ -403,7 +479,7 @@ fn evaluate_keystroke_dynamics_rs<'py>(
     keystrokes: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let mut detailed = Vec::new();
-    if let Ok(list) = keystrokes.downcast::<PyList>() {
+    if let Ok(list) = keystrokes.cast::<PyList>() {
         for i in 0..list.len() {
             if let Ok(item) = list.get_item(i) {
                 if let Ok(tuple) = item.extract::<(String, f64, Option<f64>)>() {
@@ -413,7 +489,7 @@ fn evaluate_keystroke_dynamics_rs<'py>(
                         up: tuple.2,
                         is_freq_digraph: None,
                     });
-                } else if let Ok(dict) = item.downcast::<PyDict>() {
+                } else if let Ok(dict) = item.cast::<PyDict>() {
                     let is_up_event = dict
                         .get_item("type")
                         .ok()
@@ -470,7 +546,7 @@ fn evaluate_keystroke_dynamics_rs<'py>(
     }
 
     let km = crate::keystrokes::evaluate_keystroke_dynamics(&detailed);
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("key_count", km.key_count)?;
     dict.set_item("avg_dwell_time", km.avg_dwell_time)?;
     dict.set_item("dwell_time_var", km.dwell_time_var)?;
@@ -514,7 +590,7 @@ fn clear_state_engine_rs() {
 #[pyfunction]
 fn get_state_engine_stats_rs<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
     let (curr, prev, bans) = get_stats_global();
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("current_bucket_nonces", curr)?;
     dict.set_item("previous_bucket_nonces", prev)?;
     dict.set_item("active_ip_bans", bans)?;

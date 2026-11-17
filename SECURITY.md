@@ -37,3 +37,5 @@ The following areas are of critical interest during security audits:
 - **Native Memory & FFI Safety:** Buffer boundaries, unaligned access, or memory safety in the Rust PyO3 core (`synapse_core_rs`).
 
 *Note: Minor theoretical issues requiring impossible human reaction speeds (< 100ms full trajectory completion) or unattainable sub-millisecond local network conditions may be evaluated as Accepted Risk.*
+
+> Operators: see [docs/PRIVACY_OPERATOR_NOTES.md](docs/PRIVACY_OPERATOR_NOTES.md) for what data is processed, stored and for how long.

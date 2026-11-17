@@ -27,16 +27,58 @@ def check_python_environment() -> dict[str, Any]:
     }
 
 
+def _native_core_path(module: Any) -> str:
+    """File the native core was loaded from (the standalone wheel re-exports it from a package)."""
+    path = getattr(module, "__file__", None) or "<unknown>"
+    if path.endswith("__init__.py"):
+        inner = getattr(module, "synapse_core_rs", None)
+        path = getattr(inner, "__file__", None) or path
+    return path
+
+
+def rust_core_version_status() -> dict[str, Any] | None:
+    """
+    Compares the Rust core that features.py actually uses with the Python package version.
+    A stale, gitignored .pyd left in the package (0.10.5 inside a 0.10.8 tree) once produced
+    "known" test failures instead of an explicit error. Returns None when no core is loaded.
+    """
+    from synapse_shield import features
+
+    module = getattr(features, "synapse_core_rs", None)
+    if module is None:
+        return None
+    core_version = str(module.get_core_version())
+    return {
+        "core_version": core_version,
+        "package_version": __version__,
+        "matches": core_version.split("-", 1)[0] == __version__,
+        "path": _native_core_path(module),
+    }
+
+
 def check_rust_simd_core() -> dict[str, Any]:
     try:
         from synapse_shield import synapse_core_rs
 
         if synapse_core_rs and synapse_core_rs.is_rust_core_active():
+            status = rust_core_version_status()
+            if status is not None and not status["matches"]:
+                return {
+                    "name": "Native Rust SIMD Core",
+                    "passed": False,
+                    "warning": False,
+                    "message": (
+                        f"Version mismatch: Rust core {status['core_version']} != package "
+                        f"{status['package_version']} (loaded from {status['path']}). Delete the stale "
+                        "binary or rebuild with `maturin develop --release`."
+                    ),
+                }
+            loaded_from = f", {status['core_version']} from {status['path']}" if status else ""
             return {
                 "name": "Native Rust SIMD Core",
                 "passed": True,
                 "warning": False,
-                "message": "PyO3 AVX2/NEON SIMD extension is active & accelerated",
+                "message": f"PyO3 AVX2/NEON SIMD extension is active & accelerated{loaded_from}",
             }
     except Exception:
         pass
@@ -62,7 +104,7 @@ def check_ai_model_weights() -> dict[str, Any]:
             "name": "1D-CNN AI Micro-Brain",
             "passed": True,
             "warning": False,
-            "message": f"Weights verified ({model.weights_path}, warmup: {t_us:.1f}µs)",
+            "message": f"Weights verified ({model.weights_path}, cnn_mode={model.cnn_mode}, warmup: {t_us:.1f}µs)",
         }
     except Exception as e:
         return {

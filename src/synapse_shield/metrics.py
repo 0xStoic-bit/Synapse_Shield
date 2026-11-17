@@ -29,6 +29,13 @@ try:
         registry=registry,
     )
 
+    synapse_trajectory_replay_total = Counter(
+        "synapse_trajectory_replay_total",
+        "Requests whose pointer trajectory fingerprint was already accepted within its TTL (single-request replay)",
+        ["mode"],
+        registry=registry,
+    )
+
     synapse_active_bans = Gauge(
         "synapse_active_bans",
         "Current number of actively quarantined IP addresses",
@@ -75,6 +82,7 @@ except ImportError:
     synapse_requests_total = None
     synapse_inference_latency_seconds = None
     synapse_replays_detected_total = None
+    synapse_trajectory_replay_total = None
     synapse_active_bans = None
     synapse_pow_solved_total = None
     synapse_shadow_requests_total = None

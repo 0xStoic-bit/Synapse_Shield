@@ -180,7 +180,8 @@ def test_gateway_session_id_is_bound_to_the_user_agent(monkeypatch, client):
 
     class Spy:
         def get_session_telemetries(self, session_id, window_sec):
-            seen.append(session_id)
+            if not session_id.startswith("ipshape_"):  # #39-C IP-only shape history is a separate key
+                seen.append(session_id)
             return []
 
         def __getattr__(self, name):

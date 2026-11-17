@@ -58,6 +58,7 @@ sdk-tests/coverage/
 *.jpeg
 
 # Loglar ve Geçici Araçlar
+backups/
 *.log
 *.tmp
 temp_*

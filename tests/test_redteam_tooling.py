@@ -105,6 +105,7 @@ def test_live_attack_suite_verdicts(inprocess_server, monkeypatch, capsys):
         # Every vector must be judged by the layer it targets, never short-circuited by the
         # challenge client-binding check (that would mean the suite itself is misconfigured).
         assert res.get("threat_type") != "TOKEN_RELAY_ATTACK", f"#{num} {title} hit relay binding: {res}"
+        assert res.get("classification") != "Error", f"#{num} {title} did not run: {res}"
     # Replay (#9) must be stopped by the single-use nonce.
     assert "replay" in json.dumps(results[9][1], ensure_ascii=False).lower()
     out = capsys.readouterr().out
@@ -118,7 +119,8 @@ def test_send_attack_error_shapes(monkeypatch):
 
     monkeypatch.setattr(live_attacker.urllib.request, "urlopen", http_error_non_json)
     res = live_attacker.send_attack("x", {"token": "t"})
-    assert res["classification"] == "Bot" and "HTTP 502" in res["reasons"][0]
+    # A 502 with no Synapse decision is not a block: the attack did not run.
+    assert res["classification"] == "Error" and res["status"] == "error" and "HTTP 502" in res["reasons"][0]
 
     def conn_refused(req, *a, **k):
         raise ConnectionRefusedError("refused")
@@ -159,6 +161,116 @@ def test_print_result_transport_error_is_not_a_pass(capsys):
     res = {"status": "error", "classification": "Error", "bot_score": 0.0, "reasons": ["refused"]}
     assert live_attacker.print_result(1, "t", res, expected_blocked=True) is None
     assert "KALKAN BAŞARILI" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("code", [401, 403, 404, 422, 500])
+def test_undecided_http_error_is_not_a_block(monkeypatch, capsys, code):
+    """A 4xx/5xx that carries no Synapse decision (misconfigured URL/proxy) must read as 'could not run'."""
+    for body in (b'{"detail": "Not Found"}', b"<html>nope</html>", b'{"detail": [{"loc": ["body"]}]}'):
+        def fake(req, *a, _b=body, **k):
+            raise urllib.error.HTTPError(req.full_url, code, "x", {}, io.BytesIO(_b))
+
+        monkeypatch.setattr(live_attacker.urllib.request, "urlopen", fake)
+        res = live_attacker.send_attack("x", {"token": "t"})
+        assert res["classification"] == "Error" and res["http_status"] == code
+        assert live_attacker.print_result(1, "t", res, expected_blocked=True) is None
+        assert live_attacker.print_result(1, "t", res, expected_blocked=False) is None
+    out = capsys.readouterr().out
+    assert "KALKAN BAŞARILI" not in out and "BAŞARISIZ" not in out and "HATA" in out
+
+
+def test_print_result_raw_http_4xx_without_decision_is_error(capsys):
+    res = {"http_status": 404, "detail": "Not Found"}
+    assert live_attacker.print_result(1, "t", res, expected_blocked=True) is None
+    assert "KALKAN BAŞARILI" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"detail": "[Synapse Shield] Missing token."}',
+        b'{"detail": "IP address temporarily banned due to suspicious activity."}',
+        b'{"decision": "block", "threat_type": "REPLAY_ATTACK"}',
+    ],
+)
+def test_synapse_refusals_still_count_as_blocks(monkeypatch, body):
+    def fake(req, *a, **k):
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(live_attacker.urllib.request, "urlopen", fake)
+    res = live_attacker.send_attack("x", {"token": "t"})
+    assert res["classification"] == "Bot" and res["http_status"] == 403
+    assert live_attacker.print_result(1, "t", res, expected_blocked=True) is True
+
+
+def test_x_synapse_header_counts_as_decision():
+    assert live_attacker.carries_synapse_decision({"detail": "x"}, {"X-Synapse-Action": "block"})
+    assert not live_attacker.carries_synapse_decision({"detail": "x"}, {"Server": "nginx"})
+
+
+def test_suite_with_wrong_endpoint_is_not_all_green(monkeypatch, capsys):
+    """Server answers 404 everywhere: nothing ran, so the suite must neither pass nor claim shield success."""
+    def fake(req, *a, **k):
+        url = req if isinstance(req, str) else req.full_url
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, io.BytesIO(b'{"detail": "Not Found"}'))
+
+    monkeypatch.setattr(live_attacker.urllib.request, "urlopen", fake)
+    monkeypatch.setattr(live_attacker.time, "sleep", lambda s: None)
+    assert live_attacker.main() != 0
+    out = capsys.readouterr().out
+    assert "KALKAN BAŞARILI" not in out and "GEÇTİ." not in out
+
+
+# --------------------------------------------------------------------------------------------
+# humanized Bezier: measurement vector
+# --------------------------------------------------------------------------------------------
+
+
+def test_humanized_bezier_shape_differs_from_naive():
+    import random as _r
+
+    from synapse_shield.adversarial import generate_bezier_telemetry, generate_humanized_bezier_telemetry
+
+    naive = generate_bezier_telemetry()["mouse_movements"]
+    human = generate_humanized_bezier_telemetry(rng=_r.Random(1))["mouse_movements"]
+    assert len({round(b["t"] - a["t"], 1) for a, b in zip(naive, naive[1:])}) <= 2  # naive: fixed grid
+    dts = [b["t"] - a["t"] for a, b in zip(human, human[1:])]
+    assert len({round(d, 1) for d in dts}) > 10 and 12 <= min(dts) and max(dts) <= 60
+
+
+def _humanized_verdict(inprocess_server):
+    import random as _r
+
+    from synapse_shield.adversarial import generate_humanized_bezier_telemetry
+
+    live_attacker.clear_bans()
+    tel = generate_humanized_bezier_telemetry(rng=_r.Random(20261117), base_t=float(live_attacker._now_ms()))
+    return live_attacker.send_attack("HumanizedBezier", tel, ip_suffix=80)
+
+
+def test_humanized_bezier_measured_verdict_is_reported(inprocess_server, capsys):
+    res = _humanized_verdict(inprocess_server)
+    live_attacker.print_measurement("hb", res)
+    out = capsys.readouterr().out
+    assert res["classification"] != "Error", res
+    assert "ÖLÇÜM" in out and ("GEÇTİ (bilinen boşluk)" in out or "yakalandı" in out)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
+def test_humanized_bezier_measured_blocked(inprocess_server, seed):
+    """MEASURED (20/20 seeds, in-process): blocked as MINIMUM_JERK_BOT via the FFT harmonic-tremor rule.
+
+    Not an xfail because it is genuinely caught. This documents a measurement, not robustness: the only
+    firing rule is spectral (smooth-curve) based, so a bot with real-human-like tremor may still evade it.
+    """
+    import random as _r
+
+    from synapse_shield.adversarial import generate_humanized_bezier_telemetry
+
+    live_attacker.clear_bans()
+    tel = generate_humanized_bezier_telemetry(rng=_r.Random(seed), base_t=float(live_attacker._now_ms()))
+    res = live_attacker.send_attack("HumanizedBezier", tel, ip_suffix=100 + seed)
+    assert res["classification"] == "Bot" and res.get("threat_type") == "MINIMUM_JERK_BOT", res
 
 
 # --------------------------------------------------------------------------------------------

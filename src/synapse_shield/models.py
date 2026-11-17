@@ -4,28 +4,77 @@ Sıfır Bağımlılık (Zero-Dependency) prensibiyle 1D-CNN + Late Fusion
 yapay zeka modelini çalıştırır. PyTorch veya TensorFlow gerektirmez.
 """
 
+import logging
 import os
 
 import numpy as np
 
+logger = logging.getLogger("synapse_shield.models")
+
+WEIGHTS_ENV = "SYNAPSE_WEIGHTS_PATH"
+CNN_MODE_ENV = "SYNAPSE_CNN_MODE"
+BUNDLED_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
+# Eski sürümler (v0.7.9-v0.10.8) çalışma klasöründeki bu dosyayı örtük olarak yüklüyordu. Artık YÜKLENMEZ:
+# aynı kurulum repo kökünden başka, Docker'dan başka model çalıştırıyordu (açık #40). Yalnızca uyarılır.
+LEGACY_CWD_WEIGHTS_NAME = "synapse_weights.npz"
+
+# CNN karar modu. "shadow" (varsayılan): olasılık hesaplanır (predict_raw) ama karara katkısı 0'dır.
+# "enforce": ham olasılık karara girer (eski davranış). Gömülü ağırlık yalnızca sentetik gürültüyle eğitildi
+# (scripts/train_sequence_ai.py); gerçek insan kayıtlarının yeniden oynatımında (research/human_sim/
+# replay_sapimouse.py) insanları engellerken bilinen bot desenlerinde (bot_tpr.py) ek tespit sağlamadı.
+# Kendi verinizle eğitip doğrulamadığınız bir ağırlık tek başına engelleme gerekçesi olmamalı.
+CNN_MODES = ("shadow", "enforce")
+DEFAULT_CNN_MODE = "shadow"
+
+_warned_cwd_paths: set[str] = set()
+
+
+def _warn_ignored_cwd_weights() -> None:
+    cwd_path = os.path.abspath(os.path.join(os.getcwd(), LEGACY_CWD_WEIGHTS_NAME))
+    if cwd_path in _warned_cwd_paths or not os.path.exists(cwd_path):
+        return
+    _warned_cwd_paths.add(cwd_path)
+    logger.warning(
+        "[Synapse Shield] Ignoring %s in the working directory: weights are no longer loaded implicitly from "
+        "the current directory. Set %s=%s to use them. Loading the bundled weights instead.",
+        LEGACY_CWD_WEIGHTS_NAME,
+        WEIGHTS_ENV,
+        cwd_path,
+    )
+
+
+def resolve_weights_path(weights_path=None) -> str:
+    """Hangi ağırlık dosyasının yükleneceği; çalışma klasöründen bağımsızdır.
+
+    Öncelik: (1) açık ``weights_path`` parametresi, (2) ``SYNAPSE_WEIGHTS_PATH`` ortam değişkeni,
+    (3) paket içi ``weights.npz``. Açıkça seçilmiş bir yol yoksa ``FileNotFoundError`` (sessizce başka
+    bir modele düşmek, yanlış modelin fark edilmeden çalışmasına yol açar).
+    """
+    if weights_path is not None:
+        return os.fspath(weights_path)
+    env_path = os.environ.get(WEIGHTS_ENV, "").strip()
+    if env_path:
+        if not os.path.exists(env_path):
+            raise FileNotFoundError(f"[Synapse Shield] {WEIGHTS_ENV} points to a missing file: {env_path}")
+        return env_path
+    _warn_ignored_cwd_weights()
+    return BUNDLED_WEIGHTS_PATH
+
+
+def resolve_cnn_mode(mode=None) -> str:
+    """CNN karar modu: parametre > ``SYNAPSE_CNN_MODE`` > ``shadow``. Geçersiz değer ``shadow`` olur (uyarıyla)."""
+    raw = mode if mode is not None else os.environ.get(CNN_MODE_ENV, "")
+    value = str(raw).strip().lower() or DEFAULT_CNN_MODE
+    if value not in CNN_MODES:
+        logger.warning("[Synapse Shield] Unknown %s=%r; using %r.", CNN_MODE_ENV, raw, DEFAULT_CNN_MODE)
+        value = DEFAULT_CNN_MODE
+    return value
+
 
 class SynapseHybridModel:
-    def __init__(self, weights_path=None):
-        if weights_path is None:
-            # Hierarchy:
-            # 1. Explicit SYNAPSE_WEIGHTS_PATH env var
-            # 2. Local ./synapse_weights.npz in current working directory
-            # 3. Default bundled base weights.npz in package
-            env_path = os.environ.get("SYNAPSE_WEIGHTS_PATH")
-            cwd_path = os.path.join(os.getcwd(), "synapse_weights.npz")
-            default_path = os.path.join(os.path.dirname(__file__), "weights.npz")
-
-            if env_path and os.path.exists(env_path):
-                weights_path = env_path
-            elif os.path.exists(cwd_path):
-                weights_path = cwd_path
-            else:
-                weights_path = default_path
+    def __init__(self, weights_path=None, cnn_mode=None):
+        weights_path = resolve_weights_path(weights_path)
+        self.cnn_mode = resolve_cnn_mode(cnn_mode)
 
         if not os.path.exists(weights_path):
             raise FileNotFoundError(f"[Synapse Shield] Model weights not found at: {weights_path}")
@@ -49,7 +98,13 @@ class SynapseHybridModel:
             self.conv_b_col = self.conv_b[:, None]  # shape: (16, 1)
 
     def predict(self, mouse_tensor, static_vector) -> float:
+        """Karara giren CNN olasılığı: ``enforce`` modunda ham olasılık, ``shadow`` modunda 0.0."""
+        prob = self.predict_raw(mouse_tensor, static_vector)
+        return prob if self.cnn_mode == "enforce" else 0.0
+
+    def predict_raw(self, mouse_tensor, static_vector) -> float:
         """
+        Kalibre edilmemiş ağ çıktısı (0.0-1.0); moddan bağımsız, gözlem ve ölçüm için.
         mouse_tensor: list of lists (60x5) or np.ndarray
         static_vector: list (8) or np.ndarray
         """

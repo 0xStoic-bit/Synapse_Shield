@@ -39,10 +39,12 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 
 ---
 
-## ✨ Key Features & Security Architecture (v0.10.7)
+## ✨ Key Features & Security Architecture (v0.11.0)
 
 | Feature | Description |
 | :--- | :--- |
+| 🧪 **Measured Corrections, Replay Defense & Honest Defaults (v0.11.0)** | Every change below was measured before and after on the same seeds; human false-positive figures use the real SapiMouse dataset (120 people), bot figures are synthetic. **1D-CNN is `shadow` by default** (`SYNAPSE_CNN_MODE`): the bundled weights were trained on synthetic noise only and blocked ~19% of real human windows; the model no longer loads `./synapse_weights.npz` from the working directory (use `SYNAPSE_WEIGHTS_PATH`). **Short traces** (<40 pointer samples) can no longer be blocked by the straightness / FFT / sub-movement rules alone (real single movements blocked 50% → 4.9%); such gray-area sessions get a PoW challenge even with PoW off. **Replay defense:** a keyed 64-bit trajectory fingerprint blocks a recorded trace that is re-sent with a fresh token (1 h TTL, no raw trace stored), and a shape SimHash catches noisy / scaled / time-warped repeats within a session, also across User-Agent changes. **Fewer false blocks:** a spoofed or genuine `touch_supported` flag without touch events is reclassified as desktop instead of penalised (touch-screen laptops and iPads with a keyboard were blocked 71-100%); the 60 s device penalty is keyed by HMAC(IP + User-Agent), so one bot behind a CGNAT no longer penalises everyone; token errors (double submit, network retry) no longer penalise the device; only hard violations or Bot verdicts with risk ≥ 85 count toward the 4-strike IP ban; Chrome's synthetic (0,0) click on Enter is ignored. **Client signals can only raise risk:** `is_freq_digraph` and IME key names no longer lower the keystroke score on desktop. **SDKs:** each token carries only events inside its own challenge window (fixes long-session "Time Travel" rejections); Vue gained `submitProtected()`; `input_events` counts autofill / paste / IME (never content); SRI hash script. **Tooling:** PyO3 0.30 abi3 wheel (CPython 3.10-3.14), `doctor` fails on a stale native core, the red-team CLI no longer counts a misconfigured 4xx as a block, `logs.user_agent` follows `SYNAPSE_PRIVACY_MODE`. See [`docs/PRIVACY_OPERATOR_NOTES.md`](docs/PRIVACY_OPERATOR_NOTES.md). |
+| ⌨️ **Keyboard-Only Access & React PoW Solving (v0.10.8)** | Keyboard-only sessions (screen readers, switch access, Tab navigation: no mouse movement, at least 3 keystrokes) are no longer hard-blocked on their own: the rule now adds +40 instead of +50, and the framework adapters send these sessions a gray-area Proof-of-Work challenge even when `enable_pow` is off (`SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0` turns this off), so a jittered auto-typer still cannot pass for free. The React hook now solves PoW and retries once (`submitProtected`, `solvePow`); the vanilla SDK solver allows 20M attempts (difficulty 5 no longer fails) and its retry waits long enough for long typing sessions to pass the server's Time Travel check. Measured on synthetic data only: keyboard-only humans blocked 94% -> 2.4% (the rest get a challenge), keyboard-only bots allowed without a challenge 0%. |
 | 🔭 **Shadow Cohorts, Rule Codes & Offline Replay (v0.10.7)** | Per-cohort Shadow Mode counters (input class × devicePixelRatio) with stable rule codes (`SynapseDecision.rule_codes`), `report_shadow_outcome()` to learn whether enforcement would have blocked real users, ready-made Grafana + Prometheus alert assets (`deploy/monitoring/`), and `synapse-shield replay` to measure false-positive / detection rate on your own recordings offline. Stutter and fast-typing rules were recalibrated on real human data (real 20 s windows blocked 2.7% → 0.5%; bot detection unchanged). |
 | 🧾 **Honest Tooling & API Contract (v0.10.7)** | `synapse-shield test` / `redteam` exit non-zero when the server is unreachable or a verdict is wrong (no more "all passed" with no server); the human controls use fresh timestamps; `doctor` works on a bare install; `POST /api/score` returns a `decision` (`allow` / `block` / `challenge` / `error`) on every branch; Prometheus exposition on `/metrics/prometheus`; raw traces are **not** stored unless `SYNAPSE_STORE_RAW_TELEMETRY=1`. |
 | 🔬 **Curvature Gating & False-Positive Fixes** | Fixes discrete quantization stopping artifacts in differential curvature $\kappa(t)$: the "chaotic curvature" check now only uses points where the cursor is actually moving (both neighbouring steps ≥ 5 px), so real humans slowing to a stop near a target are no longer flagged. Unified positive lower bound on keystroke frequency (`0 < key_interval_avg < 25ms`) across rules, Brave shields, and threat classification, preventing rollover-typing false positives. Mobile tap isolation (`and not is_touch` on polynomial acceleration rule 4.C). (v0.10.6) |
@@ -67,7 +69,7 @@ By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$
 | 🦀 **Native Rust SIMD Kinematic Core** | High-performance C-ABI FFI via PyO3 with single-pass AVX2/NEON SIMD vectorization across 24 kinematic dimensions ($212.7\,\mu s$ latency, ~4,700 ops/s) (v0.9.0). |
 | ⚡ **Microsecond Benchmark Suite** | Built-in CLI command (`synapse-shield benchmark`) profiles 19D Kinematics ($73.7\,\mu s$), 1D-CNN inference ($451.2\,\mu s$), and end-to-end evaluation ($828.1\,\mu s$, ~1,200 req/sec) with ASCII/JSON reports (v0.7.9). |
 | 🧬 **Biological Synthetic Human Generator** | Multi-bell submovement velocity decomposition with natural valleys, biomechanical arm curvature, and inertia-filtered neuromuscular micro-tremor achieving 100% human verification accuracy (v0.7.9). |
-| 🛡️ **Isolated Weight & Bootstrap Architecture** | Fine-tuning saves to `./synapse_weights.npz` (or `SYNAPSE_WEIGHTS_PATH`), isolating package distribution weights. `--bootstrap` enables zero-data model calibration on clean installs (v0.7.9). |
+| 🛡️ **Isolated Weight & Bootstrap Architecture** | Fine-tuning writes only where you tell it (`retrain --output` or `SYNAPSE_WEIGHTS_PATH`); the engine loads `SYNAPSE_WEIGHTS_PATH` or the bundled weights, never a file from the working directory. `--bootstrap` enables zero-data model calibration on clean installs (v0.7.9). |
 | 🌊 **FFT Tremor Spectral Analysis (DSP)** | Fast Fourier Transform (`np.fft.rfft`) decomposes velocity sequences to evaluate Power Spectral Density (`spectral_purity` & `spectral_entropy`), mitigating synthetic harmonic oscillator tremors ($\sin(2\pi ft)$) in the frequency domain (v0.7.8). |
 | 🖐️ **Sub-Movement Kinematic Decomposition** | Decomposes trajectory paths into discrete ballistic and corrective velocity pulses based on Fitts's Law. Trajectories lacking physiological sub-movements (`submovement_count <= 1`) are flagged as polynomial bots (v0.7.8). |
 | 🔄 **Session-Level Behavioral Invariance** | Stateful sliding-window telemetry tracking across session requests. Mitigates attackers rotating random seeds or repeating deterministic kinetic templates (v0.7.8). |
@@ -167,8 +169,12 @@ synapse-shield test
 Retrain the 1D-CNN AI model autonomously on local SQLite telemetry (Active Learning):
 
 ```bash
-synapse-shield retrain --epochs 5
+synapse-shield retrain --epochs 5 --output /data/synapse_weights.npz
+export SYNAPSE_WEIGHTS_PATH=/data/synapse_weights.npz   # load it
+export SYNAPSE_CNN_MODE=enforce                          # only after validating it on your own traffic
 ```
+
+The 1D-CNN runs in `shadow` mode by default: it is computed (`details["ai_raw_score"]`) but does not affect the decision.
 
 ### Option 2: Clone & Local Development
 
@@ -239,6 +245,8 @@ async def login(request: Request):
 > **`protected_paths` semantics (all adapters):** the middleware checks only state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`; a body-less `DELETE` sends its token in the `X-Synapse-Token` header) whose path starts with one of the listed prefixes. **If the list is empty or missing, every `POST`/`PUT`/`PATCH` route is protected.** This fail-safe default is the same in FastAPI, raw ASGI, Django, Flask, Sanic and Litestar. Up to v0.10.4, Flask, FastAPI and Django protected *nothing* when the list was empty, so list your paths explicitly if you relied on that.
 
 > **Calling `POST /api/score` yourself?** Branch on `decision` (`"allow"` / `"block"` / `"challenge"` / `"error"`), not on `status`. `status: "success"` only means the request was scored, and is returned for bots too.
+
+> **Gray-area PoW and keyboard-only sessions:** the middleware adapters default to `enable_pow=False`, which turns the gray-area (risk 35-55) Proof-of-Work challenge off. One segment keeps it anyway: keyboard-only sessions (no mouse movement, at least 3 keystrokes, not touch) that would otherwise be allowed get an HTTP 429 `challenge_required` response with a `pow_salt`, so a keyboard-only auto-typer cannot pass without paying the PoW cost. Your client must solve it and retry: the vanilla `synapse-sdk.js` `submit()` does this automatically, the Vue composable's `submitProtected()` solves it and retries once automatically, and the React hook's `submitProtected()` solves it and retries once automatically (its `solvePow()` is also exported). A client that cannot solve PoW is refused, as it was before keyboard-only sessions were moved out of the block range. Set `SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0` (or pass `keyboard_only_challenge=False` to `evaluate_synapse_request[_sync]`) to turn this off.
 
 ### 2. Django & Flask Integration
 
@@ -397,6 +405,12 @@ Add the lightweight SDK (`<5 KB`) to your vanilla project:
 </script>
 ```
 
+Serving the SDK on a payment page (PCI DSS 6.4.3)? Pin it with Subresource Integrity and regenerate the hash for every SDK release with `python scripts/sri_hash.py` (`--check <hash>` in CI):
+
+```html
+<script src="/static/synapse-sdk.js" integrity="sha384-..." crossorigin="anonymous"></script>
+```
+
 ### 9. Prometheus Metrics
 
 Install `pip install "synapse-shield[metrics]"`. The server exposes the Prometheus exposition format on `GET /metrics/prometheus`
@@ -413,6 +427,23 @@ export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
 By default the server stores **no raw traces**: a log row keeps the verdict, reasons and the aggregate feature vector, with an empty
 `telemetry` column. Set `SYNAPSE_STORE_RAW_TELEMETRY=1` to keep full traces (mouse coordinates and timings; typed characters are
 always masked) so `synapse-shield retrain` can learn from your own traffic. Without it, use `retrain --bootstrap`.
+
+### Detection policy and environment
+
+| Setting | Default | Effect |
+| :--- | :--- | :--- |
+| `SYNAPSE_ENABLE_POW` | `0` (adapters) | Gray-area (35-55) PoW challenge. The reference server (`synapse-shield run`) always challenges the gray area; set `1` for the same behaviour in the framework adapters. |
+| `SYNAPSE_KEYBOARD_ONLY_CHALLENGE` | `1` | Keyboard-only sessions that would otherwise be allowed get a PoW challenge even with PoW off. |
+| `SYNAPSE_SHORT_TRACE_CHALLENGE` | `1` | Same for short pointer traces (<40 samples) whose risk was capped. Short humanised bots pass more often without PoW, so keep this on (or enable PoW). Keyboard-only and short-trace challenges always use difficulty 5, and a solved PoW lowers the risk by only 10 points (20 elsewhere): PoW does not tell humans from bots, it makes automation cost more. |
+| `SYNAPSE_TRAJECTORY_REPLAY` / `SYNAPSE_TRAJECTORY_FP_TTL` | `1` / `3600` | Keyed trajectory fingerprint against re-sent traces. Consumed only on `allow`, so SDK retries after a challenge or an expired token are not treated as replays. Known limit: adding 1 px of noise defeats the exact fingerprint (the in-session shape check still applies). |
+| `SYNAPSE_CNN_MODE` / `SYNAPSE_WEIGHTS_PATH` | `shadow` / bundled | See above. |
+| `SYNAPSE_PRIVACY_MODE` | `strict` | Log rows keep a masked IP (/24, /64) and a coarse User-Agent family (`Chrome/131 Windows`); `hash` keeps HMACs, `off` keeps raw values. |
+| `SYNAPSE_MAX_REQ_10S` | `100` | Extreme-rate limit (15-minute ban); now shared by the reference server and the adapters. |
+| `SYNAPSE_SECRET_KEY` | generated | Signs challenges and keys every HMAC (device penalty, trajectory fingerprint, shape hash). **All pods must share it.** |
+
+**IP ban:** 4 strikes in 60 s ban the IP for 60 s. Strikes are token errors (replay, forged, malformed, stale, relay; expired tokens excluded) and hard violations (no interaction, scroll-only, webdriver / stealth, session invariance on the same IP + User-Agent, trajectory replay) or Bot verdicts with risk ≥ 85. Borderline Bot verdicts block the request and add a 60 s penalty to that device only (HMAC of IP + User-Agent), not to everyone behind the same NAT. A repeated trajectory shape seen only across User-Agents on the same IP blocks the request but does not count as an IP strike, so it cannot be used to ban a shared IP. Blocked requests are recorded in the session history as blocked and are not used as the reference for history-only invariance checks, so an attacker sharing a CGNAT IP and a common User-Agent cannot poison a victim's session.
+
+What is processed and stored, for how long, and how to turn it off: [`docs/PRIVACY_OPERATOR_NOTES.md`](docs/PRIVACY_OPERATOR_NOTES.md).
 
 ---
 
@@ -475,7 +506,7 @@ pytest tests -rsxX --cov=synapse_shield --cov-branch --cov-fail-under=85
 
 # Rust core (point PyO3 at the interpreter you build against)
 cd crates/synapse_core_rs
-PYO3_PYTHON=$(which python) cargo test --all-targets
+PYO3_PYTHON=$(which python) cargo test --all-targets   # Windows: point it at the official CPython, not an MSYS2/MinGW python on PATH
 
 # Browser SDKs
 cd sdk-tests && npm ci && npx vitest run
@@ -505,6 +536,8 @@ Run the full adversarial suite anytime:
 synapse-shield test
 ```
 
+This is a smoke test, not a measurement of real-user false positives or real-bot detection: the human controls are synthetic, and an HTTP error that carries no Synapse verdict counts as `Error`, never as a block. Vector #10 (humanised Bézier) is printed as a separate measurement row and does not affect the exit code.
+
 Measured on 2026-11-12 (v0.10.7). Reproduce with `python scripts/measure_readme_benchmarks.py`, which needs no server and sends nothing off the machine. Decision and risk come from a real `POST /api/score`. Latency is the median engine time (`analyze_behavior`) over 200 runs.
 
 | Attack Vector          | Simulated Signature                     | Detection Mechanism                              | Decision                 | Risk Score  | Latency |
@@ -517,7 +550,7 @@ Measured on 2026-11-12 (v0.10.7). Reproduce with `python scripts/measure_readme_
 | **Replay Attack**      | Re-sending a captured valid token       | Single-use HMAC nonce                            | 🔴 BLOCK                 | 100.0%      | —       |
 | **Natural Human**      | Ease-out curve, tremor, jittered timing | Biologic jerk & deceleration                     | 🟢 ALLOW (50/50 seeds)   | 0.0% (max)  | 0.54 ms |
 
-> **Burst flooding is not blocked on its own.** When the trajectories look organic, the Poisson frequency signal only raises the risk score. Hard blocking starts at the extreme-rate limit (`SYNAPSE_MAX_REQ_10S`, default 100 requests per 10 s, which leads to a 15-minute ban) or after 4 bot verdicts in 60 s. Earlier versions of this table listed this row as `BLOCK 60%`. That figure could not be reproduced: the bundled attack suite had been rejecting every request at the token-binding layer since v0.10.1, so the table did not reflect the biometric layers.
+> **Burst flooding is not blocked on its own.** When the trajectories look organic, the Poisson frequency signal only raises the risk score. Hard blocking starts at the extreme-rate limit (`SYNAPSE_MAX_REQ_10S`, default 100 requests per 10 s, which leads to a 15-minute ban) or after 4 IP strikes in 60 s (see *Detection policy and environment*). Earlier versions of this table listed this row as `BLOCK 60%`. That figure could not be reproduced: the bundled attack suite had been rejecting every request at the token-binding layer since v0.10.1, so the table did not reflect the biometric layers.
 
 ---
 

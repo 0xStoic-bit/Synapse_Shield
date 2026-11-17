@@ -28,8 +28,20 @@ pub struct KeystrokeMetrics {
 /// Maximum flight-time variance (ms^2) for the "superhuman typing speed" verdict (parity with features.py).
 pub const SUPERHUMAN_FLIGHT_MAX_VAR: f64 = 1000.0;
 
-/// Evaluates keystroke dynamics telemetry including dwell time, flight time, and digraph entropy.
+/// Evaluates keystroke dynamics without device context: touch evidence is assumed, so the mobile IME
+/// dwell exemption behaves as it did before #5 (used by unit tests of the scoring rules themselves).
 pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> KeystrokeMetrics {
+    evaluate_keystroke_dynamics_ctx(keystrokes, true, 0.0)
+}
+
+/// Evaluates keystroke dynamics telemetry including dwell time, flight time, and digraph entropy.
+/// `touch_evidence` (capacitive touch events or tap durations) and `screen_width` gate the mobile IME
+/// exemption (#5, parity with features.py).
+pub fn evaluate_keystroke_dynamics_ctx(
+    keystrokes: &[DetailedKeystroke],
+    touch_evidence: bool,
+    screen_width: f64,
+) -> KeystrokeMetrics {
     let key_count = keystrokes.len();
     if key_count == 0 {
         return KeystrokeMetrics::default();
@@ -146,7 +158,9 @@ pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> Keystrok
             let kl = k.key.to_lowercase();
             kl == "unidentified" || kl == "process"
         }).count();
-        let is_mobile_ime = ime_count * 2 >= sorted_keys.len();
+        // #5: "unidentified"/"process" key names are only an IME on a touch device. Without touch evidence on a
+        // desktop-width screen (>= 1024, same criterion as engine.py's touch reclassification) they are spoofed.
+        let is_mobile_ime = ime_count * 2 >= sorted_keys.len() && (touch_evidence || screen_width < 1024.0);
 
         // Robotic dwell time: zero variance or instant keypress (Desktop mechanical keys)
         if !dwell_times.is_empty() && !is_mobile_ime {
@@ -162,10 +176,10 @@ pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> Keystrok
             if !direct_freq_flights.is_empty() && !direct_non_freq_flights.is_empty() {
                 let f_mean = direct_freq_flights.iter().sum::<f64>() / direct_freq_flights.len() as f64;
                 let nf_mean = direct_non_freq_flights.iter().sum::<f64>() / direct_non_freq_flights.len() as f64;
+                // #5: the client flag can only add evidence; a client-supplied "frequent digraphs are faster"
+                // pattern must not lower the score (the server cannot verify the masked keys).
                 if f_mean >= nf_mean * 1.05 && key_count >= 8 {
                     score += 0.40;
-                } else if f_mean < nf_mean * 0.85 {
-                    score = (score - 0.25).max(0.0);
                 }
             }
         } else if !digraph_flights.is_empty() {
@@ -189,10 +203,9 @@ pub fn evaluate_keystroke_dynamics(keystrokes: &[DetailedKeystroke]) -> Keystrok
                 if f_mean >= nf_mean * 1.05 && key_count >= 8 {
                     // Artificial bot with uniform random generator has no linguistic memory
                     score += 0.40;
-                } else if f_mean < nf_mean * 0.85 {
-                    // Natural human muscle memory: frequent combinations are noticeably faster!
-                    score = (score - 0.25).max(0.0);
                 }
+                // Raw key names are client data too: a client signal may only raise the score, never lower it
+                // (the former "frequent digraphs faster -> -0.25" branch was removed; parity with features.py).
             }
         }
 
@@ -442,8 +455,8 @@ mod tests {
     }
 
     #[test]
-    fn client_flag_frequent_digraphs_faster_lowers_score() {
-        // Make the base score positive first (fixed 50 ms dwell = +0.80), then show the flag discount.
+    fn client_flag_frequent_digraphs_faster_does_not_lower_score() {
+        // Make the base score positive first (fixed 50 ms dwell = +0.80), then show there is no flag discount.
         let mut ks = flagged(12, 90.0, 220.0);
         for k in ks.iter_mut() {
             k.up = Some(k.down + 50.0);
@@ -451,9 +464,11 @@ mod tests {
         let with_flag = evaluate_keystroke_dynamics(&ks);
         let no_flag: Vec<_> = ks.iter().cloned().map(|mut k| { k.is_freq_digraph = None; k }).collect();
         let without = evaluate_keystroke_dynamics(&no_flag);
+        // #5: without the flag the server-side pairing finds no digraphs (masked keys), so both score the same;
+        // the client flag can no longer subtract 0.25.
         assert!(
-            (without.keystroke_score - with_flag.keystroke_score - 0.25).abs() < 1e-9,
-            "human muscle memory must subtract 0.25: {} vs {}",
+            (without.keystroke_score - with_flag.keystroke_score).abs() < 1e-9,
+            "client flag must not lower the score: {} vs {}",
             with_flag.keystroke_score, without.keystroke_score
         );
     }
@@ -465,5 +480,19 @@ mod tests {
         let ascii = seq(&[("s", 80.0), ("e", 95.0), ("x", 70.0), ("q", 88.0)], &[60.0, 300.0, 180.0]);
         // Neither "şe" nor "se" is in the frequent set, so both must score identically.
         assert_eq!(evaluate_keystroke_dynamics(&ks).keystroke_score, evaluate_keystroke_dynamics(&ascii).keystroke_score);
+    }
+
+    #[test]
+    fn ime_exemption_requires_touch_evidence_or_narrow_screen() {
+        // Majority "Unidentified" keys with a robotic fixed 50 ms dwell (+0.80 when not exempt).
+        let keys = vec![("Unidentified", 50.0); 8];
+        let ks = seq(&keys, &HUMAN_FLIGHTS[..].iter().chain([90.0].iter()).copied().collect::<Vec<_>>());
+        let desktop = evaluate_keystroke_dynamics_ctx(&ks, false, 1920.0);
+        let phone = evaluate_keystroke_dynamics_ctx(&ks, false, 412.0);
+        let touched = evaluate_keystroke_dynamics_ctx(&ks, true, 1920.0);
+        assert!((desktop.keystroke_score - phone.keystroke_score - 0.80).abs() < 1e-9,
+            "spoofed IME on a desktop screen without touch must not skip the dwell check: {} vs {}",
+            desktop.keystroke_score, phone.keystroke_score);
+        assert_eq!(phone.keystroke_score, touched.keystroke_score);
     }
 }

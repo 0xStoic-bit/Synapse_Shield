@@ -51,7 +51,7 @@ def main():
         "--output",
         type=str,
         default=None,
-        help="Custom output path for retrained weights (default: ./synapse_weights.npz)",
+        help="Output .npz for retrained weights (default: $SYNAPSE_WEIGHTS_PATH; one of the two is required)",
     )
 
     # Red Team Plugin Orchestrator Command

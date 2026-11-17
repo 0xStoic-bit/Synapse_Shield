@@ -218,3 +218,52 @@ def test_masked_sdk_keystrokes_differential_fuzz():
         rust = extract_features(telemetry)
         py = extract_features(telemetry, force_python=True)
         assert py["keystroke_score"] == pytest.approx(rust["keystroke_score"], abs=1e-4), ks
+
+
+_BROWSER_VARIANTS = [
+    None, True, False, 0, 1, 5, -3, 1920, 2**70, -(2**70), 0.0, 390.0, 1920.7, -1.5, float("nan"), float("inf"),
+    1e300, "1920", "390", "5", "5.9", "-2", "1e3", ".5", "5.", "+7", "", " 1920", "1920 ", "1_920", "inf", "nan",
+    "abc", "0x10", "1e400", "true", "False", "1", "0", "9" * 70, [], {}, b"1920",
+]
+_BROWSER_FIELDS = ["screen_width", "screen_height", "max_touch_points", "plugins_length", "device_pixel_ratio",
+                   "motion_variance", "webdriver", "touch_supported"]
+_BROWSER_OUT = ["screen_width", "screen_valid", "max_touch_points", "plugins_length", "device_pixel_ratio",
+                "motion_variance", "webdriver", "touch_supported", "mobile_hardware_mismatch"]
+
+
+def _same(a, b):
+    if isinstance(a, float) and isinstance(b, float):
+        return (a != a and b != b) or abs(a - b) < 1e-9
+    return a == b and type(a) is type(b)
+
+
+@pytest.mark.skipif(not HAS_RUST, reason="Rust core (synapse_core_rs) required for parity test")
+def test_browser_numeric_fields_string_float_none_bool_parity():
+    """screen_width="1920" used to give Python 1920 and Rust 0. Both sides now share one strict parser."""
+    rng = random.Random(20261117)
+    cases = [{f: v} for f in _BROWSER_FIELDS for v in _BROWSER_VARIANTS]
+    for _ in range(400):
+        cases.append({f: rng.choice(_BROWSER_VARIANTS) for f in _BROWSER_FIELDS if rng.random() < 0.7})
+    for browser in cases:
+        browser.setdefault("webgl_renderer", "Apple GPU")
+        tel = {"browser": browser, "mouse_movements": [{"x": 1.0, "y": 2.0, "t": 0.0}, {"x": 5.0, "y": 9.0, "t": 16.0}]}
+        py = extract_features(tel, force_python=True)
+        rs = extract_features(tel)
+        for k in _BROWSER_OUT:
+            assert _same(py.get(k), rs.get(k)), f"{k} mismatch for {browser!r}: py={py.get(k)!r} rs={rs.get(k)!r}"
+    f = extract_features({"browser": {"screen_width": "1920", "screen_height": "1080", "max_touch_points": "5"}})
+    assert f["screen_width"] == 1920.0 and f["screen_valid"] and f["max_touch_points"] == 5
+
+
+@pytest.mark.skipif(not HAS_RUST, reason="Rust core (synapse_core_rs) required for parity test")
+def test_raw_key_name_fast_frequent_digraphs_cannot_lower_score():
+    """Raw key names are client data: 'frequent digraphs faster' must not subtract 0.25 (Rust and Python)."""
+    keys, t, ks = "thxqthzwthjk", 0.0, []
+    for i, k in enumerate(keys):
+        t += 40.0 if (i > 0 and keys[i - 1:i + 1] == "th") else 300.0 + 2.0 * i
+        ks.append({"key": k, "down": t, "up": t + 9.0})  # 9 ms dwell -> +0.75, the only other evidence
+    tel = {"browser": {"screen_width": 1920, "screen_height": 1080}, "keystrokes": ks}
+    py = extract_features(tel, force_python=True)["keystroke_score"]
+    rs = extract_features(tel)["keystroke_score"]
+    assert abs(py - rs) < 1e-9
+    assert py >= 0.75, py

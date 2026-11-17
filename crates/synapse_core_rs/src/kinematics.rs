@@ -1,6 +1,6 @@
 use std::f64;
 use crate::curvature::evaluate_curvature_naturalness;
-use crate::keystrokes::{evaluate_keystroke_dynamics, DetailedKeystroke};
+use crate::keystrokes::{evaluate_keystroke_dynamics_ctx, DetailedKeystroke};
 
 #[derive(Debug, Clone)]
 pub struct MousePoint {
@@ -244,7 +244,9 @@ pub fn compute_kinematics(raw: &RawTelemetry) -> ExtractedFeatures {
 
     // 3. Keyboard Dynamics (Dwell & Flight Time & Digraph Entropy v0.9.2)
     if !raw.detailed_keystrokes.is_empty() {
-        let km = evaluate_keystroke_dynamics(&raw.detailed_keystrokes);
+        // #5: touch evidence (computed above, same as engine.py's has_capacitive_data) gates the IME exemption.
+        let touch_evidence = feat.touch_event_count > 0 || feat.tap_count > 0;
+        let km = evaluate_keystroke_dynamics_ctx(&raw.detailed_keystrokes, touch_evidence, raw.screen_width);
         feat.key_count = km.key_count;
         feat.avg_dwell_time = km.avg_dwell_time;
         feat.dwell_time_var = km.dwell_time_var;

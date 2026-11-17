@@ -233,13 +233,23 @@ def verify_and_consume_token(
             SECRET_KEY, f"{nonce}:{ts}".encode("utf-8"), digestmod=hashlib.sha256
         ).hexdigest()
 
-    if not hmac.compare_digest(sig, expected_sig):
+    try:
+        if not isinstance(sig, str) or not hmac.compare_digest(sig, expected_sig):
+            return False, "Sahte challenge imzası (Forged Signature)", {}
+    except (TypeError, ValueError):
         return False, "Sahte challenge imzası (Forged Signature)", {}
 
     # 1.5 İstemci Bağlama (Token Relay & Farm Attack) Koruması
     if bind_hash is not None:
         current_binding = compute_client_binding_hash(client_ip, user_agent)
-        if not current_binding or not hmac.compare_digest(bind_hash, current_binding):
+        try:
+            if not current_binding or not isinstance(bind_hash, str) or not hmac.compare_digest(bind_hash, current_binding):
+                return (
+                    False,
+                    "Token Relay Saldırısı: Token başka bir istemci veya IP tarafından üretilmiş! (Token Client Binding Mismatch)",
+                    {},
+                )
+        except (TypeError, ValueError):
             return (
                 False,
                 "Token Relay Saldırısı: Token başka bir istemci veya IP tarafından üretilmiş! (Token Client Binding Mismatch)",
@@ -388,7 +398,10 @@ def verify_pow_salt(signed_salt: str, client_ip: str | None = None) -> bool:
         except ValueError:
             return False
         expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}:{diff}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected_sig):
+        try:
+            if not isinstance(sig, str) or not hmac.compare_digest(sig, expected_sig):
+                return False
+        except (TypeError, ValueError):
             return False
     elif len(parts) == 3:
         salt_hex, ts_str, sig = parts
@@ -397,7 +410,10 @@ def verify_pow_salt(signed_salt: str, client_ip: str | None = None) -> bool:
         except ValueError:
             return False
         expected_sig = hmac.HMAC(SECRET_KEY, f"{salt_hex}:{ts}{ip_part}".encode(), digestmod=hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected_sig):
+        try:
+            if not isinstance(sig, str) or not hmac.compare_digest(sig, expected_sig):
+                return False
+        except (TypeError, ValueError):
             return False
     else:
         return False

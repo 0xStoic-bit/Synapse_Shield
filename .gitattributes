@@ -1,0 +1,3 @@
+# Keep the published SDK byte-identical across platforms: Subresource Integrity (SRI)
+# hashes (scripts/sri_hash.py) break if git converts its line endings on checkout.
+src/synapse_shield/static/*.js -text

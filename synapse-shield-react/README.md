@@ -85,6 +85,24 @@ export function CommentForm() {
 }
 ```
 
+### Automatic Proof-of-Work retry (`submitProtected`)
+
+Gray-area sessions (and keyboard-only sessions) can receive HTTP 429 `challenge_required` with a signed `pow_salt`. `submitProtected` handles it for you: it fetches a fresh challenge, solves the PoW with Web Crypto (yielding to the event loop between batches), and retries **once**. A second 429 is returned to your code as is; there is no retry loop.
+
+```tsx
+const { submitProtected } = useSynapseShield();
+
+const res = await submitProtected('/api/login', (p) => ({
+  username,
+  password,
+  synapse_token: p.token,
+  pow_salt: p.pow_salt,   // set only on the retry
+  pow_nonce: p.pow_nonce, // the server middleware reads both from the top level of the JSON body
+}));
+```
+
+The retry waits 1.6-3 s for the fresh token to age (up to 8 s only when needed to keep the last 3 mouse points). It then sends the most recent telemetry window the server accepts (span <= token age + 0.5 s), shifted into the token's window. It never waits 30+ s, but a long session is scored on its last few seconds. Every token only carries the events its challenge can vouch for: events older than the challenge window, for example from a long SPA session, are left out instead of making the server reject the token. Non-keyboard text entry (autofill, paste, IME) goes to a separate `input_events` list as `{ t, kind }` only; content is never read, and `key_count` is unchanged. If Web Crypto is unavailable (insecure `http://` context) the original 429 is returned. `solvePow(salt, difficulty)` and `isSolvingPow` are also exposed by the hook, and `solvePow` is a standalone export.
+
 ---
 
 ## Next.js (App & Pages Router)
@@ -105,8 +123,9 @@ export default function Page() {
 
 ---
 
-## Features (v0.10.7)
+## Features (v0.11.0)
 
+- **Automatic PoW Challenge Solving (v0.10.8):** `submitProtected()` solves a gray-area `challenge_required` (HTTP 429) Proof-of-Work and retries exactly once; `solvePow()` is exported for custom flows.
 - **Universal Keystroke Zero-PII Shield (v0.10.4):** Automatic client-side masking of all single-character inputs (`rawKey.length === 1 -> "masked"`) and sensitive fields, local digraph frequency computation (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR & KVKK compliant).
 - **SPA Token Lifecycle & Coalescing Mutex (v0.10.3):** Single-use challenge token lifecycle invalidation to eliminate 403 Replay Attack loops in Next.js and React applications.
 - **PoW Telemetry Retention (v0.10.3):** Shifts historical telemetry timestamps forward upon PoW challenge retry, eliminating empty telemetry 403 blocks for genuine users.

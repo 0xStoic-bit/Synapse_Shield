@@ -1,4 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { solvePow as solvePowImpl } from './pow';
+import type { PowSolution } from './pow';
+import {
+  MIN_CHALLENGE_AGE_MS,
+  alignForRetry,
+  challengeTimestamp,
+  fitTelemetry,
+  inputEventKind,
+  retryWaitMs,
+} from './timing';
+import type { SynapseInputKind } from './timing';
 
 declare const Buffer: any;
 
@@ -64,6 +75,8 @@ export interface SynapseTelemetry {
   clicks: Array<{ x: number; y: number; t: number; r?: number; tap_duration_ms?: number; source?: string }>;
   keystrokes: Array<{ type: string; key?: string; t: number; down?: number; up?: number; duration_ms?: number; is_freq_digraph?: boolean }>;
   scrolls: Array<{ y: number; t: number }>;
+  /** Zero-PII non-keyboard text entry (autofill, paste, IME, typed insertions): kind and time only, never content. */
+  input_events: Array<{ t: number; kind: SynapseInputKind }>;
   browser: {
     webdriver: boolean;
     screen_width: number;
@@ -84,6 +97,8 @@ export interface SynapseTelemetry {
 export interface SynapsePayload {
   telemetry?: SynapseTelemetry;
   token?: string;
+  pow_salt?: string;
+  pow_nonce?: number;
 }
 
 const FREQUENT_DIGRAPHS = new Set([
@@ -149,6 +164,7 @@ export function useSynapseShield() {
     clicks: [],
     keystrokes: [],
     scrolls: [],
+    input_events: [],
     browser: {
       webdriver: false,
       screen_width: 0,
@@ -167,17 +183,38 @@ export function useSynapseShield() {
   const scrollThrottleMs = 100;
   const motionThrottleMs = 50;
 
-  const refreshChallenge = useCallback(async () => {
+  const [isSolvingPow, setIsSolvingPow] = useState(false);
+  const mountedRef = useRef(true);
+  const challengeFetchedAt = useRef(0);
+
+  const fetchChallenge = useCallback(async (): Promise<string | null> => {
     try {
       const res = await fetch('/api/challenge');
       if (res.ok) {
         const data = await res.json();
-        challengeRef.current = data.challenge;
-        setCurrentChallenge(data.challenge);
+        return typeof data.challenge === "string" ? data.challenge : null;
       }
     } catch (e) {
       console.warn("Could not fetch challenge, falling back to unsigned mode.");
     }
+    return null;
+  }, []);
+
+  const refreshChallenge = useCallback(async (): Promise<string | null> => {
+    const challenge = await fetchChallenge();
+    if (challenge) {
+      challengeRef.current = challenge;
+      challengeFetchedAt.current = Date.now();
+      if (mountedRef.current) setCurrentChallenge(challenge);
+    }
+    return challenge;
+  }, [fetchChallenge]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -406,6 +443,18 @@ export function useSynapseShield() {
       }
     };
 
+    // Non-keyboard text entry: counted in input_events so key_count is never inflated (Zero-PII: no content read).
+    const pushInputEvent = (kind: SynapseInputKind) => {
+      telemetry.current.input_events.push({ t: Date.now(), kind });
+      if (telemetry.current.input_events.length > 50) telemetry.current.input_events.shift();
+    };
+    const handleInput = (e: Event) => {
+      const kind = inputEventKind(e);
+      if (kind) pushInputEvent(kind);
+    };
+    const handlePaste = () => pushInputEvent("paste");
+    const handleCompositionEnd = () => pushInputEvent("ime");
+
     window.addEventListener("mousemove", handleMouseMove, { passive: true });
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
@@ -415,6 +464,9 @@ export function useSynapseShield() {
     window.addEventListener("keydown", handleKeyDown, { passive: true });
     window.addEventListener("keyup", handleKeyUp, { passive: true });
     window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("input", handleInput, { passive: true, capture: true });
+    window.addEventListener("paste", handlePaste, { passive: true, capture: true });
+    window.addEventListener("compositionend", handleCompositionEnd, { passive: true, capture: true });
 
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
@@ -426,6 +478,9 @@ export function useSynapseShield() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("input", handleInput, true);
+      window.removeEventListener("paste", handlePaste, true);
+      window.removeEventListener("compositionend", handleCompositionEnd, true);
     };
   }, [refreshChallenge]);
 
@@ -434,11 +489,12 @@ export function useSynapseShield() {
     telemetry.current.clicks = [];
     telemetry.current.keystrokes = [];
     telemetry.current.scrolls = [];
+    telemetry.current.input_events = [];
     motionSamples.current = [];
     lastTouchStartTime.current = 0;
   }, []);
 
-  const getProtectedPayload = useCallback((): SynapsePayload => {
+  const getProtectedPayload = useCallback((powResult?: PowSolution): SynapsePayload => {
     const n = motionSamples.current.length;
     if (n >= 2) {
       const mean = motionSamples.current.reduce((a, b) => a + b, 0) / n;
@@ -450,9 +506,11 @@ export function useSynapseShield() {
 
     const challenge = challengeRef.current;
     if (challenge) {
+      // Only the events this challenge can vouch for: older ones (long SPA session, renewed challenge) would make
+      // the server reject the whole token as Stale Telemetry / Time Travel.
       const envelope = {
         challenge,
-        telemetry: telemetry.current,
+        telemetry: fitTelemetry(telemetry.current, challengeTimestamp(challenge), Date.now() - challengeFetchedAt.current),
         created_at: Date.now(),
       };
       // The challenge is single-use: consume it and fetch the next one in the background so a second
@@ -460,10 +518,94 @@ export function useSynapseShield() {
       challengeRef.current = null;
       setCurrentChallenge(null);
       void refreshChallenge();
-      return { token: safeBtoa(JSON.stringify(envelope)) };
+      return {
+        token: safeBtoa(JSON.stringify(envelope)),
+        ...(powResult ? { pow_salt: powResult.salt, pow_nonce: powResult.nonce } : {}),
+      };
     }
     return { telemetry: telemetry.current };
   }, [refreshChallenge]);
 
-  return { getProtectedPayload, refreshChallenge, reset };
+  const solvePow = useCallback(async (powSalt: string, difficulty: number = 4): Promise<PowSolution | null> => {
+    if (mountedRef.current) setIsSolvingPow(true);
+    try {
+      return await solvePowImpl(powSalt, difficulty);
+    } finally {
+      if (mountedRef.current) setIsSolvingPow(false);
+    }
+  }, []);
+
+  /**
+   * POSTs a protected request and transparently handles the gray-area proof-of-work challenge.
+   * `buildBody` receives the payload (`token`, plus `pow_salt`/`pow_nonce` on the retry) and returns the JSON body;
+   * put `pow_salt` and `pow_nonce` at the top level of that body, where the server middleware reads them.
+   * On HTTP 429 `challenge_required` it fetches a fresh challenge, solves the PoW and retries exactly ONCE.
+   * The final Response (including a second 429) is returned as is; there is no further retry.
+   */
+  const submitProtected = useCallback(async (
+    url: string,
+    buildBody: (payload: SynapsePayload) => unknown,
+    init: RequestInit = {},
+  ): Promise<Response> => {
+    const send = (payload: SynapsePayload): Promise<Response> => {
+      const headers = new Headers(init.headers);
+      if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+      return fetch(url, {
+        ...init,
+        method: init.method || "POST",
+        headers,
+        body: JSON.stringify(buildBody(payload)),
+      });
+    };
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    // A missing or nearly-expired challenge (60 s lifetime) is renewed first; any challenge younger than the
+    // server's 1.5 s minimum is aged first. getProtectedPayload() then drops events older than its window.
+    if (!challengeRef.current || Date.now() - challengeFetchedAt.current > 45000) {
+      await refreshChallenge();
+    }
+    const age = Date.now() - challengeFetchedAt.current;
+    if (challengeRef.current && age < MIN_CHALLENGE_AGE_MS) await sleep(MIN_CHALLENGE_AGE_MS - age);
+
+    const first = await send(getProtectedPayload());
+    if (first.status !== 429) {
+      reset();
+      return first;
+    }
+
+    let body: any = null;
+    try {
+      body = await first.clone().json();
+    } catch (e) {}
+    if (!body || body.status !== "challenge_required" || typeof body.pow_salt !== "string" || !body.pow_salt) {
+      reset();
+      return first;
+    }
+
+    // The first token consumed our challenge: fetch a fresh one while the PoW is solved.
+    let freshAt = 0;
+    const [fresh, solution] = await Promise.all([
+      fetchChallenge().then((c) => {
+        freshAt = Date.now();
+        return c;
+      }),
+      solvePow(body.pow_salt, Number(body.pow_difficulty) || 4),
+    ]);
+    if (!fresh || !solution) return first; // cannot comply (no Web Crypto / no challenge); caller sees the 429
+
+    // Server checks: token age >= 1.5 s and telemetry span <= token age + 0.5 s. Wait briefly (<= 3 s; <= 8 s only
+    // to keep the last 3 mouse points), then send the most recent window that fits, shifted past challenge_ts.
+    const remaining = retryWaitMs(telemetry.current) - (Date.now() - freshAt);
+    if (remaining > 0) await sleep(remaining);
+    alignForRetry(telemetry.current, challengeTimestamp(fresh) ?? freshAt, Date.now() - freshAt);
+    // Re-assert our challenge: a background refresh started by the first payload may have replaced it.
+    challengeRef.current = fresh;
+    challengeFetchedAt.current = freshAt;
+
+    const second = await send(getProtectedPayload(solution));
+    reset();
+    return second;
+  }, [fetchChallenge, refreshChallenge, getProtectedPayload, reset, solvePow]);
+
+  return { getProtectedPayload, refreshChallenge, reset, solvePow, isSolvingPow, submitProtected };
 }

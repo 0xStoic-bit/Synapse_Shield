@@ -4,5 +4,6 @@ export type {
   SynapsePayload,
   UseSynapseShieldOptions,
 } from './useSynapseShield';
+export type { SynapseInputKind } from './timing';
 
 export { SynapseProtect } from './SynapseProtect';

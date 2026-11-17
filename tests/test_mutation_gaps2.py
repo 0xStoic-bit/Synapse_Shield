@@ -123,7 +123,7 @@ def test_session_features_are_forwarded_to_storage(monkeypatch):
     monkeypatch.setattr(core, "analyze_behavior", _fake(1.0, **feats))
     core.evaluate_synapse_request_sync(client_ip="198.19.6.90", user_agent="ua", token=_token())
     assert seen["m"] == {k: feats[k] for k in ("avg_jerk", "straightness", "total_distance",
-                                               "submovement_count", "spectral_purity")}
+                                               "submovement_count", "spectral_purity")} | {"ok": True}
 
 
 def test_storage_base_class_is_abstract_and_keeps_its_defaults():

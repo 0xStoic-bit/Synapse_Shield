@@ -3,6 +3,7 @@ Synapse Shield - Kinematic Feature Extractor v0.10.0 (Native Rust Core Accelerat
 """
 
 import math
+import re
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,48 @@ except (ImportError, AttributeError):
     except (ImportError, AttributeError):
         synapse_core_rs = None
         HAS_RUST_CORE = False
+
+
+# Browser numeric/boolean fields: one strict parser shared with lib.rs (parse_browser_f64/i64/bool).
+# int/float -> value; strict decimal string ("1920", "-1.5e3", no whitespace/underscores, <= 64 chars) -> value;
+# bool, None, non-finite, other types -> invalid (caller's default). Integers are truncated toward zero and must
+# fit in i64.
+_NUM_STR_RE = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+
+def _parse_browser_f64(v: Any) -> float | None:
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        try:
+            f = float(v)
+        except OverflowError:
+            return None
+    elif isinstance(v, str):
+        if len(v) > 64 or not _NUM_STR_RE.fullmatch(v):
+            return None
+        f = float(v)
+    else:
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _parse_browser_i64(v: Any) -> int | None:
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v if -(2**63) <= v < 2**63 else None
+    f = _parse_browser_f64(v)
+    if f is None or not (-9.2e18 < f < 9.2e18):
+        return None
+    return int(f)
+
+
+def _parse_browser_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in ("true", "1")
+    f = _parse_browser_f64(v)
+    return f is not None and f != 0.0
 
 
 def is_rust_accelerated() -> bool:
@@ -200,39 +243,28 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
     # 1. Tarayıcı, Ekran ve Mobil Donanım Telemetrisi
     browser = telemetry.get("browser", {})
     if isinstance(browser, dict):
-        features["webdriver"] = bool(browser.get("webdriver", False))
-        try:
-            screen_width = float(browser.get("screen_width", 0))
-            screen_height = float(browser.get("screen_height", 0))
-            features["screen_width"] = screen_width
-            if screen_width <= 0 or screen_height <= 0 or math.isnan(screen_width) or math.isnan(screen_height):
-                features["screen_valid"] = False
-        except (ValueError, TypeError):
+        features["webdriver"] = _parse_browser_bool(browser.get("webdriver", False))
+        screen_width = _parse_browser_f64(browser.get("screen_width"))
+        screen_height = _parse_browser_f64(browser.get("screen_height"))
+        screen_width = 0.0 if screen_width is None else screen_width
+        screen_height = 0.0 if screen_height is None else screen_height
+        features["screen_width"] = screen_width
+        if screen_width <= 0 or screen_height <= 0:
             features["screen_valid"] = False
 
-        features["touch_supported"] = bool(browser.get("touch_supported", False))
-        try:
-            features["max_touch_points"] = int(browser.get("max_touch_points", 0))
-        except (ValueError, TypeError):
-            features["max_touch_points"] = 0
-        try:
-            features["plugins_length"] = int(browser.get("plugins_length", 1))
-        except Exception:
-            features["plugins_length"] = 1
+        features["touch_supported"] = _parse_browser_bool(browser.get("touch_supported", False))
+        mtp = _parse_browser_i64(browser.get("max_touch_points"))
+        features["max_touch_points"] = 0 if mtp is None else mtp
+        plugins = _parse_browser_i64(browser.get("plugins_length"))
+        features["plugins_length"] = 1 if plugins is None else plugins
 
-        try:
-            dpr = float(browser.get("device_pixel_ratio", 1.0))
-            if dpr > 0.0 and not math.isnan(dpr) and not math.isinf(dpr):
-                features["device_pixel_ratio"] = dpr
-        except (ValueError, TypeError):
-            features["device_pixel_ratio"] = 1.0
+        dpr = _parse_browser_f64(browser.get("device_pixel_ratio"))
+        if dpr is not None and dpr > 0.0:
+            features["device_pixel_ratio"] = dpr
 
-        try:
-            mv = float(browser.get("motion_variance", 0.0))
-            if mv >= 0.0 and not math.isnan(mv) and not math.isinf(mv):
-                features["motion_variance"] = mv
-        except (ValueError, TypeError):
-            features["motion_variance"] = 0.0
+        mv = _parse_browser_f64(browser.get("motion_variance"))
+        if mv is not None and mv >= 0.0:
+            features["motion_variance"] = mv
 
         webgl_renderer = str(browser.get("webgl_renderer", "")).lower()
         if (
@@ -290,6 +322,45 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
         avg_tap = sum(tap_durations) / len(tap_durations)
         features["avg_tap_duration"] = avg_tap
         features["tap_duration_var"] = sum((d - avg_tap) ** 2 for d in tap_durations) / len(tap_durations)
+
+    # Fare noktalarını klavye bölümünden ÖNCE ayrıştır: #5 mobil IME muafiyeti dokunma kanıtına bakar
+    # (keystrokes.rs: compute_kinematics dokunma alanlarını klavyeden önce hesaplar).
+    mouse_movements = telemetry.get("mouse_movements", [])
+    valid_moves = []
+    if isinstance(mouse_movements, list):
+        for m in mouse_movements:
+            if isinstance(m, dict) and "x" in m and "y" in m and "t" in m:
+                try:
+                    x = float(m["x"])
+                    y = float(m["y"])
+                    t = float(m["t"])
+                    r = float(m.get("r", 0.0)) if "r" in m else 0.0
+                    f = float(m.get("f", 0.0)) if "f" in m else 0.0
+                    is_touch_src = str(m.get("source", "")) == "touch"
+                    if not (
+                        math.isnan(x)
+                        or math.isnan(y)
+                        or math.isnan(t)
+                        or math.isinf(x)
+                        or math.isinf(y)
+                        or math.isinf(t)
+                    ):
+                        valid_moves.append({
+                            "x": x,
+                            "y": y,
+                            "t": t,
+                            "r": max(0.0, r) if not math.isnan(r) and not math.isinf(r) else 0.0,
+                            "f": max(0.0, f) if not math.isnan(f) and not math.isinf(f) else 0.0,
+                            "is_touch_source": is_touch_src,
+                        })
+                except (ValueError, TypeError):
+                    continue
+    # engine.py has_capacitive_data ile aynı: touch_event_count > 0 veya tap_count > 0.
+    touch_evidence = (
+        bool(tap_durations)
+        or touch_click_count > 0
+        or any(m["r"] > 0.0 or m["is_touch_source"] for m in valid_moves)
+    )
 
     # 3. Klavye Dinamikleri (Dwell & Flight Time Parity v0.9.2 + Mobile IME Support)
     keystrokes = telemetry.get("keystrokes", [])
@@ -454,7 +525,13 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     1 for d in detailed if str(d.get("key", "")).lower() in ("unidentified", "process")
                 )
                 # Require majority of keystrokes to be virtual IME to prevent desktop bot dwell bypass (matches Rust core)
-                is_mobile_ime = bool(detailed) and (ime_count * 2 >= len(detailed))
+                # #5: "unidentified"/"process" yalnızca dokunmatik cihazda IME'dir. Dokunma kanıtı yok ve ekran
+                # masaüstü genişliğindeyse (>= 1024) sahtedir (keystrokes.rs ve engine.py touch yeniden sınıflaması ile aynı).
+                is_mobile_ime = (
+                    bool(detailed)
+                    and (ime_count * 2 >= len(detailed))
+                    and (touch_evidence or features["screen_width"] < 1024.0)
+                )
 
                 if dwell_times and not is_mobile_ime:
                     if features["avg_dwell_time"] < 15.0:
@@ -496,10 +573,10 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                     if direct_freq_flights and direct_non_freq_flights:
                         f_mean = sum(direct_freq_flights) / len(direct_freq_flights)
                         nf_mean = sum(direct_non_freq_flights) / len(direct_non_freq_flights)
+                        # #5: istemci bayrağı yalnızca kanıt ekleyebilir; sunucunun doğrulayamadığı "sık digraph'lar
+                        # daha hızlı" deseni skoru düşüremez (keystrokes.rs ile aynı).
                         if f_mean >= nf_mean * 1.05 and len(detailed) >= 8:
                             score += 0.40
-                        elif f_mean < nf_mean * 0.85:
-                            score = max(0.0, score - 0.25)
                 elif digraph_flights:
                     freq_avg = []
                     non_freq_avg = []
@@ -515,8 +592,8 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
                         nf_mean = sum(non_freq_avg) / len(non_freq_avg)
                         if f_mean >= nf_mean * 1.05 and len(detailed) >= 8:
                             score += 0.40
-                        elif f_mean < nf_mean * 0.85:
-                            score = max(0.0, score - 0.25)
+                        # Ham tuş adları da istemci verisidir: istemci sinyali skoru yalnızca artırabilir, düşüremez
+                        # (eski 'sık digraph daha hızlı → −0,25' dalı kaldırıldı; keystrokes.rs ile aynı).
 
                 if entropy < 0.15 and len(flight_times) >= 5:
                     score += 0.70
@@ -526,37 +603,7 @@ def extract_features(telemetry: dict[str, Any], force_python: bool = False) -> d
             features["keystroke_score"] = min(1.0, max(0.0, score))
 
     # 4. Fare Kinematiği & Biyomekanik Titreme
-    mouse_movements = telemetry.get("mouse_movements", [])
     if isinstance(mouse_movements, list):
-        valid_moves = []
-        for m in mouse_movements:
-            if isinstance(m, dict) and "x" in m and "y" in m and "t" in m:
-                try:
-                    x = float(m["x"])
-                    y = float(m["y"])
-                    t = float(m["t"])
-                    r = float(m.get("r", 0.0)) if "r" in m else 0.0
-                    f = float(m.get("f", 0.0)) if "f" in m else 0.0
-                    is_touch_src = str(m.get("source", "")) == "touch"
-                    if not (
-                        math.isnan(x)
-                        or math.isnan(y)
-                        or math.isnan(t)
-                        or math.isinf(x)
-                        or math.isinf(y)
-                        or math.isinf(t)
-                    ):
-                        valid_moves.append({
-                            "x": x,
-                            "y": y,
-                            "t": t,
-                            "r": max(0.0, r) if not math.isnan(r) and not math.isinf(r) else 0.0,
-                            "f": max(0.0, f) if not math.isnan(f) and not math.isinf(f) else 0.0,
-                            "is_touch_source": is_touch_src,
-                        })
-                except (ValueError, TypeError):
-                    continue
-
         features["mouse_points"] = len(valid_moves)
 
         # 4.1 Dokunmatik & Kapasitif Biyometri (Touch Biometrics)

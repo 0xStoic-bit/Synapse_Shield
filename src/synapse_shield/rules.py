@@ -49,7 +49,9 @@ RULE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("keystroke_constant", "Robotic constant-interval keystroke"),
     ("keystroke_superhuman", "Superhuman input frequency"),
     ("request_frequency", "Poisson request frequency anomaly"),
+    ("session_shape_invariance", "Same normalized trajectory shape repeated"),
     ("session_invariance", "Session Behavioral Invariance"),
+    ("trajectory_replay", "REPLAY_TRAJECTORY"),
     ("ai_error", "AI Model Error"),
 )
 

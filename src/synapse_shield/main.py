@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import hashlib
 import hmac
+import logging
 
 # pyrefly: ignore [missing-import]
 import uvicorn
@@ -23,17 +24,34 @@ import time
 from collections import OrderedDict
 
 from synapse_shield._version import __version__
-from synapse_shield.core import anonymize_ip, get_trusted_proxies, resolve_client_ip
+from synapse_shield.core import (
+    TRAJECTORY_REPLAY_REASON,
+    TRAJECTORY_REPLAY_THREAT,
+    anonymize_ip,
+    counts_as_ip_strike,
+    invariance_scopes,
+    pow_challenge_difficulty,
+    pow_solved_discount,
+    get_trusted_proxies,
+    ip_shape_session_id,
+    is_trajectory_replay,
+    record_ip_shape_history,
+    record_session_history,
+    resolve_client_ip,
+    SECRET_KEY,
+)
 from synapse_shield.engine import analyze_behavior
 from synapse_shield import metrics as prom
 from synapse_shield.privacy import sanitize_keystrokes
-from synapse_shield.storage import get_storage
+from synapse_shield.storage import client_strike_key, get_storage
 from synapse_shield.tokens import (
     generate_challenge,
     generate_pow_salt,
     verify_and_consume_token,
     verify_and_consume_pow,
 )
+
+logger = logging.getLogger("synapse_shield.main")
 
 _get_trusted_proxies = get_trusted_proxies
 TRUSTED_PROXIES = _get_trusted_proxies()
@@ -272,32 +290,106 @@ def get_client_ip(request: Request | WebSocket) -> str:
 def mask_ip(ip_str: str) -> str:
     return anonymize_ip(ip_str)
 
-def get_recent_request_count(ip: str) -> int:
-    conn = get_connection()
-    cursor = conn.cursor()
-    ten_seconds_ago = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
-    cursor.execute("SELECT COUNT(*) FROM logs WHERE ip = ? AND timestamp > ?", (ip, ten_seconds_ago))
-    count = cursor.fetchone()[0]
-    return count + 1
+_UA_BROWSERS = (
+    ("Edg/", "Edge"), ("OPR/", "Opera"), ("SamsungBrowser/", "SamsungBrowser"), ("Firefox/", "Firefox"),
+    ("CriOS/", "Chrome"), ("FxiOS/", "Firefox"), ("Chrome/", "Chrome"), ("Version/", "Safari"),
+)
+_UA_OSES = (
+    ("Windows", "Windows"), ("Android", "Android"), ("iPhone", "iOS"), ("iPad", "iOS"),
+    ("Mac OS X", "macOS"), ("CrOS", "ChromeOS"), ("Linux", "Linux"),
+)
+
+
+def privacy_user_agent(user_agent: str | None) -> str:
+    """User-Agent value persisted in the `logs` table, according to SYNAPSE_PRIVACY_MODE.
+
+    - 'strict' (default): coarse family only, e.g. "Chrome/131 Windows" (browser + major version + OS);
+      unknown agents (curl, scripts) become their first product token's name, capped at 32 chars.
+    - 'hash': "ua_" + HMAC-SHA256(SECRET_KEY, UA) truncated to 16 hex chars (correlatable, not readable).
+    - 'off': the raw string, capped at 512 chars (operator's explicit choice).
+    Token binding and the device penalty key use the raw UA in memory; this only governs persistence.
+    """
+    ua = (user_agent or "").strip()
+    mode = os.environ.get("SYNAPSE_PRIVACY_MODE", "strict").lower()
+    if mode == "off":
+        return ua[:512] or "Unknown"
+    if not ua:
+        return "Unknown"
+    if mode == "hash":
+        return "ua_" + hmac.new(SECRET_KEY, ua.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+    browser = None
+    for marker, name in _UA_BROWSERS:
+        idx = ua.find(marker)
+        if idx >= 0:
+            ver = ua[idx + len(marker):].split(".", 1)[0].split(" ", 1)[0]
+            browser = f"{name}/{ver}" if ver.isdigit() else name
+            break
+    os_name = next((name for marker, name in _UA_OSES if marker in ua), None)
+    if browser is None:
+        token = ua.split(" ", 1)[0].split("/", 1)[0]
+        browser = "".join(c for c in token if c.isalnum() or c in "-_.")[:32] or "Unknown"
+        if browser == "Mozilla":
+            browser = "Other"
+    return f"{browser} {os_name}" if os_name else browser
+
+
+_LOG_PRUNE_LOCK = threading.Lock()
+_last_log_prune = time.monotonic()  # prune_old_records() runs once at import, below
+
+
+def _log_prune_interval_sec() -> float:
+    try:
+        return max(1.0, float(os.environ.get("SYNAPSE_LOG_PRUNE_INTERVAL_SEC", "600")))
+    except ValueError:
+        return 600.0
+
+
+def maybe_prune_old_records() -> bool:
+    """Run the retention TTL prune at most once per SYNAPSE_LOG_PRUNE_INTERVAL_SEC (default 600 s).
+
+    Called on the log-write path; the common case is a single monotonic-clock comparison.
+    """
+    global _last_log_prune
+    now = time.monotonic()
+    if now - _last_log_prune < _log_prune_interval_sec():
+        return False
+    if not _LOG_PRUNE_LOCK.acquire(blocking=False):
+        return False
+    try:
+        if now - _last_log_prune < _log_prune_interval_sec():
+            return False
+        _last_log_prune = now
+    finally:
+        _LOG_PRUNE_LOCK.release()
+    prune_old_records()
+    return True
 
 
 def is_ip_banned(ip: str) -> bool:
     return get_storage().is_ip_banned(ip)
 
 
-def record_ip_decision(ip: str, is_bot: bool):
+def record_ip_decision(ip: str, is_bot: bool, client_key: str | None = None, ip_strike: bool = True):
     """
     Sliding Window (Kayan Pencere) Tabanlı Dinamik IP Karantina Takibi:
-    Son 60 saniye içerisinde 4 veya daha fazla bot kararı tespit edilirse IP 1 dakika banlanır.
+    Son 60 saniye içerisinde 4 veya daha fazla IP vuruşu (strike) olursa IP 1 dakika banlanır.
+
+    ip_strike=False: the verdict is a Bot but not a "hard" one (see core.counts_as_ip_strike), so it does
+    not feed the IP-wide ban counter that every device behind a CGNAT shares.
+    client_key (IP+UA hash, see storage.client_strike_key) additionally records the verdict for the
+    short per-device "+50 penalized" signal, so other devices behind the same NAT are not penalised.
     """
     if is_bot:
-        get_storage().record_bot_strike(
-            ip,
-            threshold=4,
-            window_sec=60,
-            ban_duration_sec=60,
-            reason="High bot density in sliding time window (4 bot requests in last 60 seconds)",
-        )
+        if ip_strike:
+            get_storage().record_bot_strike(
+                ip,
+                threshold=4,
+                window_sec=60,
+                ban_duration_sec=60,
+                reason="High bot density in sliding time window (4 hard bot verdicts in last 60 seconds)",
+            )
+        if client_key:
+            get_storage().record_client_strike(client_key, window_sec=60)
 
 
 def ban_ip(ip: str, minutes: int, reason: str):
@@ -336,7 +428,7 @@ def save_log(
         (
             now,
             ip,
-            user_agent,
+            privacy_user_agent(user_agent),
             bot_score,
             classification,
             threat_type,
@@ -355,6 +447,7 @@ def save_log(
         )
     """)
     conn.commit()
+    maybe_prune_old_records()
 
 
 def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reasons: list[str]):
@@ -426,6 +519,33 @@ def send_webhook_notification(ip: str, threat_type: str, risk_score: float, reas
         print(f"Webhook Notification Error: {e}")
 
 
+def _admin_secret_matches(provided: Any, expected: str | None) -> bool:
+    """Constant-time admin secret check that never raises.
+
+    hmac.compare_digest() raises TypeError for a str with non-ASCII characters (Starlette decodes header
+    values as latin-1, so any byte >= 0x80 does that), which used to surface as HTTP 500. Both sides are
+    compared as UTF-8 bytes instead.
+    """
+    if not expected or not provided or not isinstance(provided, str):
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+_admin_not_configured_logged = False
+
+
+def _log_admin_auth_failure(reason: str, path: str, client_ip: str) -> None:
+    """Server-side detail for a rejected admin request; the HTTP response stays a generic 401."""
+    global _admin_not_configured_logged
+    if reason.startswith("SYNAPSE_ADMIN_SECRET not configured"):
+        # Unauthenticated callers can trigger this at will: say it loudly once, then at debug level.
+        level = logging.DEBUG if _admin_not_configured_logged else logging.WARNING
+        _admin_not_configured_logged = True
+    else:
+        level = logging.WARNING
+    logger.log(level, "Admin auth rejected on %s from %s: %s", path, anonymize_ip(client_ip), reason)
+
+
 def verify_admin(request: Request):
     """Admin endpoint'leri için yetkilendirme doğrulaması."""
     dev_mode = os.environ.get("SYNAPSE_DEV_MODE", "0") == "1"
@@ -440,9 +560,20 @@ def verify_admin(request: Request):
 
     # Üretimde (veya dev_mode olmayan durumlarda) IP'ye bakma, sadece secret doğrula.
     admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
-    provided_secret = request.headers.get("X-Admin-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
-    
-    if not admin_secret or not provided_secret or not hmac.compare_digest(provided_secret, admin_secret):
+    provided_secret = request.headers.get("X-Admin-Secret")
+    if not provided_secret:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            provided_secret = auth_header[len("Bearer "):]
+
+    # The response body is identical for every failure (no oracle telling a scanner whether admin auth
+    # is configured or which header it reached); the operator gets the real cause in the server log.
+    if not admin_secret:
+        _log_admin_auth_failure("SYNAPSE_ADMIN_SECRET not configured: admin endpoints are disabled", request.url.path, client_ip)
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
+    if not _admin_secret_matches(provided_secret, admin_secret):
+        reason = "missing admin secret" if not provided_secret else "invalid admin secret"
+        _log_admin_auth_failure(reason, request.url.path, client_ip)
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid admin secret")
 
 
@@ -530,6 +661,7 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=403, detail="IP address temporarily banned due to suspicious activity.")
 
     user_agent = request.headers.get("user-agent", "Unknown")
+    client_key = client_strike_key(ip, user_agent)
 
     try:
         body = json.loads(raw_body)
@@ -561,7 +693,10 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
                     "threat_type": "EXPIRED_CHALLENGE",
                 },
             )
-        # Replay Attack veya sahte token durumu: Ceza havuzuna ekle
+        # Replay / sahte / bozuk / relay token: yalnızca IP düzeyindeki 4-vuruş ban sayacına yazılır.
+        # Cihaz (IP+UA) +50 cezası VERİLMEZ: SDK ağ-hatası retry'ı veya çift tıklama aynı token'ı yeniden
+        # gönderir; o istek reddedilir (replay) ama gerçek kullanıcının sonraki temiz isteği cezasız kalır.
+        # Cihaz cezası yalnızca davranışsal Bot kararından gelir (aşağıda). core.py ile aynı.
         record_ip_decision(ip, is_bot=True)
         if "Token Relay" in reason or "Binding Mismatch" in reason:
             threat_type = "TOKEN_RELAY_ATTACK"
@@ -584,15 +719,19 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
 
     # Atomik kayan pencere istek sayımı (Race condition koruması)
     recent_count = await asyncio.to_thread(get_storage().record_and_get_request_count, ip, 10)
-    if recent_count > 100:
+    # Same knob as core.py (SDK/middleware path) so both entry points share one threshold.
+    max_10s_limit = int(os.environ.get("SYNAPSE_MAX_REQ_10S", "100"))
+    if recent_count > max_10s_limit:
         ban_ip(ip, 15, "Extreme request frequency (DoS/Brute-force protection)")
         raise HTTPException(status_code=403, detail="IP address banned due to extreme request frequency.")
 
     pow_nonce = body.get("pow_nonce") or request.headers.get("x-synapse-pow-nonce")
     pow_salt = body.get("pow_salt") or request.headers.get("x-synapse-pow-salt")
 
-    # Son 60 saniyedeki bot vuruşlarını kontrol et ve is_ip_penalized durumunu aktifleştir
-    strike_count = await asyncio.to_thread(get_storage().get_bot_strike_count, ip, 60)
+    # Son 60 saniyedeki bot kararları: +50 ceza IP+UA (cihaz) anahtarına göre uygulanır, IP'ye göre değil.
+    # Aynı CGNAT/Eduroam IP'sindeki tek bir botun kararı diğer cihazları cezalandırmaz; IP düzeyindeki
+    # 4 vuruş / 60 sn ban'ı (record_bot_strike) IP başına saymaya devam eder.
+    strike_count = await asyncio.to_thread(get_storage().get_client_strike_count, client_key, 60)
     is_ip_penalized = strike_count >= 1
 
     # Same session key as core.py: IP + User-Agent hash, so users behind one CGNAT/Eduroam address do not
@@ -600,9 +739,12 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     ua_hash = hashlib.sha256((user_agent or "unknown_ua").encode("utf-8")).hexdigest()[:16]
     session_id = f"ip_{ip}_{ua_hash}"
     session_history = await asyncio.to_thread(get_storage().get_session_telemetries, session_id, 300)
+    # #39-C IP-only şekil geçmişi (core.py ile aynı): UA döndürmek yeni bir IP+UA oturumu açar, IP geçmişini değil.
+    ip_session_id = ip_shape_session_id(ip)
+    ip_history = await asyncio.to_thread(get_storage().get_session_telemetries, ip_session_id, 300)
 
     bot_score, classification, reasons, details = await asyncio.to_thread(
-        analyze_behavior, telemetry, recent_count, is_ip_penalized, False, session_history
+        analyze_behavior, telemetry, recent_count, is_ip_penalized, False, session_history, ip_history=ip_history
     )
     threat_type = details.get("threat_type", "CLEAN_HUMAN" if classification == "Human" else "UNKNOWN_ANOMALY")
 
@@ -612,7 +754,16 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     )
     mouse_points = feat.get("mouse_points", 0)
     is_stealth = feat.get("is_stealth_automation", False) or (threat_type == "STEALTH_AUTOMATION")
-    has_invariance = any("Session Behavioral Invariance" in r for r in reasons) or (threat_type == "SESSION_INVARIANCE_BOT")
+    has_invariance, ip_shape_invariance = invariance_scopes(reasons, threat_type)
+    # IP-only şekil eşleşmesi (core.py ile aynı): isteği bloklar ama sert ihlal / IP vuruşu değildir.
+    if ip_shape_invariance and classification != "Bot":
+        classification = "Bot"
+        bot_score = max(bot_score, 70.0)
+        threat_type = "SESSION_INVARIANCE_BOT"
+    # Yetersiz kanıt segmentleri (core.py ile aynı): klavye-only ve kısa iz kapısı -> PoW zorluk 5, indirim -10.
+    insufficient_evidence = (
+        mouse_points == 0 and feat.get("key_count", 0) >= 3 and not feat.get("touch_supported", False)
+    ) or bool(details.get("short_trace_gated", False))
 
     hard_bot_violation = (
         total_interactive_events == 0
@@ -622,19 +773,25 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
     )
 
     # Proof of Work (Smart Challenge) for Gray Area - Daraltılmış aralık ve Sert İhlal Vetosu
-    if (35.0 <= bot_score < 55.0) and not hard_bot_violation:
+    # BİLİNÇLİ POLİTİKA FARKI (main.py <-> core.py): bu referans sunucu gri alanda (35 <= skor < 55, sert
+    # ihlal yok) HER ZAMAN PoW challenge döner. Framework adaptörleri (core.evaluate_synapse_request_sync)
+    # ise varsayılan enable_pow=False (SYNAPSE_ENABLE_POW) ile çalışır: orada gri alan, skor max_risk_score
+    # (50) altındaysa allow, üstündeyse block olur (klavye-only oturumlar hariç; onlara challenge zorunlu).
+    # Sonuç: aynı +50 cezalı (penalized) oturum burada "challenge", middleware'de "block" alabilir.
+    # Middleware'de aynı davranış için: SYNAPSE_ENABLE_POW=1 (veya enable_pow=True).
+    if (35.0 <= bot_score < 55.0) and not hard_bot_violation and not ip_shape_invariance:
         is_pow_valid = False
         if pow_nonce and pow_salt:
             is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce), client_ip=ip)
 
         if is_pow_valid:
-            bot_score = max(0.0, bot_score - 20.0)
+            bot_score = max(0.0, bot_score - pow_solved_discount(insufficient_evidence))
             classification = "Human"
             threat_type = "CLEAN_HUMAN"
             reasons.append("Gray area PoW Challenge successfully solved (Risk reduced).")
         else:
             # Risk-adaptive difficulty, identical to core.py: the closer to the block threshold, the harder.
-            pow_diff = 5 if bot_score >= 45.0 else 4
+            pow_diff = pow_challenge_difficulty(bot_score, insufficient_evidence)
             _count_request("challenge", "Unknown")
             return {
                 "status": "challenge_required",
@@ -643,22 +800,35 @@ async def score_telemetry(request: Request, background_tasks: BackgroundTasks):
                 "pow_salt": generate_pow_salt(client_ip=ip, difficulty=pow_diff),
             }
 
-    # Atomik ceza takibi
-    record_ip_decision(ip, is_bot=(classification == "Bot"))
+    # Yörünge replay'i (#39-A, core.py ile aynı): parmak izi YALNIZCA allow kararında tüketilir; 429 challenge,
+    # EXPIRED ve block tüketmez, böylece SDK'nın aynı (zamanı kaydırılmış) olayları yeni token ile yeniden
+    # gönderdiği retry yolları replay sayılmaz. TTL içinde tekrar -> block; token replay'i gibi yalnızca IP
+    # 4-vuruş sayacına yazılır, cihaz +50 cezası verilmez.
+    trajectory_replay = False
+    if classification != "Bot" and await asyncio.to_thread(is_trajectory_replay, get_storage(), telemetry):
+        trajectory_replay = True
+        bot_score = 100.0
+        classification = "Bot"
+        threat_type = TRAJECTORY_REPLAY_THREAT
+        reasons.append(TRAJECTORY_REPLAY_REASON)
+        if isinstance(details, dict):
+            details["threat_type"] = TRAJECTORY_REPLAY_THREAT
 
-    # Oturum düzeyinde telemetri geçmişini kaydet (Replay & Invariance Koruması)
-    if feat.get("mouse_points", 0) >= 3 and feat.get("total_distance", 0.0) > 0:
-        background_tasks.add_task(
-            get_storage().record_session_telemetry,
-            session_id,
-            {
-                "avg_jerk": feat.get("avg_jerk", 0.0),
-                "straightness": feat.get("straightness", 0.0),
-                "total_distance": feat.get("total_distance", 0.0),
-            },
-            10,
-            300,
-        )
+    # Atomik ceza takibi: her Bot kararı cihaz (+50) cezası verir; IP ban sayacına yalnızca sert ihlal veya
+    # skor >= IP_STRIKE_MIN_SCORE olan kararlar yazılır (CGNAT arkasındaki insanların sınırdaki yanlış Bot
+    # kararları ortak IP'yi kilitlemesin). core.py ile aynı kural.
+    record_ip_decision(
+        ip,
+        is_bot=(classification == "Bot"),
+        client_key=None if trajectory_replay else client_key,
+        ip_strike=True if trajectory_replay else counts_as_ip_strike(bot_score, hard_bot_violation),
+    )
+
+    # IP-only şekil geçmişi yalnızca ALLOW kararlarında yazılır (core.py ile aynı; CGNAT zehirlemesine karşı).
+    if classification != "Bot":
+        background_tasks.add_task(record_ip_shape_history, get_storage(), ip_session_id, details)
+    # IP+UA oturum geçmişi her nihai kararda yazılır, ok = allow etiketiyle (#3G, core.record_session_history ile aynı).
+    background_tasks.add_task(record_session_history, get_storage(), session_id, details, classification != "Bot")
 
     background_tasks.add_task(
         save_log,
@@ -715,7 +885,14 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
     # Sadece yerel geliştirme modunda localhost'a şifresiz izin ver.
     if not (dev_mode and is_localhost):
         admin_secret = os.environ.get("SYNAPSE_ADMIN_SECRET")
-        if not admin_secret or not token or not hmac.compare_digest(token, admin_secret):
+        if not _admin_secret_matches(token, admin_secret):
+            _log_admin_auth_failure(
+                "SYNAPSE_ADMIN_SECRET not configured: admin endpoints are disabled"
+                if not admin_secret
+                else ("missing admin secret" if not token else "invalid admin secret"),
+                "/ws/terminal",
+                client_ip,
+            )
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
@@ -787,6 +964,12 @@ async def websocket_terminal(websocket: WebSocket, token: str | None = Query(Non
                     )
                 else:
                     msg = res.get("error", "Bilinmeyen durum")
+                    if not os.environ.get("SYNAPSE_WEIGHTS_PATH"):
+                        # retrain_fc2() never writes into the cwd: without a target file it skips.
+                        msg += (
+                            " | Set SYNAPSE_WEIGHTS_PATH=/path/to/weights.pt (the file the engine loads) and "
+                            "restart, or use `synapse-shield retrain --output /path/to/weights.pt`."
+                        )
                     await websocket.send_text(f"[INFO] Yeniden eğitim atlandı: {msg}")
             else:
                 await websocket.send_text(f"[ERROR] Unknown command: {cmd}. Type 'help'.")
@@ -983,7 +1166,7 @@ async def clear_logs(request: Request):
     cursor = conn.cursor()
     cursor.execute("DELETE FROM logs")
     conn.commit()
-    return {"status": "success", "message": "Database logs and bans cleared"}
+    return {"status": "success", "message": "Database logs, nonces, strikes, and bans cleared"}
 
 
 @app.post("/api/collect_dataset")

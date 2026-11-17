@@ -29,7 +29,7 @@ describe("Vanilla SDK token lifecycle", () => {
     const env = decodeToken(sdk.getPayload().token);
     expect(env.challenge).toBe(CHALLENGE);
     expect(typeof env.created_at).toBe("number");
-    expect(Object.keys(env.telemetry).sort()).toEqual(["browser", "clicks", "keystrokes", "mouse_movements", "scrolls"]);
+    expect(Object.keys(env.telemetry).sort()).toEqual(["browser", "clicks", "input_events", "keystrokes", "mouse_movements", "scrolls"]);
   });
 
   it("refuses to build a payload without a challenge", () => {

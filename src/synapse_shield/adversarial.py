@@ -53,6 +53,53 @@ def generate_bezier_telemetry(
     }
 
 
+def generate_humanized_bezier_telemetry(
+    start: tuple[float, float] = (100.0, 100.0),
+    end: tuple[float, float] = (500.0, 400.0),
+    steps: int = 45,
+    sample_ms: float = 30.0,
+    pixel_noise: float = 1.2,
+    rng: random.Random | None = None,
+    base_t: float = 1000.0,
+) -> dict[str, Any]:
+    """Cubic Bezier path as a *careful* bot would emit it (a measurement vector, not a regression one).
+
+    Unlike :func:`generate_bezier_telemetry` (noiseless, fixed 20 ms grid) this adds what a ghost-cursor
+    style tool adds: jittered sampling around the SDK's ~30 ms cadence, a minimum-jerk (bell-shaped)
+    speed profile via time-warping, Gaussian pixel noise and a click after the arrival pause.
+    It is deliberately NOT promised to be caught; its verdict is a measurement.
+    """
+    r = rng or random
+    p0, p3 = start, end
+    p1 = (start[0] + (end[0] - start[0]) * 0.3 + r.uniform(-40, 40), start[1] + (end[1] - start[1]) * 0.1 + r.uniform(-40, 40))
+    p2 = (start[0] + (end[0] - start[0]) * 0.7 + r.uniform(-40, 40), start[1] + (end[1] - start[1]) * 0.9 + r.uniform(-40, 40))
+    movements = []
+    t = base_t
+    for i in range(steps):
+        tau = i / (steps - 1)
+        u = 10 * tau**3 - 15 * tau**4 + 6 * tau**5  # minimum-jerk speed profile
+        b0, b1, b2, b3 = (1 - u) ** 3, 3 * (1 - u) ** 2 * u, 3 * (1 - u) * u**2, u**3
+        x = b0 * p0[0] + b1 * p1[0] + b2 * p2[0] + b3 * p3[0] + r.gauss(0, pixel_noise)
+        y = b0 * p0[1] + b1 * p1[1] + b2 * p2[1] + b3 * p3[1] + r.gauss(0, pixel_noise)
+        movements.append({"x": round(x), "y": round(y), "t": round(t, 1)})
+        t += min(60.0, max(12.0, r.gauss(sample_ms, 7.0)))
+    last = movements[-1]
+    return {
+        "mouse_movements": movements,
+        "clicks": [{"x": last["x"], "y": last["y"], "t": round(t + r.uniform(80, 160), 1)}],
+        "keystrokes": [],
+        "scrolls": [],
+        "browser": {
+            "webdriver": False,
+            "screen_width": 1920,
+            "screen_height": 1080,
+            "plugins_length": 3,
+            "touch_supported": False,
+            "max_touch_points": 0,
+        },
+    }
+
+
 def generate_linear_telemetry(
     start: tuple[float, float] = (100.0, 100.0),
     end: tuple[float, float] = (500.0, 400.0),

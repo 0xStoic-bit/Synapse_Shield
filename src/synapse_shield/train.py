@@ -12,23 +12,40 @@ import tempfile
 import numpy as np
 
 from synapse_shield.features import MultimodalTokenizer
+from synapse_shield.models import BUNDLED_WEIGHTS_PATH, WEIGHTS_ENV, resolve_weights_path
 
 logger = logging.getLogger("synapse_shield.train")
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
-BASE_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.npz")
+BASE_WEIGHTS_PATH = BUNDLED_WEIGHTS_PATH
 WEIGHTS_PATH = BASE_WEIGHTS_PATH
-DEFAULT_LOCAL_WEIGHTS_PATH = os.path.join(os.getcwd(), "synapse_weights.npz")
 
 
 def get_active_weights_path() -> str:
-    """Returns the path of the weights file to load, prioritizing custom/local over base."""
-    env_w = os.environ.get("SYNAPSE_WEIGHTS_PATH")
-    if env_w and os.path.exists(env_w):
-        return env_w
-    if os.path.exists(DEFAULT_LOCAL_WEIGHTS_PATH):
-        return DEFAULT_LOCAL_WEIGHTS_PATH
-    return BASE_WEIGHTS_PATH
+    """The weights the engine would load right now (same resolution as SynapseHybridModel; never the cwd)."""
+    return resolve_weights_path()
+
+
+def resolve_output_path(output_path: str | None = None, overwrite_base: bool = False) -> str:
+    """Where retrained weights go: --output > overwrite_base > SYNAPSE_WEIGHTS_PATH. No implicit cwd target.
+
+    The engine only loads SYNAPSE_WEIGHTS_PATH (or the bundled file), so writing anywhere else by default would
+    produce a model that is silently never used, and writing into the working directory let test runs and ad-hoc
+    calls change the repo-root model between runs (open issue #40).
+    """
+    if output_path:
+        target = os.path.abspath(output_path)
+    elif overwrite_base:
+        target = os.path.abspath(BASE_WEIGHTS_PATH)
+    elif os.environ.get(WEIGHTS_ENV, "").strip():
+        target = os.path.abspath(os.environ[WEIGHTS_ENV].strip())
+    else:
+        raise ValueError(
+            f"No output path for retrained weights: pass output_path (CLI: --output) or set {WEIGHTS_ENV}."
+        )
+    if not target.endswith(".npz"):
+        raise ValueError(f"Invalid output weights file extension: {target} (must be .npz)")
+    return target
 
 
 def load_training_data(
@@ -152,7 +169,8 @@ def retrain_fc2(
     """
     Fine-tunes the final FC layer (fc2_w, fc2_b) using Binary Cross Entropy (BCE)
     and Stochastic Gradient Descent (SGD) completely in NumPy.
-    Saves weights to ./synapse_weights.npz (or output_path) by default to prevent package pollution.
+    Saves weights to output_path, else to SYNAPSE_WEIGHTS_PATH (the file the engine loads). With neither set it
+    returns an error instead of writing into the current directory.
     """
 
     def notify(msg: str):
@@ -164,6 +182,14 @@ def retrain_fc2(
                 pass
 
     notify("[*] Synapse Shield Active Learning Pipeline Initiated...")
+
+    try:
+        target_weights_path = resolve_output_path(output_path, overwrite_base)
+    except ValueError as e:
+        if output_path:
+            raise  # malformed explicit path (e.g. not .npz) is a caller error
+        notify(f"[-] {e}")
+        return {"success": False, "error": str(e)}
 
     # 1. Load data
     X_telemetry, Y_labels = load_training_data(limit=500, include_adversarial=True, bootstrap=bootstrap)
@@ -182,7 +208,7 @@ def retrain_fc2(
     notify(f"[*] Loading base model weights from: {input_weights}")
 
     # Load current weights safely with context manager
-    with np.load(input_weights) as data:
+    with np.load(input_weights, allow_pickle=False) as data:
         conv_w = np.array(data["conv_w"])
         conv_b = np.array(data["conv_b"])
         fc1_w = np.array(data["fc1_w"])
@@ -264,15 +290,13 @@ def retrain_fc2(
         accuracy = float((correct / n_samples) * 100.0)
         notify(f"   Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.2f}%")
 
-    if output_path:
-        resolved = os.path.abspath(output_path)
-        if not resolved.endswith(".npz"):
-            raise ValueError(f"Invalid output weights file extension: {output_path} (must be .npz)")
-        target_weights_path = resolved
-    elif overwrite_base:
-        target_weights_path = os.path.abspath(BASE_WEIGHTS_PATH)
-    else:
-        target_weights_path = os.path.abspath(os.environ.get("SYNAPSE_WEIGHTS_PATH", DEFAULT_LOCAL_WEIGHTS_PATH))
+    # Sabit çıktılı (doymuş) bir FC2'yi kaydetme: normalize edilmemiş FC1 çıktılarıyla tekrarlanan SGD, ağırlığı
+    # her girdide aynı olasılığı veren bir modele sürükleyebiliyor (repo kökündeki synapse_weights.npz böyle bozuldu).
+    train_probs = sigmoid(X_train @ fc2_w + fc2_b).ravel()
+    if not (np.all(np.isfinite(fc2_w)) and np.all(np.isfinite(fc2_b))) or float(np.ptp(train_probs)) < 1e-6:
+        err = "Retrained FC2 is degenerate (non-finite or constant output); weights were not saved."
+        notify(f"[-] {err}")
+        return {"success": False, "error": err}
 
     notify(f"[*] Saving updated weights to {target_weights_path}...")
     weights_dir = os.path.dirname(os.path.abspath(target_weights_path))
@@ -303,6 +327,9 @@ def retrain_fc2(
             return {"success": False, "error": str(copy_err)}
 
     notify(f"[+] Model successfully retrained and weights saved to {target_weights_path}!")
+    if os.path.abspath(os.environ.get(WEIGHTS_ENV, "").strip() or BASE_WEIGHTS_PATH) != target_weights_path:
+        notify(f"[!] The engine does not load this file until {WEIGHTS_ENV}={target_weights_path} is set.")
+    notify("[!] The CNN only affects decisions with SYNAPSE_CNN_MODE=enforce (default: shadow).")
     return {"success": True, "samples": len(X_telemetry), "epochs": epochs, "loss": avg_loss, "accuracy": accuracy}
 
 

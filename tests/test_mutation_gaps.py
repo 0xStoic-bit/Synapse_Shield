@@ -336,7 +336,7 @@ def test_session_and_telemetry_plumbing(monkeypatch):
             return getattr(st, name)
 
         def get_session_telemetries(self, session_id, window_sec=None):
-            seen["session"] = (session_id, window_sec)
+            seen.setdefault("session", (session_id, window_sec))  # first call: IP+UA session; then IP-only shape history
             return []
 
         def record_and_get_request_count(self, ip, window_sec=None):
@@ -346,7 +346,7 @@ def test_session_and_telemetry_plumbing(monkeypatch):
         def record_session_telemetry(self, session_id, metrics_, max_history=None, window_sec=None):
             seen["record"] = (metrics_, max_history, window_sec)
 
-    def analyze(telemetry, recent, penalized, accessibility, history):
+    def analyze(telemetry, recent, penalized, accessibility, history, ip_history=None):
         seen["analyze"] = (penalized, accessibility, history)
         return 0.0, "Human", [], {"features": {"total_interactive_events": 3, "mouse_points": 3, "total_distance": 10.0}}
 
@@ -360,7 +360,7 @@ def test_session_and_telemetry_plumbing(monkeypatch):
     metrics_, max_history, window = seen["record"]
     assert (max_history, window) == (10, 300)
     assert metrics_ == {"avg_jerk": 0.0, "straightness": 1.0, "total_distance": 10.0, "submovement_count": 0,
-                        "spectral_purity": 0.0}
+                        "spectral_purity": 0.0, "ok": True}
 
 
 @pytest.mark.parametrize(

@@ -39,10 +39,12 @@
 
 ---
 
-## ✨ 核心特性与安全架构 (v0.10.7)
+## ✨ 核心特性与安全架构 (v0.11.0)
 
 | 核心特性 | 功能与技术解析 |
 | :--- | :--- |
+| 🧪 **实测修正、重放防御与诚实默认值 (v0.11.0)** | 每项改动均以相同种子做前后对比；真人误报数据来自真实 SapiMouse 数据集（120 人），机器人数据为合成。1D-CNN 默认改为 `shadow`（`SYNAPSE_CNN_MODE`）：内置权重仅用合成噪声训练，曾拦截约 19% 的真人窗口；不再从工作目录加载 `./synapse_weights.npz`（请用 `SYNAPSE_WEIGHTS_PATH`）。短轨迹（<40 个采样点）不再仅凭直线度 / FFT / 子运动规则被拦截（真实单次移动误拦 50% → 4.9%），此类灰区会话即使关闭 PoW 也会收到挑战。新增带密钥的 64 位轨迹指纹（1 小时 TTL，不存原始轨迹）与会话内形状 SimHash，用于防御重放。无触摸事件的 `touch_supported` 改为重新分类而非惩罚；60 秒设备惩罚按 HMAC(IP + UA) 计算；令牌错误不再惩罚设备；仅硬性违规或风险 ≥ 85 的 Bot 判定计入 4 次 IP 封禁。客户端信号只能提高风险。详见 [`docs/PRIVACY_OPERATOR_NOTES.md`](docs/PRIVACY_OPERATOR_NOTES.md) 与英文 README 的 *Detection policy and environment*。 |
+| ⌨️ **纯键盘访问与 React 工作量证明求解 (v0.10.8)** | 纯键盘会话（读屏软件、开关设备、Tab 导航：无鼠标移动且至少 3 次按键）不再仅因此被直接拦截：该规则由 +50 改为 +40，即使关闭 `enable_pow`，框架适配器也会对这类会话发出灰区工作量证明挑战（设置 `SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0` 可关闭），因此带抖动的自动输入脚本仍无法免费通过。React hook 现可自动求解 PoW 并重试一次（`submitProtected`、`solvePow`）；原生 SDK 求解上限提高到 2000 万次（难度 5 不再失败），重试等待时间会随输入时长调整，长时间输入不再被判为 Time Travel。仅基于合成数据测得：纯键盘真人被拦截 94% → 2.4%（其余收到挑战），纯键盘机器人无挑战直接放行 0%。 |
 | 🔭 **影子队列、规则代码与离线回放 (v0.10.7)** | 影子模式按队列（输入类型 × devicePixelRatio）统计，附稳定规则代码（`SynapseDecision.rule_codes`）；`report_shadow_outcome()` 可上报会话结果，用于判断强制拦截是否会误伤真实用户；提供现成的 Grafana 与 Prometheus 告警资源（`deploy/monitoring/`）；`synapse-shield replay` 可在本机离线评估自有录制数据的误报率/检出率。抖动（stutter）与快速打字规则已按真人数据重新校准（真实 20 秒窗口误拦截 2.7% → 0.5%，机器人检出不变）。 |
 | 🧾 **诚实的工具链与 API 契约 (v0.10.7)** | `synapse-shield test` / `redteam` 在服务不可达或判定错误时以非零状态码退出（不再在无服务时显示"全部通过"）；真人对照用例使用新鲜时间戳；`doctor` 在最小安装下可运行；`POST /api/score` 的每个分支都返回 `decision`（`allow` / `block` / `challenge` / `error`）；Prometheus 格式输出位于 `/metrics/prometheus`；除非设置 `SYNAPSE_STORE_RAW_TELEMETRY=1`，否则**不再**存储原始轨迹。 |
 | 🔬 **曲率门控与误报修复** | 修复微分曲率 $\kappa(t)$ 在低速停顿下的离散量化奇异点问题："混沌曲率"检查现在仅使用光标实际移动的点（相邻两步均 ≥ 5 px），真实用户在目标附近减速停下不再被误判。统一击键频率严格正值下界（`0 < key_interval_avg < 25ms`），消除快速连击（Rollover）误杀 Brave 隐私豁免与误打机器人标签。隔离移动端离散点击的多项式加速度误判（规则 4.C 引入 `and not is_touch`）。(v0.10.6) |

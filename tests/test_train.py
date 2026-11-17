@@ -70,14 +70,15 @@ def setup_teardown():
     shutil.rmtree(TEST_DB_DIR, ignore_errors=True)
 
 
-def test_retrain_fc2(monkeypatch):
-    # Mock WEIGHTS_PATH to avoid overwriting the real model
-    tmp_weights_path = os.path.join(TEST_DB_DIR, "dummy_weights.npz")
+def test_retrain_fc2(monkeypatch, tmp_path):
+    # Write only into tmp_path: a bare retrain_fc2() used to save to ./synapse_weights.npz and so rewrote
+    # the repo-root model on every test run (open issue #40).
+    monkeypatch.delenv("SYNAPSE_WEIGHTS_PATH", raising=False)
+    tmp_weights_path = str(tmp_path / "dummy_weights.npz")
     shutil.copy2(WEIGHTS_PATH, tmp_weights_path)
+    monkeypatch.setenv("SYNAPSE_WEIGHTS_PATH", tmp_weights_path)
 
-    monkeypatch.setattr("synapse_shield.train.WEIGHTS_PATH", tmp_weights_path)
-
-    # Retrain (transfer learning on FC2)
+    # Retrain (transfer learning on FC2): input and output are the env-selected file
     retrain_fc2(epochs=1)
 
     # Verify new weights were saved atomically

@@ -1,4 +1,13 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
+import {
+  MIN_CHALLENGE_AGE_MS,
+  alignForRetry,
+  challengeTimestamp,
+  fitTelemetry,
+  inputEventKind,
+  retryWaitMs,
+} from './timing';
+import type { SynapseInputKind } from './timing';
 
 declare const Buffer: any;
 
@@ -64,6 +73,8 @@ export interface SynapseTelemetry {
   clicks: Array<{ x: number; y: number; t: number; r?: number; tap_duration_ms?: number; source?: string }>;
   keystrokes: Array<{ type: string; key?: string; t: number; down?: number; up?: number; duration_ms?: number; is_freq_digraph?: boolean }>;
   scrolls: Array<{ y: number; t: number }>;
+  /** Zero-PII non-keyboard text entry (autofill, paste, IME, typed insertions): kind and time only, never content. */
+  input_events: Array<{ t: number; kind: SynapseInputKind }>;
   browser: {
     webdriver: boolean;
     screen_width: number;
@@ -165,6 +176,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     clicks: [],
     keystrokes: [],
     scrolls: [],
+    input_events: [],
     browser: {
       webdriver: false,
       screen_width: 0,
@@ -181,19 +193,30 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
   const activeKeys: Record<string, { down: number; isFreq: boolean }> = {};
   let lastRawKey = "";
 
-  const refreshChallenge = async (): Promise<string | null> => {
+  // Local time at which the current challenge arrived (its age decides which telemetry the server accepts).
+  let challengeFetchedAt = 0;
+
+  const fetchChallenge = async (): Promise<string | null> => {
     if (typeof window === 'undefined') return null;
     try {
       const res = await fetch(`${apiEndpoint}/challenge`);
       if (res.ok) {
         const data = await res.json();
-        currentChallenge.value = data.challenge;
-        return data.challenge;
+        return typeof data.challenge === "string" ? data.challenge : null;
       }
     } catch (e) {
       console.warn("[Synapse Shield] Could not fetch challenge, falling back to unsigned mode.");
     }
     return null;
+  };
+
+  const refreshChallenge = async (): Promise<string | null> => {
+    const challenge = await fetchChallenge();
+    if (challenge) {
+      currentChallenge.value = challenge;
+      challengeFetchedAt = Date.now();
+    }
+    return challenge;
   };
 
   /**
@@ -238,6 +261,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     telemetry.value.clicks = [];
     telemetry.value.keystrokes = [];
     telemetry.value.scrolls = [];
+    telemetry.value.input_events = [];
     motionSamples = [];
     lastTouchStartTime = 0;
   };
@@ -253,9 +277,11 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     }
 
     if (currentChallenge.value) {
+      // Only the events this challenge can vouch for: older ones (long SPA session, renewed challenge) would make
+      // the server reject the whole token as Stale Telemetry / Time Travel.
       const envelope: any = {
         challenge: currentChallenge.value,
-        telemetry: telemetry.value,
+        telemetry: fitTelemetry(telemetry.value, challengeTimestamp(currentChallenge.value), Date.now() - challengeFetchedAt),
         created_at: Date.now(),
       };
       if (powResult) {
@@ -273,6 +299,90 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     }
     return { telemetry: telemetry.value };
   };
+
+  /**
+   * POSTs a protected request and transparently handles the gray-area proof-of-work challenge (parity with the
+   * React SDK). `buildBody` receives the payload (`token`, plus `pow_salt`/`pow_nonce` on the retry) and returns the
+   * JSON body; put `pow_salt` and `pow_nonce` at the top level of that body, where the server middleware reads them.
+   * On HTTP 429 `challenge_required` it fetches a fresh challenge, solves the PoW and retries exactly ONCE.
+   * The final Response (including a second 429) is returned as is; there is no further retry.
+   */
+  const submitProtected = async (
+    url: string,
+    buildBody: (payload: SynapsePayload) => unknown,
+    init: RequestInit = {},
+  ): Promise<Response> => {
+    const send = (payload: SynapsePayload): Promise<Response> => {
+      const headers = new Headers(init.headers);
+      if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+      return fetch(url, {
+        ...init,
+        method: init.method || "POST",
+        headers,
+        body: JSON.stringify(buildBody(payload)),
+      });
+    };
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    // A missing or nearly-expired challenge (60 s lifetime) is renewed first; any challenge younger than the
+    // server's 1.5 s minimum is aged first. getProtectedPayload() then drops events older than its window.
+    if (!currentChallenge.value || Date.now() - challengeFetchedAt > 45000) {
+      await refreshChallenge();
+    }
+    const age = Date.now() - challengeFetchedAt;
+    if (currentChallenge.value && age < MIN_CHALLENGE_AGE_MS) await sleep(MIN_CHALLENGE_AGE_MS - age);
+
+    const first = await send(getProtectedPayload());
+    if (first.status !== 429) {
+      reset();
+      return first;
+    }
+
+    let body: any = null;
+    try {
+      body = await first.clone().json();
+    } catch (e) {}
+    if (!body || body.status !== "challenge_required" || typeof body.pow_salt !== "string" || !body.pow_salt) {
+      reset();
+      return first;
+    }
+
+    // The first token consumed our challenge: fetch a fresh one while the PoW is solved.
+    let freshAt = 0;
+    const [fresh, solution] = await Promise.all([
+      fetchChallenge().then((c) => {
+        freshAt = Date.now();
+        return c;
+      }),
+      solvePow(body.pow_salt, Number(body.pow_difficulty) || 4),
+    ]);
+    if (!fresh || !solution) return first; // cannot comply (no Web Crypto / no challenge); caller sees the 429
+
+    // Server checks: token age >= 1.5 s and telemetry span <= token age + 0.5 s. Wait briefly (<= 3 s; <= 8 s only
+    // to keep the last 3 mouse points), then send the most recent window that fits, shifted past challenge_ts.
+    const remaining = retryWaitMs(telemetry.value) - (Date.now() - freshAt);
+    if (remaining > 0) await sleep(remaining);
+    alignForRetry(telemetry.value, challengeTimestamp(fresh) ?? freshAt, Date.now() - freshAt);
+    // Re-assert our challenge: a background refresh started by the first payload may have replaced it.
+    currentChallenge.value = fresh;
+    challengeFetchedAt = freshAt;
+
+    const second = await send(getProtectedPayload(solution));
+    reset();
+    return second;
+  };
+
+  // Non-keyboard text entry: counted in input_events so key_count is never inflated (Zero-PII: no content read).
+  const pushInputEvent = (kind: SynapseInputKind) => {
+    telemetry.value.input_events.push({ t: Date.now(), kind });
+    if (telemetry.value.input_events.length > 50) telemetry.value.input_events.shift();
+  };
+  const handleInput = (e: Event) => {
+    const kind = inputEventKind(e);
+    if (kind) pushInputEvent(kind);
+  };
+  const handlePaste = () => pushInputEvent("paste");
+  const handleCompositionEnd = () => pushInputEvent("ime");
 
   // Event handlers
   const handleMouseMove = (e: MouseEvent) => {
@@ -511,6 +621,9 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     window.addEventListener("keydown", handleKeyDown, { passive: true });
     window.addEventListener("keyup", handleKeyUp, { passive: true });
     window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("input", handleInput, { passive: true, capture: true });
+    window.addEventListener("paste", handlePaste, { passive: true, capture: true });
+    window.addEventListener("compositionend", handleCompositionEnd, { passive: true, capture: true });
 
     isReady.value = true;
   });
@@ -527,6 +640,9 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     window.removeEventListener("keydown", handleKeyDown);
     window.removeEventListener("keyup", handleKeyUp);
     window.removeEventListener("scroll", handleScroll);
+    window.removeEventListener("input", handleInput, true);
+    window.removeEventListener("paste", handlePaste, true);
+    window.removeEventListener("compositionend", handleCompositionEnd, true);
   });
 
   return {
@@ -537,6 +653,7 @@ export function useSynapseShield(options: UseSynapseShieldOptions = {}) {
     refreshChallenge,
     solvePow,
     getProtectedPayload,
+    submitProtected,
     reset,
   };
 }

@@ -36,7 +36,7 @@ from synapse_shield.train import load_training_data
 def test_v1_spoofed_touch_supported_without_capacitive_data():
     """
     Desktop bot setting touch_supported=True on mouse movements without capacitive radius (r > 0)
-    must trigger +75.0 penalty, set is_touch=False, and execute all desktop kinematic filters.
+    must be reclassified (is_touch=False, no extra penalty) and execute all desktop kinematic filters.
     """
     linear_points = [{"x": i * 15, "y": i * 15, "t": 1000 + i * 20} for i in range(20)]
     telemetry = {

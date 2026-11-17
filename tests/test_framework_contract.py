@@ -38,6 +38,10 @@ HUMAN_TELEMETRY = {
 }
 BOT_TELEMETRY = {"browser": {"webdriver": True}}
 OVERSIZED = {"blob": "X" * (MAX_PAYLOAD_SIZE + 1024)}
+# A behavioural Bot verdict (also in shadow mode) gives the SAME device (IP + User-Agent) a +50 risk penalty for
+# 60 s, in main.py and in every adapter. Token failures (replay / forged) do not. A step that must be judged on
+# its own right after a Bot verdict is therefore sent as another device (see test_strike_policy.py).
+OTHER_DEVICE = {"User-Agent": "contract-other-device/1.0"}
 
 
 def make_token(human: bool = True) -> str:
@@ -489,7 +493,7 @@ def test_fastapi_shadow_passthrough_and_response_headers(fastapi_client):
     c = fastapi_client
     r = c.post("/deco-shadow", json={"token": make_token(human=False)})
     assert r.status_code == 200 and r.headers.get("x-synapse-decision") == "shadow-block"
-    r = c.post("/deco-positional", json={"token": make_token()})
+    r = c.post("/deco-positional", json={"token": make_token()}, headers=OTHER_DEVICE)
     assert r.text == "plain" and r.headers.get("x-synapse-decision") == "allow"
     assert c.post("/public", json={}).status_code == 200
     r = c.get("/mw/login")

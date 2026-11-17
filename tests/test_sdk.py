@@ -19,7 +19,7 @@ def test_sdk_static_serving():
     assert response.status_code == 200
     assert "application/javascript" in response.headers.get("content-type", "")
     content = response.text
-    assert "Synapse Shield SDK v0.10.7" in content
+    assert "Synapse Shield SDK v0.11.0" in content
     assert "safeBtoa" in content
     assert "solvePoW" in content
     assert "touchstart" in content
@@ -72,7 +72,7 @@ def test_utf8_token_handling():
     assert data["threat_type"] == "CLEAN_HUMAN"
 
 
-@patch.object(engine._ai_model, "predict", return_value=0.1)
+@patch.object(engine._ai_model, "predict_raw", return_value=0.1)
 def test_pow_gray_area_and_fresh_retry(mock_predict):
     """
     Test the complete PoW workflow:
@@ -166,7 +166,7 @@ def test_pow_gray_area_and_fresh_retry(mock_predict):
     assert any("PoW Challenge successfully solved" in r for r in data2["reasons"])
 
 
-@patch.object(engine._ai_model, "predict", return_value=0.1)
+@patch.object(engine._ai_model, "predict_raw", return_value=0.1)
 def test_pow_replay_attack_rejection_on_reused_token(mock_predict):
     """Verify that reusing the consumed challenge token during PoW retry is rejected as REPLAY_ATTACK."""
     chal_res = client.get("/api/challenge")
@@ -220,7 +220,7 @@ def test_pow_replay_attack_rejection_on_reused_token(mock_predict):
     assert data_buggy["bot_score"] == 100.0
 
 
-@patch.object(engine._ai_model, "predict", return_value=0.1)
+@patch.object(engine._ai_model, "predict_raw", return_value=0.1)
 def test_mobile_touch_telemetry_support(mock_predict):
     """Verify that mobile telemetry with touch events avoids missing mouse and plugin false positives."""
     # When a mobile user taps the screen, SDK captures touchstart and touchmove points into mouseMovements
@@ -275,7 +275,7 @@ def test_dynamic_pow_difficulty_logic():
     assert check_leading_zero_hex(bytes([0x00, 0x00, 0xFA, 0x34]), 5) is False
 
 
-@patch.object(engine._ai_model, "predict", return_value=0.05)
+@patch.object(engine._ai_model, "predict_raw", return_value=0.05)
 def test_capacitive_touch_radius_and_compliance(mock_predict):
     """Verify that human touch events with physical contact radius and variance receive compliance verification."""
     telemetry = {

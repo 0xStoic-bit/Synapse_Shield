@@ -25,6 +25,51 @@ def _get_dynamic_threshold(base_value: float, key_tag: str, spread_pct: float = 
     return base_value * (1.0 + jitter)
 
 
+# #39-C Oturum şekil değişmezliği: yay uzunluğuna göre 32 noktaya yeniden örneklenmiş, merkezlenmiş, RMS-ölçeklenmiş
+# (x, y) + normalize zaman oranı -> 64 bitlik SimHash. Öteleme, ölçek ve zaman bükmesine değişmez, birkaç px gürültüye
+# toleranslıdır; geri döndürülemez (ham iz saklanmaz). Hiperdüzlemler SECRET_KEY'den türetilir (white-box saldırgan
+# bit sınırlarını bilemez). Ölçüm (p2bc/inv_meas.py, SapiMouse 120 kullanıcı; 3 sn pencere 9238 istek, 20 sn 1525):
+# art arda 2 eşleşme (3 istek) kuralıyla Hamming <= 4, >= 10 nokta, >= 50 px yolda aynı kullanıcı ve NAT (12
+# kullanıcı tek IP) FP 0; ±1-3 px gürültü / %80-125 ölçek / ±%10 zaman bükmeli şablon replay TPR %100.
+SHAPE_HASH_POINTS = 32
+SHAPE_HASH_MIN_POINTS = 10
+SHAPE_HASH_MIN_PATH_PX = 50.0
+SHAPE_INVARIANCE_MAX_HAMMING = 4
+_SHAPE_PLANES = None
+
+
+def trajectory_shape_hash(telemetry: Any) -> str | None:
+    """Ölçekten bağımsız 64 bit şekil SimHash'i (16 hex) ya da yetersiz/bozuk izde None."""
+    global _SHAPE_PLANES
+    import numpy as np
+
+    moves = telemetry.get("mouse_movements") if isinstance(telemetry, dict) else None
+    if not isinstance(moves, list) or len(moves) < SHAPE_HASH_MIN_POINTS:
+        return None
+    try:
+        a = np.array([[float(m["x"]), float(m["y"]), float(m["t"])] for m in moves[:5000]], dtype=float)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not np.all(np.isfinite(a)):
+        return None
+    xy, t = a[:, :2], a[:, 2]
+    L = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))])
+    if L[-1] < SHAPE_HASH_MIN_PATH_PX:
+        return None
+    s = np.linspace(0.0, L[-1], SHAPE_HASH_POINTS)
+    x, y, tt = np.interp(s, L, xy[:, 0]), np.interp(s, L, xy[:, 1]), np.interp(s, L, t)
+    tt = (tt - tt[0]) / max(tt[-1] - tt[0], 1e-9) - 0.5
+    x, y = x - x.mean(), y - y.mean()
+    rms = float(np.sqrt((x**2 + y**2).mean()))
+    if rms <= 0.0:
+        return None
+    if _SHAPE_PLANES is None:
+        seed = int.from_bytes(hashlib.sha256(SECRET_KEY + b":shape_simhash").digest()[:8], "big")
+        _SHAPE_PLANES = np.random.default_rng(seed).standard_normal((64, 3 * SHAPE_HASH_POINTS))
+    bits = (_SHAPE_PLANES @ np.concatenate([x / rms, y / rms, tt * 2.0])) > 0
+    return f"{int.from_bytes(np.packbits(bits, bitorder='little').tobytes(), 'little'):016x}"
+
+
 # --- GLOBAL WARMUP ---
 # FastAPI (Uvicorn) worker başına sadece 1 kez yüklenir, RAM'de kalır.
 try:
@@ -56,6 +101,20 @@ STUTTER_MIN_PEAKS = 18
 STUTTER_MIN_PEAK_DENSITY = 0.22
 
 
+# #38a "Yetersiz kanıt" kapısı. Düzlük (A), FFT spektral saflık (H) ve alt-hareket eksikliği (I) kuralları iz
+# uzunluğuna bağlıdır: tek bir hedefe yönelik insan hareketi (çan biçimli hız profili, 1 tepe, neredeyse düz yol)
+# kısa izde bu üç kuralın tanımına doğal olarak uyar. Gerçek SapiMouse tek hareketlerinde (SDK 30 ms örnekleme)
+# bu kurallar 10-20 noktalı izlerin %54-67'sini, 40+ noktalı izlerin %6'sını engelliyordu. Bu yüzden
+# SHORT_TRACE_MAX_POINTS'ten kısa izlerde üçünün TOPLAM katkısı SHORT_TRACE_WEAK_RISK_CAP ile sınırlanır:
+# tek başına gri bölgede (35-55; PoW açıksa challenge, kapalıysa geçer) kalır, bağımsız bir sinyalle
+# (jerk, polinom ivme, eğrilik, sabit zamanlayıcı, Fitts, tamper...) birleşince eşiği aşar ve BLOCK kalır.
+# Matematiksel olarak kusursuz doğru (düzlük >= SHORT_TRACE_EXACT_LINE) Demir Kural 2 gereği sınırlanmaz.
+# Eşik ölçümle seçildi (p2a/m1_gate*: 15-100000 nokta taraması): bkz. tests/test_short_trace_gate.py.
+SHORT_TRACE_MAX_POINTS = 40
+SHORT_TRACE_WEAK_RISK_CAP = 45.0
+SHORT_TRACE_EXACT_LINE = 0.9999
+
+
 # Hızlı gerçek yazarlar (parmaklar örtüşürken) ortalama up->down aralığını 25 ms altına indirir; ama aralıkları
 # geniş dağılır (kayıtlı gerçek yazımda en düşük standart sapma ~47 ms, varyans ~1700 ms²). Otomatik yazıcıların
 # aralığı sabit ya da çok dar jitter'lıdır. Bu yüzden "insanüstü" için ortalama düşük VE varyans dar olmalı.
@@ -74,6 +133,63 @@ def _superhuman_key_interval(features: dict[str, Any]) -> bool:
         0.0 < features.get("key_interval_avg", 100.0) < 25.0
         and features.get("key_interval_var", 0.0) < SUPERHUMAN_KEY_MAX_VAR_MS2
     )
+
+
+# #6: Chrome, Enter ile örtük form gönderiminde varsayılan düğmeye clientX/Y = 0 olan sentetik bir click üretir.
+# Bu click imleç konumu taşımaz; kinematik tık kurallarına (imleç hizası, Fitts) girerse fareyle alanları
+# doldurup Enter'a basan gerçek kullanıcı cezalanır. Parola alanında SDK Enter'ı "masked" gönderir; bu yüzden tuş
+# adına değil, click'ten en fazla bu kadar önce gelen herhangi bir keydown'a bakılır.
+SYNTHETIC_ENTER_CLICK_MAX_MS = 50.0
+
+
+def _keydown_times(telemetry: Any) -> list[float]:
+    keys = telemetry.get("keystrokes", []) if isinstance(telemetry, dict) else []
+    out: list[float] = []
+    if not isinstance(keys, list):
+        return out
+    for k in keys[:150]:
+        if isinstance(k, dict) and k.get("type", "down") == "down":
+            v = k.get("t", k.get("down"))
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                out.append(float(v))
+    return out
+
+
+def _synthetic_enter_click_ids(telemetry: Any) -> set[int]:
+    """Koordinatsız (0, 0), dokunma olmayan ve <= 50 ms önce bir keydown'ı olan click'lerin id()'leri."""
+    clicks = telemetry.get("clicks", []) if isinstance(telemetry, dict) else []
+    if not isinstance(clicks, list) or not clicks:
+        return set()
+    downs = _keydown_times(telemetry)
+    out: set[int] = set()
+    if not downs:
+        return out
+    for c in clicks[:100]:
+        if not isinstance(c, dict) or c.get("source") == "touch":
+            continue
+        try:
+            if float(c.get("x", -1)) != 0.0 or float(c.get("y", -1)) != 0.0:
+                continue
+            t_c = float(c.get("t"))
+        except (TypeError, ValueError):
+            continue
+        if any(0.0 <= t_c - d <= SYNTHETIC_ENTER_CLICK_MAX_MS for d in downs):
+            out.add(id(c))
+    return out
+
+
+INPUT_EVENT_KINDS = ("autofill", "paste", "ime", "insert")
+
+
+def _input_event_counts(telemetry: Any) -> dict[str, int]:
+    """SDK `input_events: [{t, kind}]` (içeriksiz). Yalnızca GÖZLEM: karara girmez (bkz. analyze_behavior)."""
+    ev = telemetry.get("input_events", []) if isinstance(telemetry, dict) else []
+    counts = dict.fromkeys(INPUT_EVENT_KINDS, 0)
+    if isinstance(ev, list):
+        for e in ev[:50]:
+            if isinstance(e, dict) and e.get("kind") in counts:
+                counts[e["kind"]] += 1
+    return counts
 
 
 def poisson_anomaly_score(k: int, lambda_val: float = 2.0) -> float:
@@ -105,10 +221,26 @@ def analyze_behavior(
     is_ip_penalized: bool = False,
     accessibility_mode: bool = False,
     session_history: list[dict[str, Any]] | None = None,
+    ip_history: list[dict[str, Any]] | None = None,
 ) -> tuple[float, str, list[str], dict[str, Any]]:
     features = extract_features(telemetry)
     reasons = []
     total_risk = 0.0
+
+    # #6: Enter ile gönderimin sentetik (0, 0) click'i kinematik tık kurallarına girmez (ceza da, kanıt da değil).
+    synthetic_click_ids = _synthetic_enter_click_ids(telemetry)
+    features["synthetic_click_count"] = len(synthetic_click_ids)
+    kinematic_click_count = max(0, features.get("click_count", 0) - len(synthetic_click_ids))
+    # SDK input_events (autofill/paste/ime/insert) yalnızca gözlem alanıdır; karara girmez. Ölçüm (p2a/m6):
+    # bayrak istemciden gelir, "autofill/paste varsa 0-2 tuşlu oturumda +50 yerine +40" yumuşatması
+    # d_autofill_click botlarının tamamına bayrağı eklemekle PoW'suz ALLOW verir (core.py keyboard-only
+    # challenge'ı yalnızca >= 3 tuşta zorlar). Sunucunun doğrulayamadığı, yalnızca insan lehine çalışan bir
+    # bayrak karar girdisi olamaz.
+    input_counts = _input_event_counts(telemetry)
+    features["input_event_count"] = sum(input_counts.values())
+    features["autofill_seen"] = input_counts["autofill"] > 0
+    features["paste_seen"] = input_counts["paste"] > 0
+    features["insert_seen"] = input_counts["insert"] > 0
 
     # 0. Dinamik IP Ceza Durumu
     if is_ip_penalized:
@@ -204,15 +336,54 @@ def analyze_behavior(
     # 1. Mobil touch_supported: true Bypass'ını Kapatma (Gerçek Dokunma Kanıtı)
     # Eğer fare hareketi (>=3 nokta) varsa ama hiçbirinde dokunma kanıtı (r > 0, source="touch" veya tap_duration) yoksa,
     # saldırgan masaüstü koordinatlarına sahte touch_supported=True bayrağı eklemiştir!
-    has_capacitive_data = features.get("touch_event_count", 0) > 0 or features.get("tap_count", 0) > 0
+    has_capacitive_data = (
+        features.get("touch_event_count", 0) > 0
+        or features.get("tap_count", 0) > 0
+        or features.get("avg_touch_radius", 0.0) > 0.0
+        or features.get("avg_tap_duration", 0.0) > 0.0
+    )
     if is_touch and features.get("mouse_points", 0) >= 3 and not has_capacitive_data:
-        total_risk += 75.0
+        # Dokunma kanıtı yoksa bayrak geçersizdir: oturum masaüstü olarak yeniden sınıflanır ve aşağıdaki tam
+        # masaüstü kinematik filtrelerinden geçer (asıl tespit orada). Ek ceza YOK: dokunmatik ekranlı dizüstü /
+        # Surface'te fare veya touchpad kullanan gerçek kullanıcılar touch_supported=true bildirir; eski +75 bunların
+        # %100'ünü engelliyordu, bilinen fare botlarından (Bezier, lineer, sinüs, min-jerk, jitter, replay) hiçbirine
+        # karşı bayraksız hâline göre ek TPR sağlamıyordu (sentetik ölçüm, v0.10.8 sonrası).
         reasons.append("Spoofed touch_supported flag on non-capacitive desktop pointer trajectory.")
         is_touch = False  # Tüm masaüstü kinematik filtrelerini zorla çalıştır!
         features["touch_supported"] = False
+    elif (
+        is_touch
+        and features.get("mouse_points", 0) < 3
+        and not has_capacitive_data
+        and (features["click_count"] > 0 or features["key_count"] > 0)
+        and (features.get("screen_width", 0) >= 1024 or features.get("is_mobile_gpu_mismatch", False))
+    ):
+        # Fare hareketi olmayan (0-2 nokta) masaüstü klavye/tık botu sahte touch_supported=True ile aşağıdaki
+        # `not is_touch` bloğunu (+50 / +40 / +60) tamamen atlıyordu. Dokunma kanıtı yoksa bayrak geçersizdir:
+        # oturum masaüstü olarak yeniden sınıflanır ve normal masaüstü kurallarına girer. Ek ceza YOK: dokunmatik
+        # ekranlı dizüstü / Surface ve iPad + donanım klavyesi gerçekten touch_supported=true bildirip dokunma olayı
+        # üretmeyebilir; +65 bu meşru kullanıcıların %71-100'ünü engelliyordu (sentetik ölçüm, v0.10.8 sonrası).
+        reasons.append("Spoofed touch_supported flag without capacitive touch telemetry.")
+        is_touch = False
+        features["touch_supported"] = False
 
     if (features["click_count"] > 0 or features["key_count"] > 0) and not is_touch:
-        if features["mouse_points"] == 0:
+        # Fare verisi yok = kinematik kanıt yok, bot kanıtı da değil. Klavye kanıtı varsa (key_count >= 3,
+        # 5. bölüm kuralları değerlendirilebilir) klavye-only kullanıcı (ekran okuyucu, anahtar cihaz, Tab ile
+        # gezinen) tek başına engellenmez: +40, core.py/main.py'deki mevcut gri bölge PoW aralığına (35-55)
+        # düşer. Bu segment için core.py, enable_pow kapalıyken de PoW challenge ister
+        # (keyboard_only_challenge, varsayılan açık; main.py gri bölgede her zaman ister), böylece başka bir
+        # sinyal üretmeyen jitter'lı otomatik yazıcı düz ALLOW almaz, PoW maliyeti öder. Ek şüpheli sinyaller
+        # toplamı bot eşiğine (varsayılan 50, yani +40 üstüne >= +10) taşırsa enable_pow kapalı core.py BLOCK
+        # verir; enable_pow açık core.py ve main.py ise 55'in altında yine challenge ister.
+        # Klavye kanıtı yoksa (tuşsuz element.click() makrosu ya da 1-2 tuş) +50 korunur.
+        if features["mouse_points"] == 0 and features.get("key_count", 0) >= 3:
+            total_risk += 40.0
+            reasons.append(
+                "Interactive events occurred without mouse movement telemetry "
+                "(keyboard-only, routed to gray-area challenge) [+40.0]."
+            )
+        elif features["mouse_points"] == 0:
             total_risk += 50.0
             reasons.append("Interactive events occurred without mouse movement telemetry.")
         elif 1 <= features["mouse_points"] <= 2:
@@ -285,6 +456,7 @@ def analyze_behavior(
             )
 
     # 4. Kinematik & Bézier Eğrisi Analizi
+    weak_trace_gated = False
     if features["mouse_points"] >= 3:
         # Erişilebilirlik modunda matematiksel katılık azaltılır (örn. Trackball kullanıcıları için)
         acc_multiplier = 0.3 if accessibility_mode else 1.0
@@ -295,6 +467,7 @@ def analyze_behavior(
         avg_jerk_thresh = _get_dynamic_threshold(0.00008, "avg_jerk")
         spectral_purity_thresh = _get_dynamic_threshold(0.65, "spectral_purity")
         curvature_thresh = _get_dynamic_threshold(0.75, "curvature")
+        weak_trace_risk = 0.0  # #38a: A + H + I katkısı (kısa izde sınırlanır)
 
         # A. Doğrusallık (Düz Çizgi Botları & Mobil Swipe)
         # Mobilde kullanıcı ekranı kaydırdığında (mouse_points >= 5 ve total_distance > 50),
@@ -306,6 +479,8 @@ def analyze_behavior(
         if is_straight_bot:
             risk_add = 75.0 * acc_multiplier
             total_risk += risk_add
+            if features["straightness"] < SHORT_TRACE_EXACT_LINE:
+                weak_trace_risk += risk_add
             reasons.append(
                 f"Euclidean straight-line trajectory detected (straightness: {features['straightness']:.4f}) [+{risk_add:.1f}]."
             )
@@ -359,7 +534,7 @@ def analyze_behavior(
 
         # F. FITTS KANUNU (Hedefe Yaklaşırken Yavaşlamayan Masaüstü Eğri Botları)
         # Mobilde kalıcı bir imleç yoktur; swipe/flick hareketi hedefe nişan alma değil kaydırma eylemidir.
-        if features["click_count"] > 0 and features["total_distance"] > 50 and not is_touch:
+        if kinematic_click_count > 0 and features["total_distance"] > 50 and not is_touch:
             if features["terminal_decel_ratio"] > 0.70:
                 total_risk += 45.0
                 reasons.append(
@@ -373,12 +548,17 @@ def analyze_behavior(
 
         # H. Tremor Spektral Saflığı (FFT Spectral Purity & Entropi)
         # Biyolojik insan tremoru stokastik ve geniş bantlıdır; botların sinüs dalgaları tek frekansta sivrilir
+        # spectral_entropy yalnızca gerekçe metninde gösterilir, karara GİRMEZ (#8, ölçüm p2a/m5): gerçek
+        # SapiMouse tek hareketlerine karşı yalnızca zaten başka kurallarla %100 yakalanan pürüzsüz botları
+        # (Bezier, min-jerk) ayırıyor; kısa humanized Bezier'de insan FPR %0,5'te TPR %3,3, sinüs/jitter/lineerde
+        # ~%0. Purity gibi nokta sayısına bağlı (FFT örnek indeksine göre, Hz bandı yok), #38'deki tuzağı tekrarlar.
         if features["total_distance"] > 30 and not is_touch:
             purity = features.get("spectral_purity", 0.0)
             entropy = features.get("spectral_entropy", 1.0)
             if purity > spectral_purity_thresh:
                 risk_add = 65.0 * acc_multiplier
                 total_risk += risk_add
+                weak_trace_risk += risk_add
                 reasons.append(
                     f"Synthetic harmonic oscillator tremor detected via FFT (spectral_purity: {purity:.3f}, spectral_entropy: {entropy:.3f}) [+{risk_add:.1f}]."
                 )
@@ -390,6 +570,7 @@ def analyze_behavior(
             if features["total_distance"] > 60 and submoves <= 1:
                 risk_add = 55.0 * acc_multiplier
                 total_risk += risk_add
+                weak_trace_risk += risk_add
                 reasons.append(
                     f"Lack of physiological sub-movement decomposition in trajectory (submovement_count: {submoves}, distance: {features['total_distance']:.1f}px) [+{risk_add:.1f}]."
                 )
@@ -413,6 +594,19 @@ def analyze_behavior(
                 f"Synthetic differential curvature profile detected (curvature_score: {curvature_score:.2f}, rate_var: {features.get('curvature_rate_var', 0.0):.6f}) [+{risk_add:.1f}]."
             )
 
+        # K. #38a Yetersiz kanıt kapısı (bkz. SHORT_TRACE_MAX_POINTS): kısa izde A + H + I tek başına BLOCK üretmez.
+        if (
+            not is_touch
+            and features["mouse_points"] < SHORT_TRACE_MAX_POINTS
+            and weak_trace_risk > SHORT_TRACE_WEAK_RISK_CAP
+        ):
+            total_risk -= weak_trace_risk - SHORT_TRACE_WEAK_RISK_CAP
+            weak_trace_gated = True
+            reasons.append(
+                f"Insufficient trajectory evidence: {features['mouse_points']}-point trace; straightness/FFT/"
+                f"sub-movement contribution capped at {SHORT_TRACE_WEAK_RISK_CAP:.1f} (gray area)."
+            )
+
     # 4.5 Tıklama – İmleç Uzamsal Hizalaması (Click-to-Cursor Spatial Check)
     # Masaüstünde son mousemove koordinatı (x_last, y_last) ile click koordinatı (x_click, y_click) aynı noktadadır (Δd < 20 px).
     # Mobilde ise kullanıcı önce ekranı kaydırıp (swipe) sonra farklı bir noktadaki butona dokunabilir;
@@ -421,7 +615,10 @@ def analyze_behavior(
     moves = telemetry.get("mouse_movements", []) if isinstance(telemetry, dict) else []
     if isinstance(clicks, list) and isinstance(moves, list) and clicks and moves:
         try:
-            valid_clicks = [c for c in clicks if isinstance(c, dict) and "x" in c and "y" in c]
+            valid_clicks = [
+                c for c in clicks
+                if isinstance(c, dict) and "x" in c and "y" in c and id(c) not in synthetic_click_ids
+            ]
             valid_moves = [m for m in moves if isinstance(m, dict) and "x" in m and "y" in m]
             if valid_clicks and valid_moves:
                 target_click = valid_clicks[-1]
@@ -448,10 +645,14 @@ def analyze_behavior(
 
     # 5. Klavye Dinamikleri (Dwell, Flight Time & Digraph Entropy v0.9.2)
     if features.get("key_count", 0) >= 3:
-        if features.get("keystroke_score", 0.0) >= 0.70:
+        # #5: mobil IME muafiyetinin dokunma kanıtı/ekran koşulu ve istemci digraph bayrağının skoru düşürememesi
+        # artık features.py / keystrokes.rs içinde (kalıcı parite); burada telafi gerekmez.
+        ks_score = features.get("keystroke_score", 0.0)
+        features["keystroke_score_effective"] = ks_score
+        if ks_score >= 0.70:
             total_risk += 60.0
             reasons.append(
-                f"Abnormal keystroke biometrics detected (keystroke_score: {features.get('keystroke_score', 0.0):.2f}, dwell_var: {features.get('dwell_time_var', 0.0):.1f}, entropy: {features.get('digraph_entropy', 0.5):.2f})."
+                f"Abnormal keystroke biometrics detected (keystroke_score: {ks_score:.2f}, dwell_var: {features.get('dwell_time_var', 0.0):.1f}, entropy: {features.get('digraph_entropy', 0.5):.2f})."
             )
         elif features.get("key_interval_var", 50.0) < 2.0:
             total_risk += 75.0
@@ -491,27 +692,54 @@ def analyze_behavior(
     # Aynı oturumdan gelen ardışık isteklerde kinetik parametrelerin robotik sabitliği
     # Gerçek bir yörünge içermeyen kayıtlar (tekil dokunuş/tıklama: total_distance == 0) varsayılan
     # yer tutucu değerler taşır; bunların "aynılığı" botu değil, kullanıcının tekrar dokunduğunu gösterir.
+    # #39-C: mevcut istek de karşılaştırmaya girer (core.py/main.py ile aynı kayıt koşulu: >= 3 nokta, mesafe > 0),
+    # böylece şablon 4. değil 3. istekte yakalanır. Geçmiş kaydı karardan sonra yazıldığı için mevcut istek
+    # session_history içinde yoktur.
     if session_history:
         session_history = [h for h in session_history if "total_distance" not in h or float(h["total_distance"] or 0.0) > 0.0]
-    if session_history and len(session_history) >= 3:
-        s_jerks = [float(h.get("avg_jerk", 0.0)) for h in session_history if "avg_jerk" in h]
-        s_straightness = [float(h.get("straightness", 0.0)) for h in session_history if "straightness" in h]
+    inv_items = list(session_history or [])
+    if features.get("mouse_points", 0) >= 3 and features.get("total_distance", 0.0) > 0:
+        inv_items.append(
+            {
+                "avg_jerk": features.get("avg_jerk", 0.0),
+                "straightness": features.get("straightness", 1.0),
+                "total_distance": features.get("total_distance", 0.0),
+            }
+        )
+    # Pencereler: (1) eski davranış, saklı geçmişin tamamı (>= 3); (2) son 2 saklı + mevcut istek. Her kural en
+    # fazla bir kez tetiklenir; (2) tetiği 4. istekten 3. isteğe indirir, (1) korunduğu için hiçbir eski tetik kaybolmaz.
+    # #3G: yalnızca geçmişten oluşan pencere (1) mevcut isteğin eşleşmesini gerektirmez; bu yüzden yalnızca ALLOW
+    # kayıtlarını ("ok" yoksa eski kayıt = ALLOW) kullanır. Aynı CGNAT IP + yaygın UA'dan gelen bloklanmış bot
+    # istekleri kurbanın geçmişini zehirleyip temiz isteğini bloklatamaz. (2) ve şekil kontrolü mevcut isteği
+    # içerdiğinden tüm kayıtları kullanır (zehirleme için kurbanın kendi izi saldırganınkiyle eşleşmeli).
+    allowed_history = [h for h in (session_history or []) if h.get("ok", True)]
+    inv_windows = []
+    if len(allowed_history) >= 3:
+        inv_windows.append(allowed_history)
+    if session_history and len(inv_items) > len(session_history) and len(inv_items) >= 3:
+        inv_windows.append(inv_items[-3:])
+    inv_fired: set[str] = set()
+    for win in inv_windows:
+        s_jerks = [float(h.get("avg_jerk", 0.0)) for h in win if "avg_jerk" in h]
+        s_straightness = [float(h.get("straightness", 0.0)) for h in win if "straightness" in h]
 
         # Jerk varyansı: bot her istekte aynı sabit tremor genliğini yolluyorsa
-        if len(s_jerks) >= 3 and all(j > 0 for j in s_jerks):
+        if "jerk" not in inv_fired and len(s_jerks) >= 3 and all(j > 0 for j in s_jerks):
             mean_j = sum(s_jerks) / len(s_jerks)
             jerk_var = sum((x - mean_j) ** 2 for x in s_jerks) / len(s_jerks)
             if jerk_var < 1e-12:
+                inv_fired.add("jerk")
                 total_risk += 60.0
                 reasons.append(
                     "Session Behavioral Invariance: Identical neuromuscular jerk tremor repeated across session requests (deterministic bot template)."
                 )
 
         # Straightness varyansı: bot her istekte tıpatıp aynı düzlüğü üretiyorsa
-        if len(s_straightness) >= 3:
+        if "straight" not in inv_fired and len(s_straightness) >= 3:
             mean_s = sum(s_straightness) / len(s_straightness)
             st_var = sum((x - mean_s) ** 2 for x in s_straightness) / len(s_straightness)
             if st_var < 1e-8:
+                inv_fired.add("straight")
                 total_risk += 50.0
                 reasons.append(
                     "Session Behavioral Invariance: Zero straightness variance across consecutive session requests."
@@ -521,14 +749,14 @@ def analyze_behavior(
         # δ = (|J1 - J2| / max(J1, 10^-6)) + |S1 - S2| + (|D1 - D2| / max(D1, 1.0))
         # Eğer aynı oturumdaki ardışık 3 istekte δ < 0.015 (%98.5 benzerlik) ise template replay + jitter
         triplets = []
-        for h in session_history:
+        for h in win:
             if "avg_jerk" in h or "straightness" in h or "total_distance" in h:
                 j = float(h.get("avg_jerk", 0.0))
                 s = float(h.get("straightness", 0.0))
                 d = float(h.get("total_distance", 0.0))
                 triplets.append((j, s, d))
 
-        if len(triplets) >= 3:
+        if "fuzzy" not in inv_fired and len(triplets) >= 3:
             def calc_delta(t1, t2):
                 j1, s1, d1 = t1
                 j2, s2, d2 = t2
@@ -542,10 +770,36 @@ def analyze_behavior(
             delta1 = calc_delta(t_last3[0], t_last3[1])
             delta2 = calc_delta(t_last3[1], t_last3[2])
             if delta1 < 0.015 and delta2 < 0.015:
+                inv_fired.add("fuzzy")
                 total_risk += 70.0
                 reasons.append(
                     f"Session Behavioral Invariance: High fuzzy kinematic similarity detected across session requests (delta1: {delta1:.4f}, delta2: {delta2:.4f} < 0.015, template replay with jitter)."
                 )
+
+    # #39-C Ölçekten bağımsız şekil değişmezliği: ham jerk/mesafe δ'sı 1 px gürültü, ölçek ya da zaman bükmeyle
+    # aşılıyordu (p2bc/inv_meas.py: jitter/ölçek/bükme replay TPR %0-2,7). Normalize şekil SimHash'i (bkz.
+    # trajectory_shape_hash) son 3 öğede (mevcut dahil) art arda Hamming <= SHAPE_INVARIANCE_MAX_HAMMING ise
+    # şablon replay'idir. Hem IP+UA oturum geçmişine hem IP-only geçmişe (UA döndürme) uygulanır.
+    # Dokunmatik izler ölçülmedi (kaydırma jestleri doğal olarak benzer şekilde): yalnızca işaretçi izleri.
+    shape_hash = None if is_touch else trajectory_shape_hash(telemetry)
+    if shape_hash is not None:
+        for hist, scope in ((session_history, "session"), (ip_history, "IP")):
+            hs = [h.get("sh") for h in (hist or []) if isinstance(h, dict) and isinstance(h.get("sh"), str)]
+            if len(hs) < 2:
+                continue
+            try:
+                a, b = int(hs[-2], 16), int(hs[-1], 16)
+            except ValueError:
+                continue
+            c = int(shape_hash, 16)
+            h1, h2 = bin(a ^ b).count("1"), bin(b ^ c).count("1")
+            if h1 <= SHAPE_INVARIANCE_MAX_HAMMING and h2 <= SHAPE_INVARIANCE_MAX_HAMMING:
+                total_risk += 70.0
+                reasons.append(
+                    f"Session Behavioral Invariance: Same normalized trajectory shape repeated across {scope} requests "
+                    f"(Hamming {h1}, {h2} <= {SHAPE_INVARIANCE_MAX_HAMMING}; scaled/translated/jittered template replay)."
+                )
+                break
 
     heuristic_score = min(100.0, max(0.0, total_risk))
 
@@ -553,10 +807,15 @@ def analyze_behavior(
     # 60 adımlık masaüstü 1D-CNN modeli <12 noktalı kısa mobil dokunuşlarda (Single Tap)
     # sıfır dolgusu (zero-padding) nedeniyle yanlış pozitif üretmemesi için yalnızca yeterli yörünge olduğunda çalışır.
     ai_score = 0.0
+    ai_raw_score = None
     if _ai_model and _tokenizer and (not is_touch or features.get("mouse_points", 0) >= 12):
         try:
             fused = _tokenizer.fuse(telemetry)
-            ai_prob = _ai_model.predict(fused["mouse_tensor"], fused["static_vector"])
+            # Tek ileri geçiş (#Görev 3): ham olasılık her modda bir kez hesaplanır; karara giren ai_score
+            # models.SynapseHybridModel.predict ile aynı sözleşmeden türetilir (enforce -> ham, shadow -> 0).
+            ai_raw_prob = _ai_model.predict_raw(fused["mouse_tensor"], fused["static_vector"])
+            ai_raw_score = ai_raw_prob * 100.0
+            ai_prob = ai_raw_prob if getattr(_ai_model, "cnn_mode", "enforce") == "enforce" else 0.0
             ai_score = ai_prob * 100.0
         except Exception as e:
             ai_score = 0.0
@@ -571,7 +830,7 @@ def analyze_behavior(
     )
     fitts_violation = (
         not is_touch
-        and features.get("click_count", 0) > 0
+        and kinematic_click_count > 0
         and features.get("total_distance", 0) > 50
         and features.get("terminal_decel_ratio", 0.0) > 0.70
     )
@@ -586,7 +845,7 @@ def analyze_behavior(
         or (heuristic_score >= 70.0)  # Yüksek bot anomalisi Brave ile bypass edilemez
         or (features.get("dt_var", 1.0) < 0.01 and features.get("mouse_points", 0) >= 10)
         or any("Session Behavioral Invariance" in r for r in reasons)
-        or any("Synthetic harmonic oscillator tremor" in r for r in reasons)
+        or (not weak_trace_gated and any("Synthetic harmonic oscillator tremor" in r for r in reasons))
         or any("Unnatural polynomial acceleration curve" in r for r in reasons)
         or any("Synthetic differential curvature" in r for r in reasons)
     )
@@ -624,10 +883,15 @@ def analyze_behavior(
         "poisson_anomaly_score": freq_anomaly,
         "heuristic_score": heuristic_score,
         "ai_score": ai_score,
+        "ai_raw_score": ai_raw_score,
         "threat_type": threat_type,
         "is_ip_penalized": is_ip_penalized,
         "accessibility_mode": accessibility_mode,
         "session_history_count": len(session_history) if session_history else 0,
+        # #39-C: core.py/main.py bunu oturum ve IP-only geçmişine yazar (ham iz değil, 64 bit şekil SimHash'i).
+        "shape_hash": shape_hash,
+        # #38a kısa iz kapısı skoru gerçekten düşürdü: core.py enable_pow kapalıyken de gri bölgede challenge ister.
+        "short_trace_gated": weak_trace_gated,
     }
 
     return final_bot_score, classification, reasons, details

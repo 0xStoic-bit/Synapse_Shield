@@ -7,6 +7,7 @@ import base64
 import json
 import math
 import random
+from random import Random
 import sys
 import time
 import urllib.error
@@ -87,6 +88,44 @@ def clear_bans():
         pass
 
 
+# Refusals the Synapse gateway itself emits without a verdict body (main.py: missing token, IP bans).
+_SYNAPSE_GATEWAY_DETAILS = ("[Synapse Shield]", "IP address temporarily banned", "IP address banned due to")
+
+
+def carries_synapse_decision(body, headers=None) -> bool:
+    """True only if a response proves Synapse Shield produced it (a verdict or a gateway refusal).
+
+    A 403/404/401/422 from a wrong URL, proxy or framework validator is NOT a block: counting it as one
+    makes a misconfigured run look like a working shield. Evidence accepted, from the server's real schema
+    (core.SynapseDecision.to_dict / main.score_telemetry): ``decision``, ``threat_type`` or a ``status`` of
+    blocked/challenge_required/allowed, ``classification`` plus ``bot_score``, any ``X-Synapse-*`` header,
+    or the gateway's own ``detail`` strings.
+    """
+    if headers is not None:
+        try:
+            if any(str(k).lower().startswith("x-synapse-") for k in headers.keys()):
+                return True
+        except Exception:
+            pass
+    if not isinstance(body, dict):
+        return False
+    if "decision" in body or "threat_type" in body:
+        return True
+    if body.get("status") in ("blocked", "challenge_required", "allowed"):
+        return True
+    if "classification" in body and "bot_score" in body:
+        return True
+    detail = body.get("detail")
+    return isinstance(detail, str) and any(m in detail for m in _SYNAPSE_GATEWAY_DETAILS)
+
+
+def _error_result(reason: str, latency: float, http_status: int | None = None) -> dict:
+    res = {"status": "error", "bot_score": 0.0, "classification": "Error", "reasons": [reason], "network_latency_ms": latency}
+    if http_status is not None:
+        res["http_status"] = http_status
+    return res
+
+
 def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
     # Eğer payload içinde 'token' yoksa ve 'raw' flag verilmemişse, geçerli token zarfı oluştur
     if "token" not in payload and not payload.get("__raw__"):
@@ -110,24 +149,31 @@ def send_attack(name: str, payload: dict, ip_suffix: int = 1) -> dict:
         with urllib.request.urlopen(req) as resp:
             t_end = time.perf_counter()
             res = json.loads(resp.read().decode("utf-8"))
-            res["network_latency_ms"] = round((t_end - t_start) * 1000, 2)
+            latency = round((t_end - t_start) * 1000, 2)
+            if not carries_synapse_decision(res, getattr(resp, "headers", None)):
+                return _error_result("HTTP 200 without a Synapse decision", latency, 200)
+            res["network_latency_ms"] = latency
             return res
     except urllib.error.HTTPError as e:
         t_end = time.perf_counter()
+        latency = round((t_end - t_start) * 1000, 2)
         try:
             body = json.loads(e.read().decode("utf-8"))
-            body["network_latency_ms"] = round((t_end - t_start) * 1000, 2)
-            body["http_status"] = e.code
-            # Gateway rejections (missing/forged/replayed token, bans) return only
-            # {"detail": ...} without a verdict. An HTTP 4xx/5xx refusal IS a block.
-            if "classification" not in body:
-                body["classification"] = "Bot"
-                body.setdefault("bot_score", 100.0)
-                detail = body.get("detail") or body.get("error")
-                body.setdefault("reasons", [f"HTTP {e.code}: {detail}" if detail else f"HTTP {e.code}"])
-            return body
         except Exception:
-            return {"status": "error", "bot_score": 100.0, "classification": "Bot", "reasons": [f"HTTP {e.code}: {e.reason}"], "network_latency_ms": round((t_end - t_start) * 1000, 2)}
+            body = None
+        if not carries_synapse_decision(body, getattr(e, "headers", None)):
+            # Not a Synapse verdict (wrong URL, proxy, framework 404/422...): the attack did not run.
+            detail = body.get("detail") if isinstance(body, dict) else None
+            return _error_result(f"HTTP {e.code} without a Synapse decision: {detail or e.reason}", latency, e.code)
+        body["network_latency_ms"] = latency
+        body["http_status"] = e.code
+        # Gateway rejections (missing token, bans) carry only {"detail": ...}: a Synapse refusal, i.e. a block.
+        if "classification" not in body:
+            body["classification"] = "Bot"
+            body.setdefault("bot_score", 100.0)
+            detail = body.get("detail") or body.get("error")
+            body.setdefault("reasons", [f"HTTP {e.code}: {detail}" if detail else f"HTTP {e.code}"])
+        return body
     except Exception as e:
         # Transport failure (server down, connection refused, timeout). This is NOT a verdict:
         # counting it as "Bot" made the suite report every attack as blocked with no server running.
@@ -152,7 +198,13 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
     latency = res.get("network_latency_ms", 0.0)
     threat_tags = res.get("threat_attribution", [])
 
-    is_error = res.get("status") == "error" and classification == "Error"
+    http_status = res.get("http_status")
+    undecided_http = isinstance(http_status, int) and http_status >= 400 and not carries_synapse_decision(res)
+    is_error = (res.get("status") == "error" and classification == "Error") or undecided_http or res.get("decision") == "error"
+    try:
+        score = float(str(score).rstrip("%"))
+    except ValueError:
+        score = 0.0
     is_blocked = classification == "Bot" or score >= 50.0
     success = is_blocked if expected_blocked else not is_blocked
     if is_error:
@@ -175,6 +227,24 @@ def print_result(attack_num: int, title: str, res: dict, expected_blocked: bool 
     print(f"│  Açıklama:     {', '.join(reasons) if reasons else 'Normal kullanıcı davranışı'}")
     print(f"{C.BOLD}{C.CYAN}└─────────────────────────────────────────────────────────────{C.END}")
     return None if is_error else success
+
+
+def print_measurement(title: str, res: dict) -> None:
+    """Report a measurement vector: shown honestly, never counted as pass/fail and never affects the exit code."""
+    classification = res.get("classification", "Unknown")
+    score = res.get("bot_score", 0.0)
+    if res.get("status") == "error" and classification == "Error":
+        verdict = f"{C.YELLOW}ÖLÇÜLEMEDİ (karar yok){C.END}"
+    else:
+        try:
+            blocked = classification == "Bot" or float(str(score).rstrip("%")) >= 50.0
+        except ValueError:
+            blocked = classification == "Bot"
+        verdict = f"{C.GREEN}yakalandı{C.END}" if blocked else f"{C.RED}GEÇTİ (bilinen boşluk){C.END}"
+    print(f"\n{C.BOLD}{C.CYAN}┌─ ÖLÇÜM (measurement, sonuca/çıkış koduna dahil değil): {title}{C.END}")
+    print(f"│  Sonuç:   {verdict} - {classification} (Risk Skoru: %{score})")
+    print(f"│  Açıklama: {', '.join(res.get('reasons', [])) or '-'}")
+    print(f"{C.BOLD}{C.CYAN}└─────────────────────────────────────────────────────────────{C.END}")
 
 
 def _now_ms() -> int:
@@ -341,6 +411,13 @@ def main() -> int:
             9, "Replay Attack (Aynı Token'ı Tekrar Kullanma)",
             {"status": "error", "classification": "Error", "bot_score": 0.0, "reasons": ["challenge alınamadı"]},
         ))
+
+    # Measurement vector (not scored): a careful bot with jittered timing, speed profile and pixel noise.
+    from synapse_shield.adversarial import generate_humanized_bezier_telemetry
+
+    hb = generate_humanized_bezier_telemetry(rng=Random(20261117), base_t=float(_now_ms()))
+    res_hb = send_attack("HumanizedBezier", hb, ip_suffix=80)
+    print_measurement("Humanized Bézier (değişken dt, min-jerk hız profili, piksel gürültüsü)", res_hb)
 
     passed = sum(1 for r in results if r is True)
     failed = sum(1 for r in results if r is False)

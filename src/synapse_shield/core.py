@@ -12,14 +12,16 @@ from dataclasses import dataclass, field
 from datetime import date
 import hashlib
 import ipaddress
+import logging
 import os
 import time
 from typing import Any
 
 from synapse_shield.cohort import OUTCOME_LABELS, cohort_of
 from synapse_shield.engine import analyze_behavior
+from synapse_shield.fingerprint import trajectory_fingerprint
 from synapse_shield.rules import rule_codes
-from synapse_shield.storage import get_storage
+from synapse_shield.storage import client_strike_key, get_storage
 from synapse_shield.tokens import SECRET_KEY, generate_pow_salt, verify_and_consume_pow, verify_and_consume_token
 
 try:
@@ -33,6 +35,7 @@ try:
         synapse_shadow_outcomes_total,
         synapse_shadow_requests_total,
         synapse_shadow_rules_total,
+        synapse_trajectory_replay_total,
     )
 except ImportError:
     METRICS_ENABLED = False
@@ -44,10 +47,150 @@ except ImportError:
     synapse_shadow_cohort_total = None
     synapse_shadow_outcomes_total = None
     synapse_shadow_rules_total = None
+    synapse_trajectory_replay_total = None
+
+logger = logging.getLogger("synapse_shield.core")
 
 MAX_PAYLOAD_SIZE = 262_144  # 256 KB
 # Methods that change state. DELETE has no body, so its token travels in the X-Synapse-Token header.
 PROTECTED_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+# IP-level 4-strike / 60 s ban counter (shared by every device behind one CGNAT / Eduroam address).
+# Token failures always count (handled at the token step). A behavioural verdict counts only when it is a
+# hard violation (zero interaction / scroll-only, 1-2 mouse points without touch, webdriver/stealth, session
+# invariance) or its score is >= IP_STRIKE_MIN_SCORE. Borderline Bot verdicts (block threshold .. 85) still
+# block the request and still give that device the 60 s +50 penalty; they just cannot lock out the whole NAT.
+# Measured (p2c/strike_policy_sim.py): human requests lost to IP bans on one CGNAT IP at 120 req/min with a
+# calibrated 1.4 % human Bot rate: 14.8 % (every Bot verdict) -> 0.8 % (this rule); scripted bots (linear,
+# bezier, sine, minimum-jerk, stealth) are still banned after 4 requests.
+IP_STRIKE_MIN_SCORE = 85.0
+
+
+def counts_as_ip_strike(bot_score: float, hard_bot_violation: bool) -> bool:
+    """Whether a behavioural Bot verdict feeds the IP-level ban counter (see IP_STRIKE_MIN_SCORE)."""
+    return bool(hard_bot_violation) or bot_score >= IP_STRIKE_MIN_SCORE
+
+
+# Single-request trajectory replay (#39-A). A recording that passed once, re-sent with a fresh token from a fresh
+# IP / User-Agent, is invisible to every per-IP / per-device signal. The keyed delta fingerprint of the pointer
+# path (fingerprint.py) is consumed ONLY when a request is about to be allowed: a 429 PoW challenge, an
+# EXPIRED token or a block never consumes it, so the SDK retry paths (which resend the same, time-shifted
+# events with a new token after a challenge / expiry) are not mistaken for a replay. A repeat within the TTL
+# is a block (or shadow block) with this reason. Measured human collisions: 0 (SapiMouse 1.13 M cross-user
+# + 8978 same-user pairs, 1000 simulated sessions). Like token-level replay it feeds only the IP 4-strike
+# counter, not the per-device +50 penalty. SYNAPSE_TRAJECTORY_REPLAY=0 turns the check off.
+# TTL 1 h (SYNAPSE_TRAJECTORY_FP_TTL): every recording in a replay library is usable at most once per hour
+# across all IPs, and one key (~40 bytes) per allowed request bounds storage to one hour of allowed traffic.
+TRAJECTORY_REPLAY_REASON = (
+    "REPLAY_TRAJECTORY: pointer trajectory identical to one already accepted within the replay window"
+)
+TRAJECTORY_REPLAY_THREAT = "REPLAY_TRAJECTORY"
+
+
+# Insufficient-evidence segments (keyboard-only, short pointer traces gated by #38a). Their gray-area PoW is the
+# only thing between a jittered bot and an allow, so: always difficulty 5 (~1 M expected SHA-256 vs ~65 k), and a
+# solved PoW removes only INSUFFICIENT_EVIDENCE_POW_DISCOUNT points instead of 20, so the gray-area bonus is not
+# wiped out (short trace 45 -> 35, keyboard-only 40 -> 30). Both stay below the block threshold (50) and the
+# verdict is Human, so a solver still passes: PoW adds cost, it is not a discriminator. Same rule in main.py.
+INSUFFICIENT_EVIDENCE_POW_DIFFICULTY = 5
+INSUFFICIENT_EVIDENCE_POW_DISCOUNT = 10.0
+GRAY_AREA_POW_DISCOUNT = 20.0
+
+
+def pow_challenge_difficulty(bot_score: float, insufficient_evidence: bool) -> int:
+    if insufficient_evidence:
+        return INSUFFICIENT_EVIDENCE_POW_DIFFICULTY
+    return 5 if bot_score >= 45.0 else 4
+
+
+def pow_solved_discount(insufficient_evidence: bool) -> float:
+    return INSUFFICIENT_EVIDENCE_POW_DISCOUNT if insufficient_evidence else GRAY_AREA_POW_DISCOUNT
+
+
+# Shape-invariance matched only against the IP-only history (#39-C, engine reason "... across IP requests").
+# A whole CGNAT can share that history, so the match blocks the request but is NOT a hard violation: it does
+# not feed the IP 4-strike ban (counts_as_ip_strike). IP+UA (session) invariance stays a hard violation.
+IP_SHAPE_INVARIANCE_MARKER = "Same normalized trajectory shape repeated across IP requests"
+
+
+def invariance_scopes(reasons: Any, threat_type: Any = None) -> tuple[bool, bool]:
+    """(hard session invariance, IP-only shape invariance) from the engine reasons."""
+    inv = [r for r in (reasons or []) if isinstance(r, str) and "Session Behavioral Invariance" in r]
+    ip_only = [r for r in inv if IP_SHAPE_INVARIANCE_MARKER in r]
+    hard = len(inv) > len(ip_only) or (not inv and threat_type == "SESSION_INVARIANCE_BOT")
+    return hard, bool(ip_only)
+
+
+def ip_shape_session_id(client_ip: str) -> str:
+    """Storage key of the IP-only shape history (#39-C); distinct from the IP+UA session key ``ip_<ip>_<ua>``."""
+    return f"ipshape_{client_ip}"
+
+
+def record_ip_shape_history(storage: Any, ip_session_id: str, details: Any) -> None:
+    """Append the request's shape SimHash (no kinematics, no raw path) to the IP-only history."""
+    sh = details.get("shape_hash") if isinstance(details, dict) else None
+    if sh:
+        storage.record_session_telemetry(ip_session_id, {"sh": sh}, max_history=10, window_sec=300)
+
+
+# IP+UA session history (#3G). Every final allow / block decision is recorded (a 429 PoW challenge is not: its
+# retry is), tagged ``ok`` = allowed. Poisoning: two bot requests from a CGNAT IP with the victim's (common)
+# User-Agent must not make the victim's next clean request trip session invariance (a hard violation). The engine
+# therefore uses only ``ok`` entries for the history-only invariance window; the windows that include the current
+# request (last 2 stored + current, shape SimHash) keep every entry, because they also need the victim's own
+# trajectory to match the attacker's. Writing only allowed requests instead was measured (p3g/meas.py) to cut
+# invariance catches of repeating template bots that wait out the 60 s penalty: allow rate 34 % -> 53 %.
+# Only a real trajectory (>= 3 points, distance > 0) is stored: single taps carry placeholder values.
+def record_session_history(storage: Any, session_id: str, details: Any, allowed: bool) -> None:
+    feats = details.get("features", {}) if isinstance(details, dict) else {}
+    if feats.get("mouse_points", 0) >= 3 and feats.get("total_distance", 0.0) > 0:
+        storage.record_session_telemetry(
+            session_id,
+            {
+                "avg_jerk": feats.get("avg_jerk", 0.0),
+                "straightness": feats.get("straightness", 1.0),
+                "total_distance": feats.get("total_distance", 0.0),
+                "submovement_count": feats.get("submovement_count", 0),
+                "spectral_purity": feats.get("spectral_purity", 0.0),
+                **({"sh": details["shape_hash"]} if details.get("shape_hash") else {}),
+                "ok": bool(allowed),
+            },
+            max_history=10,
+            window_sec=300,
+        )
+
+
+def trajectory_replay_enabled() -> bool:
+    return os.environ.get("SYNAPSE_TRAJECTORY_REPLAY", "1").lower() not in ("0", "false", "no", "off")
+
+
+def trajectory_fp_ttl() -> int:
+    try:
+        return max(60, int(os.environ.get("SYNAPSE_TRAJECTORY_FP_TTL", "3600")))
+    except ValueError:
+        return 3600
+
+
+def is_trajectory_replay(storage: Any, telemetry: Any, shadow: bool = False) -> bool:
+    """Consume the trajectory fingerprint; True when it was already accepted within the TTL.
+
+    Call only at the allow decision. Low-entropy / malformed trajectories are not fingerprinted (False).
+    """
+    if not trajectory_replay_enabled():
+        return False
+    fp = trajectory_fingerprint(telemetry)
+    if fp is None:
+        return False
+    try:
+        first = storage.consume_trajectory_fp(fp, ttl_sec=trajectory_fp_ttl())
+    except Exception as e:  # fail-open: a storage error must not block a human as a replay
+        logger.warning("consume_trajectory_fp failed (%s); trajectory replay check skipped", e)
+        return False
+    if first:
+        return False
+    if METRICS_ENABLED and synapse_trajectory_replay_total is not None:
+        synapse_trajectory_replay_total.labels(mode="shadow" if shadow else "enforce").inc()
+    return True
 
 
 def get_trusted_proxies() -> set[str]:
@@ -294,15 +437,32 @@ def evaluate_synapse_request_sync(
     pow_nonce: str | None = None,
     pow_salt: str | None = None,
     enable_pow: bool | None = None,
+    keyboard_only_challenge: bool | None = None,
+    short_trace_challenge: bool | None = None,
 ) -> SynapseDecision:
     """
     Synchronous core security evaluation engine.
     Used natively by synchronous frameworks (Django, Flask) and wrapped in threadpools for ASGI/FastAPI.
+
+    ``keyboard_only_challenge`` (default on; env ``SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0`` turns it off) keeps
+    the gray-area PoW challenge for keyboard-only sessions even when ``enable_pow`` is off, for scores that
+    would otherwise be a plain allow. It never turns a block into a challenge.
+    ``short_trace_challenge`` (default on; env ``SYNAPSE_SHORT_TRACE_CHALLENGE=0``) does the same for pointer
+    traces whose score the short-trace gate (engine #38a) lowered.
     """
     storage = get_storage()
     if enable_pow is None:
         enable_pow = os.environ.get("SYNAPSE_ENABLE_POW", "").lower() in ("1", "true")
+    if keyboard_only_challenge is None:
+        keyboard_only_challenge = os.environ.get("SYNAPSE_KEYBOARD_ONLY_CHALLENGE", "1").lower() not in (
+            "0", "false", "no", "off"
+        )
+    if short_trace_challenge is None:
+        short_trace_challenge = os.environ.get("SYNAPSE_SHORT_TRACE_CHALLENGE", "1").lower() not in (
+            "0", "false", "no", "off"
+        )
     is_shadow = mode.lower() == "shadow"
+    client_key = client_strike_key(client_ip, user_agent)
 
     # 1. IP Ban check
     if storage.is_ip_banned(client_ip):
@@ -363,6 +523,10 @@ def evaluate_synapse_request_sync(
             if METRICS_ENABLED and synapse_replays_detected_total is not None:
                 synapse_replays_detected_total.inc()
 
+        # Token-level failures (replay, forged signature, malformed, time-travel, relay) feed only the IP-level
+        # 4-strike ban counter. They do NOT give the device (IP+UA) the 60 s +50 penalty: an SDK network retry or
+        # a double submit resends the same token, and the next clean request of that real user must not be
+        # penalized. The per-device penalty comes only from a behavioural verdict (step 7). Same as main.py.
         if reason != "TOKEN_EXPIRED":
             storage.record_bot_strike(client_ip)
 
@@ -396,6 +560,10 @@ def evaluate_synapse_request_sync(
     ua_hash = hashlib.sha256((user_agent or "unknown_ua").encode("utf-8")).hexdigest()[:16]
     session_id = f"ip_{client_ip}_{ua_hash}"
     session_history = storage.get_session_telemetries(session_id, window_sec=300)
+    # #39-C: IP-only shape history (normalized-shape SimHash only). Rotating the User-Agent gives a fresh IP+UA
+    # session, but not a fresh IP history. Measured NAT FP (12 SapiMouse users on one IP): 0 (p2bc/inv_meas.py).
+    ip_session_id = ip_shape_session_id(client_ip)
+    ip_history = storage.get_session_telemetries(ip_session_id, window_sec=300)
 
     # 4.5 Sliding-Window Request Frequency (Poisson Anomaly & DoS protection)
     recent_request_count = storage.record_and_get_request_count(client_ip, window_sec=10)
@@ -414,32 +582,17 @@ def evaluate_synapse_request_sync(
         )
 
     # 5. Biometric Kinematics & AI Inference
-    is_penalized = storage.is_ip_banned(client_ip)
+    # In NAT / CGNAT environments, penalizing the whole IP pushes innocent devices into 403.
+    # The short 60s "+50 risk" penalty is scoped per-client (IP + User-Agent), while the 4-strike IP ban stays IP-scoped.
+    strike_count = storage.get_client_strike_count(client_key, window_sec=60)
+    is_penalized = strike_count >= 1
     start_time = time.perf_counter()
     bot_score, classification, reasons, details = analyze_behavior(
-        telemetry, recent_request_count, is_penalized, accessibility_mode, session_history
+        telemetry, recent_request_count, is_penalized, accessibility_mode, session_history, ip_history=ip_history
     )
     latency = time.perf_counter() - start_time
 
-    # Record kinematic session features
-    features = details.get("features", {}) if isinstance(details, dict) else {}
-    # Yalnızca gerçek bir yörünge (>= 3 nokta, mesafe > 0) kaydedilir. Tekil dokunuş/tıklama varsayılan
-    # yer tutucu değerler (jerk 0, düzlük 1, mesafe 0) üretir; bunları saklamak gerçek mobil ve
-    # erişilebilirlik kullanıcılarını 4. istekte "oturum değişmezliği" ile bot sanmaya yol açıyordu.
-    if features.get("mouse_points", 0) >= 3 and features.get("total_distance", 0.0) > 0:
-        storage.record_session_telemetry(
-            session_id,
-            {
-                "avg_jerk": features.get("avg_jerk", 0.0),
-                "straightness": features.get("straightness", 1.0),
-                "total_distance": features.get("total_distance", 0.0),
-                "submovement_count": features.get("submovement_count", 0),
-                "spectral_purity": features.get("spectral_purity", 0.0),
-            },
-            max_history=10,
-            window_sec=300,
-        )
-
+    # IP+UA session history is written at the final decision (record_session_history, below), see #3G.
     if METRICS_ENABLED and synapse_inference_latency_seconds is not None:
         synapse_inference_latency_seconds.observe(latency)
 
@@ -450,7 +603,10 @@ def evaluate_synapse_request_sync(
     )
     mouse_points = feat.get("mouse_points", 0)
     is_stealth = feat.get("is_stealth_automation", False) or (details.get("threat_type") == "STEALTH_AUTOMATION")
-    has_invariance = any("Session Behavioral Invariance" in r for r in reasons) or (details.get("threat_type") == "SESSION_INVARIANCE_BOT")
+    has_invariance, ip_shape_invariance = invariance_scopes(reasons, details.get("threat_type"))
+    if ip_shape_invariance and classification != "Bot":
+        classification = "Bot"
+        bot_score = max(bot_score, 70.0)
 
     hard_bot_violation = (
         total_interactive_events == 0
@@ -459,20 +615,47 @@ def evaluate_synapse_request_sync(
         or has_invariance
     )
 
-    if enable_pow and (35.0 <= bot_score < 55.0) and not hard_bot_violation:
+    # Keyboard-only sessions (no mouse, >= 3 keys, not touch) get +40 instead of +50 in engine.py so real
+    # keyboard users are not hard-blocked. Without PoW that would make them a plain allow, and a jittered
+    # auto-typer with them, so for this segment the challenge stays on even when enable_pow is off. It only
+    # covers scores that would otherwise be allowed (below max_risk_score, not classified Bot): a session
+    # that was going to be blocked is still blocked, so this can only tighten, never loosen, a decision.
+    is_keyboard_only = (
+        mouse_points == 0
+        and feat.get("key_count", 0) >= 3
+        and not feat.get("touch_supported", False)
+    )
+    # Same rule for short pointer traces (#38a): when the short-trace gate actually lowered the score
+    # (details["short_trace_gated"]), the trace is too short to tell a humanised bot from a human, so the gray
+    # area is challenged instead of allowed. Measured (p2bc/short_meas.py): see SHORT_TRACE_CHALLENGE notes.
+    is_short_trace_gated = bool(details.get("short_trace_gated", False)) if isinstance(details, dict) else False
+    force_insufficient_evidence_pow = (
+        not enable_pow
+        and ((keyboard_only_challenge and is_keyboard_only) or (short_trace_challenge and is_short_trace_gated))
+        and bot_score < max_risk_score
+        and classification != "Bot"
+    )
+
+    insufficient_evidence = is_keyboard_only or is_short_trace_gated
+    if (
+        (enable_pow or force_insufficient_evidence_pow)
+        and (35.0 <= bot_score < 55.0)
+        and not hard_bot_violation
+        and not ip_shape_invariance
+    ):
         is_pow_valid = False
         if pow_nonce and pow_salt:
             is_pow_valid = verify_and_consume_pow(pow_salt, str(pow_nonce), client_ip=client_ip)
 
         if is_pow_valid:
-            bot_score = max(0.0, bot_score - 20.0)
+            bot_score = max(0.0, bot_score - pow_solved_discount(insufficient_evidence))
             classification = "Human"
             reasons.append("Gray area PoW Challenge successfully solved (Risk reduced).")
             if METRICS_ENABLED and synapse_pow_solved_total is not None:
                 synapse_pow_solved_total.inc()
         elif not is_shadow:
             # Emit challenge request with risk-adaptive PoW difficulty
-            pow_diff = 5 if bot_score >= 45.0 else 4
+            pow_diff = pow_challenge_difficulty(bot_score, insufficient_evidence)
             challenge_salt = generate_pow_salt(client_ip=client_ip, difficulty=pow_diff)
             return SynapseDecision(
                 allowed=False,
@@ -492,10 +675,28 @@ def evaluate_synapse_request_sync(
             )
 
     # 7. Final Decision Threshold
-    is_mitigated = bot_score >= max_risk_score or classification == "Bot"
+    is_mitigated = bot_score >= max_risk_score or classification == "Bot" or ip_shape_invariance
+
+    # 7.5 Trajectory replay: consumed only on the allow path (see TRAJECTORY_REPLAY_REASON above).
+    trajectory_replay = False
+    if not is_mitigated and is_trajectory_replay(storage, telemetry, shadow=is_shadow):
+        trajectory_replay = True
+        is_mitigated = True
+        bot_score = 100.0
+        classification = "Bot"
+        reasons.append(TRAJECTORY_REPLAY_REASON)
+
+    # IP+UA session history: final decision only, tagged allowed / blocked (see record_session_history, #3G).
+    record_session_history(storage, session_id, details, allowed=not is_mitigated)
 
     if is_mitigated:
-        storage.record_bot_strike(client_ip)
+        if trajectory_replay:
+            # Same policy as token-level replay: IP 4-strike counter only, no per-device +50 penalty.
+            storage.record_bot_strike(client_ip)
+        else:
+            if counts_as_ip_strike(bot_score, hard_bot_violation):
+                storage.record_bot_strike(client_ip)
+            storage.record_client_strike(client_key, window_sec=60)
 
         if is_shadow:
             if METRICS_ENABLED and synapse_shadow_requests_total is not None:
@@ -546,6 +747,10 @@ def evaluate_synapse_request_sync(
     elif METRICS_ENABLED and synapse_requests_total is not None:
         synapse_requests_total.labels(status="allow", classification=classification).inc()
 
+    # IP-only shape history (#39-C) is written ONLY for allowed requests: a blocked / challenged bot on a shared
+    # CGNAT IP must not be able to seed the history that the next (human) request on that IP is compared with.
+    record_ip_shape_history(storage, ip_session_id, details)
+
     return SynapseDecision(
         allowed=True,
         status_code=200,
@@ -573,6 +778,8 @@ async def evaluate_synapse_request(
     pow_nonce: str | None = None,
     pow_salt: str | None = None,
     enable_pow: bool | None = None,
+    keyboard_only_challenge: bool | None = None,
+    short_trace_challenge: bool | None = None,
 ) -> SynapseDecision:
     """
     Asynchronous wrapper for non-blocking invocation in ASGI event loops.
@@ -588,4 +795,6 @@ async def evaluate_synapse_request(
         pow_nonce=pow_nonce,
         pow_salt=pow_salt,
         enable_pow=enable_pow,
+        keyboard_only_challenge=keyboard_only_challenge,
+        short_trace_challenge=short_trace_challenge,
     )

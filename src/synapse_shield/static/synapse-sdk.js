@@ -1,5 +1,5 @@
 /**
- * Synapse Shield SDK v0.10.7 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
+ * Synapse Shield SDK v0.11.0 - Cryptographic Behavioral & Mobile Biometric Telemetry Collector
  * Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine (Desktop + Mobile SDK v2.0)
  */
 
@@ -121,11 +121,90 @@
     return false;
   }
 
+  // Server freshness contract (tokens.py verify_and_consume_token), applied with a 100 ms safety margin:
+  //   token age >= 1.5 s; telemetry span <= token age + 0.5 s (Time Travel);
+  //   epoch-ms timestamps: min_t >= challenge_ts - 5 s (Stale Telemetry) and max_t <= now + 2 s.
+  const MIN_CHALLENGE_AGE_MS = 1600;
+  const STALE_LIMIT_MS = 4900;
+  const SPAN_SLACK_MS = 400;
+  // Retry after a fresh challenge: wait at most this long, then send the most recent window that fits.
+  const MAX_RETRY_WAIT_MS = 3000;
+  // ...unless that window would leave fewer than 3 mouse points while the session had them (engine.py rejects
+  // 0-2 point "teleport" sessions); then wait up to this long so the last 3 points fit.
+  const MAX_MOUSE_GUARD_WAIT_MS = 8000;
+  const EVENT_TIME_FIELDS = ["t", "down", "up", "time"];
+
+  function parseChallengeTs(challenge) {
+    if (typeof challenge !== "string") return null;
+    const parts = challenge.split(".");
+    if (parts.length < 2) return null;
+    const parsed = parseInt(parts[1], 10);
+    return isNaN(parsed) ? null : parsed;
+  }
+
+  function eventMinTime(ev) {
+    let min = Infinity;
+    EVENT_TIME_FIELDS.forEach((f) => {
+      if (ev && typeof ev[f] === "number" && ev[f] < min) min = ev[f];
+    });
+    return min;
+  }
+
+  function eventBounds(lists) {
+    let min = Infinity;
+    let max = -Infinity;
+    lists.forEach((list) => list.forEach((ev) => {
+      EVENT_TIME_FIELDS.forEach((f) => {
+        const v = ev ? ev[f] : undefined;
+        if (typeof v === "number") {
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      });
+    }));
+    return min === Infinity ? null : { min: min, max: max };
+  }
+
+  // Keeps only the events the server can accept with a challenge issued at `challengeTs` and `ageMs` old:
+  // the most recent window of length age + 0.4 s and, for epoch timestamps, nothing older than challenge_ts - 4.9 s.
+  // An event is dropped as a whole when any of its time fields (t / down / up) falls outside the window.
+  function fitEventLists(lists, challengeTs, ageMs) {
+    const b = eventBounds(lists);
+    if (!b) return lists;
+    let cutoff = b.max - Math.max(0, ageMs) - SPAN_SLACK_MS;
+    if (b.min > 10000000000 && typeof challengeTs === "number") {
+      cutoff = Math.max(cutoff, challengeTs - STALE_LIMIT_MS);
+    }
+    return lists.map((list) => list.filter((ev) => eventMinTime(ev) >= cutoff));
+  }
+
+  function shiftEventLists(lists, delta) {
+    lists.forEach((list) => list.forEach((ev) => {
+      EVENT_TIME_FIELDS.forEach((f) => {
+        if (ev && typeof ev[f] === "number") ev[f] += delta;
+      });
+    }));
+  }
+
+  // Zero-PII input-path counters: only the kind of an insertion and its time, never its content.
+  // Autofill and password managers commonly fire plain `input` events (no InputEvent.inputType) or
+  // "insertReplacementText"; typed text arrives as "insertText"; paste / IME commits have their own events.
+  function inputEventKind(e) {
+    const type = e && typeof e.inputType === "string" ? e.inputType : "";
+    if (!type || type === "insertReplacementText") return "autofill";
+    if (type === "insertFromDrop") return "paste";
+    if (type === "insertFromPaste" || type === "insertFromPasteAsQuotation") return null; // counted by `paste`
+    if (type === "insertCompositionText" || type === "insertFromComposition") return null; // counted by `compositionend`
+    if (type.indexOf("insert") === 0) return "insert";
+    return null; // deletions, formatting, history: already covered by keystrokes or not an insertion
+  }
+
   const SynapseShield = {
     mouseMovements: [],
     clicks: [],
     keystrokes: [],
     scrolls: [],
+    inputEvents: [],
     motionSamples: [],
     lastMoveTime: 0,
     lastScrollTime: 0,
@@ -309,6 +388,19 @@
         if (this.keystrokes.length > 50) this.keystrokes.shift();
       }, { passive: true });
 
+      // Non-keyboard text entry (autofill, paste, IME): counted separately so key_count is never inflated.
+      // Zero-PII: e.data, clipboardData and field values are never read.
+      const pushInputEvent = (kind) => {
+        this.inputEvents.push({ t: Date.now(), kind: kind });
+        if (this.inputEvents.length > 50) this.inputEvents.shift();
+      };
+      window.addEventListener("input", (e) => {
+        const kind = inputEventKind(e);
+        if (kind) pushInputEvent(kind);
+      }, { passive: true, capture: true });
+      window.addEventListener("paste", () => pushInputEvent("paste"), { passive: true, capture: true });
+      window.addEventListener("compositionend", () => pushInputEvent("ime"), { passive: true, capture: true });
+
       // Scroll dynamics
       window.addEventListener("scroll", () => {
         const now = Date.now();
@@ -351,8 +443,51 @@
       this.clicks = [];
       this.keystrokes = [];
       this.scrolls = [];
+      this.inputEvents = [];
       this.motionSamples = [];
       this.lastTouchStartTime = 0;
+    },
+
+    _eventLists() {
+      return [this.mouseMovements, this.clicks, this.keystrokes, this.scrolls, this.inputEvents];
+    },
+
+    _challengeAgeMs() {
+      return Date.now() - this.challengeCreatedAt;
+    },
+
+    // The server rejects a token younger than 1.5 s ("Humanly Impossible Speed"); wait out the remainder.
+    async _ensureChallengeAge() {
+      const remaining = MIN_CHALLENGE_AGE_MS - this._challengeAgeMs();
+      if (this.currentChallenge && remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+    },
+
+    // Shared by both retry paths (EXPIRED and PoW): after a fresh challenge, wait briefly (<= 3 s, longer only to
+    // keep the last 3 mouse points, <= 8 s), keep the most recent telemetry window the token age allows
+    // (span <= age + 0.4 s) and shift it just past challenge_ts so the Stale rule holds. Intervals are preserved.
+    async _alignTelemetryForRetry() {
+      const challengeTs = parseChallengeTs(this.currentChallenge);
+      const b = eventBounds(this._eventLists());
+      const span = b ? b.max - b.min : 0;
+      let targetWindow = Math.min(span, MAX_RETRY_WAIT_MS + SPAN_SLACK_MS);
+      if (b && this.mouseMovements.length >= 3) {
+        const thirdLast = eventMinTime(this.mouseMovements[this.mouseMovements.length - 3]);
+        const needed = b.max - thirdLast;
+        if (needed > targetWindow) targetWindow = Math.min(needed, MAX_MOUSE_GUARD_WAIT_MS + SPAN_SLACK_MS);
+      }
+      const waitMs = Math.max(MIN_CHALLENGE_AGE_MS, targetWindow - SPAN_SLACK_MS);
+      const remaining = waitMs - this._challengeAgeMs();
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      if (!b) return;
+      const fitted = fitEventLists(this._eventLists(), null, this._challengeAgeMs());
+      [this.mouseMovements, this.clicks, this.keystrokes, this.scrolls, this.inputEvents] = fitted;
+      const nb = eventBounds(this._eventLists());
+      const anchor = challengeTs !== null ? challengeTs : this.challengeCreatedAt;
+      if (nb && nb.min < anchor) shiftEventLists(this._eventLists(), anchor - nb.min + 50);
     },
 
     getMotionVariance() {
@@ -365,11 +500,15 @@
 
     getPayload() {
       const cleanToString = getCleanFunctionToString();
+      // Only send what the current challenge can vouch for: events older than its window (a long SPA session,
+      // a renewed challenge) would make the server reject the whole token as Stale / Time Travel.
+      const fitted = fitEventLists(this._eventLists(), parseChallengeTs(this.currentChallenge), this._challengeAgeMs());
       const telemetry = {
-        mouse_movements: this.mouseMovements,
-        clicks: this.clicks,
-        keystrokes: this.keystrokes,
-        scrolls: this.scrolls,
+        mouse_movements: fitted[0],
+        clicks: fitted[1],
+        keystrokes: fitted[2],
+        scrolls: fitted[3],
+        input_events: fitted[4],
         browser: {
           webdriver: Boolean(navigator.webdriver),
           screen_width: window.innerWidth || (window.screen ? window.screen.width : 0),
@@ -429,7 +568,8 @@
       const encoder = new TextEncoder();
       let nonce = 0;
       const batchSize = 1000;
-      const maxAttempts = 1000000;
+      // Difficulty 5 needs ~1M hashes on average (a tail of 10x is not rare), so leave generous headroom.
+      const maxAttempts = 20000000;
 
       while (nonce < maxAttempts) {
         const promises = [];
@@ -464,6 +604,7 @@
       if (!this.currentChallenge || (Date.now() - this.challengeCreatedAt > 45000)) {
         await this.refreshChallenge();
       }
+      await this._ensureChallengeAge();
       const payload = this.getPayload();
 
       if (powData) {
@@ -484,7 +625,7 @@
         if ((data.code === "EXPIRED" || data.status === "token_expired") && !retryWithPoW && !_retried) {
           console.log("[Synapse Shield] Challenge token expired. Refreshing token and retrying seamlessly...");
           await this.refreshChallenge();
-          await new Promise((resolve) => setTimeout(resolve, 1600));
+          await this._alignTelemetryForRetry();
           return await this.submit(url, false, powData, true);
         }
 
@@ -503,47 +644,8 @@
           // 3. Ensure fresh challenge is fetched
           await refreshPromise;
 
-          // 4. Ensure minimum elapsed time (1600ms) has passed since fresh challenge creation
-          let challengeTs = Date.now();
-          if (this.currentChallenge) {
-            const parts = this.currentChallenge.split(".");
-            if (parts.length >= 2) {
-              const parsed = parseInt(parts[1], 10);
-              if (!isNaN(parsed)) challengeTs = parsed;
-            }
-          }
-          const elapsed = Date.now() - challengeTs;
-          if (elapsed < 1600) {
-            await new Promise((resolve) => setTimeout(resolve, 1600 - elapsed));
-          }
-
-          // 5. Shift telemetry timestamps to match fresh challenge window
-          // Preserves kinematic intervals, jerks, and curvature while preventing 'Time Travel' rejection
-          // and avoiding empty telemetry 403 blocks.
-          const allEvents = [
-            ...this.mouseMovements,
-            ...this.clicks,
-            ...this.keystrokes,
-            ...this.scrolls,
-          ];
-          if (allEvents.length > 0) {
-            let minT = Infinity;
-            allEvents.forEach((ev) => {
-              const t = ev.t || ev.down;
-              if (typeof t === "number" && t < minT) minT = t;
-            });
-            if (minT < challengeTs && minT !== Infinity) {
-              const shift = challengeTs - minT + 50;
-              this.mouseMovements.forEach((e) => { if (typeof e.t === "number") e.t += shift; });
-              this.clicks.forEach((e) => { if (typeof e.t === "number") e.t += shift; });
-              this.keystrokes.forEach((e) => {
-                if (typeof e.t === "number") e.t += shift;
-                if (typeof e.down === "number") e.down += shift;
-                if (typeof e.up === "number") e.up += shift;
-              });
-              this.scrolls.forEach((e) => { if (typeof e.t === "number") e.t += shift; });
-            }
-          }
+          // 4. Age the fresh challenge briefly and fit the telemetry into its window (shared with the EXPIRED path)
+          await this._alignTelemetryForRetry();
 
           // Retry with fresh challenge token and valid PoW data
           return await this.submit(url, true, { nonce: powNonce, salt: data.pow_salt });
@@ -569,6 +671,9 @@
       if (!this.currentChallenge || (now - this.challengeCreatedAt > 45000)) {
         await this.refreshChallenge();
       }
+      // A just-renewed challenge would be rejected as too fast; getPayload() then drops the events that predate
+      // the challenge window (long SPA sessions), so the token is not rejected as Stale Telemetry.
+      await this._ensureChallengeAge();
       const payload = this.getPayload();
       // Invalidate current challenge immediately after consumption to guarantee single-use token lifecycle
       // and prevent 403 Replay Attack in SPAs (React / Vue / Next.js)

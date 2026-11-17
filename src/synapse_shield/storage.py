@@ -11,8 +11,10 @@ Supports:
 """
 
 from abc import ABC, abstractmethod
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -38,6 +40,33 @@ except (ImportError, AttributeError):
 logger = logging.getLogger("synapse_shield.storage")
 
 DB_FILE = os.environ.get("SYNAPSE_DB_PATH", os.path.join(tempfile.gettempdir(), "synapse_shield.db"))
+
+
+def client_strike_key(ip: str | None, user_agent: str | None, secret_key: bytes | None = None) -> str:
+    """Opaque per-device key (IP + User-Agent) for the short "recently judged bot" penalty.
+
+    Behind CGNAT / Eduroam / a corporate NAT many devices share one IP. Penalising the whole IP
+    after a single bot verdict pushes every gray-area human on that address over the block
+    threshold, so the penalty is keyed per IP+UA instead (the IP-level 4-strike ban stays per IP).
+    Keyed with SECRET_KEY (HMAC-SHA256) so low-entropy User-Agent strings cannot be rainbow-tabled
+    or brute-forced back to IP or UA: neither the raw IP nor the raw User-Agent reaches storage.
+
+    Key rotation: the key is the token-signing SECRET_KEY (SYNAPSE_SECRET_KEY). Rotating it changes every
+    client key, so strikes recorded before the rotation are no longer found. They expire after the 60 s
+    window anyway, so a rotation forgets at most 60 s of per-device penalties; IP-level strikes and bans
+    are keyed by IP and are not affected. All pods sharing one Redis must use the same SYNAPSE_SECRET_KEY
+    (they already must, for tokens), otherwise each pod computes different client keys.
+    """
+    if secret_key is None:
+        from synapse_shield.tokens import SECRET_KEY
+        secret_key = SECRET_KEY
+    raw = f"{(ip or '').strip()}\x1f{(user_agent or 'unknown_ua').strip()}".encode("utf-8")
+    return "c_" + hmac.HMAC(secret_key, raw, digestmod=hashlib.sha256).hexdigest()[:32]
+
+
+# Hard upper bound on the process-local fallback stores (trajectory fingerprints, client strikes) of the
+# StorageBackend base class. Applies within the TTL too; when full, the oldest keys are evicted first.
+MEMORY_STORE_MAX_KEYS = 100_000
 
 
 class StorageBackend(ABC):
@@ -87,6 +116,67 @@ class StorageBackend(ABC):
         """Get the number of bot strikes recorded for an IP within window_sec."""
         pass
 
+    # Per-client (IP+UA hash, see client_strike_key) strike window. Not abstract so third-party
+    # backends written against the older interface keep working; they get a process-local window.
+    def record_client_strike(self, client_key: str, window_sec: int = 60) -> None:
+        """Record one bot verdict for an opaque client key. Never bans anything."""
+        now = time.time()
+        lock, store = self._client_strike_fallback_state()
+        with lock:
+            q = store.get(client_key)
+            if q is None:
+                q = store[client_key] = deque()
+            else:
+                store.move_to_end(client_key)
+            q.append(now)
+            while q and q[0] < now - window_sec:
+                q.popleft()
+            # Hard cap within the window too (rotating IP+UA keys must not grow memory without bound).
+            while len(store) > MEMORY_STORE_MAX_KEYS:
+                store.popitem(last=False)
+
+    def get_client_strike_count(self, client_key: str, window_sec: int = 60) -> int:
+        """Number of bot verdicts recorded for an opaque client key within window_sec."""
+        now = time.time()
+        lock, store = self._client_strike_fallback_state()
+        with lock:
+            q = store.get(client_key)
+            if not q:
+                return 0
+            while q and q[0] < now - window_sec:
+                q.popleft()
+            return len(q)
+
+    def _client_strike_fallback_state(self) -> tuple:
+        state = self.__dict__.get("_client_strikes_default")
+        if state is None:
+            state = self.__dict__.setdefault("_client_strikes_default", (threading.Lock(), OrderedDict()))
+        return state
+
+    # Trajectory-replay fingerprints (see fingerprint.trajectory_fingerprint). Not abstract so third-party
+    # backends written against the older interface keep working; they get a process-local window.
+    def consume_trajectory_fp(self, fp: str, ttl_sec: int = 3600) -> bool:
+        """Record an opaque trajectory fingerprint. True the first time it is seen within ttl_sec, else False."""
+        now = time.time()
+        state = self.__dict__.get("_trajectory_fps_default")
+        if state is None:
+            state = self.__dict__.setdefault("_trajectory_fps_default", (threading.Lock(), OrderedDict()))
+        lock, store = state
+        with lock:
+            exp = store.get(fp)
+            if exp is not None and exp >= now:
+                return False
+            store.pop(fp, None)
+            store[fp] = now + ttl_sec
+            # Drop expired entries from the front (insertion order ~ expiry order), then enforce a hard cap
+            # even within the TTL: when full, the oldest fingerprints are forgotten first (LRU-by-insert).
+            while store:
+                k, e = next(iter(store.items()))
+                if e >= now and len(store) <= MEMORY_STORE_MAX_KEYS:
+                    break
+                store.popitem(last=False)
+            return True
+
     @abstractmethod
     def clear_all(self) -> None:
         """Clear all nonces, bans, and bot strikes (used for tests and admin clear)."""
@@ -118,6 +208,7 @@ class SQLiteStorageBackend(StorageBackend):
         self._local = threading.local()
         self._ip_history: dict[str, deque] = {}
         self._ip_strikes_l1: dict[str, deque] = {}
+        self._client_strikes_l1: dict[str, deque] = {}
         self._ip_ban_cache: dict[str, tuple[bool, float]] = {}
         self._session_telemetry_l1: dict[str, deque] = {}
         self._last_nonce_cleanup = 0.0
@@ -212,6 +303,24 @@ class SQLiteStorageBackend(StorageBackend):
                 """)
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_ip_strikes_ip_ts ON ip_strikes(ip, timestamp)
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS client_strikes (
+                        client_key TEXT,
+                        timestamp REAL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_client_strikes_key_ts ON client_strikes(client_key, timestamp)
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS trajectory_fps (
+                        fp TEXT PRIMARY KEY,
+                        expires_at REAL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_trajectory_fps_exp ON trajectory_fps(expires_at)
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS session_telemetry (
@@ -459,6 +568,77 @@ class SQLiteStorageBackend(StorageBackend):
             logger.error(f"SQLite get_bot_strike_count error: {e}")
             return l1_count
 
+    def record_client_strike(self, client_key: str, window_sec: int = 60) -> None:
+        now = time.time()
+        with self._lock:
+            if len(self._client_strikes_l1) > 5000:
+                stale = [k for k, dq in self._client_strikes_l1.items() if not dq or dq[-1] < now - window_sec]
+                for k in stale:
+                    del self._client_strikes_l1[k]
+            q = self._client_strikes_l1.setdefault(client_key, deque())
+            q.append(now)
+            while q and q[0] < now - window_sec:
+                q.popleft()
+        # Keys are per device (high cardinality) and most are never seen again, so the per-key DELETE
+        # below would leave their rows forever. Purge every expired row at most once a minute.
+        purge_all = now - getattr(self, "_last_client_strike_purge", 0.0) >= 60.0
+        if purge_all:
+            self._last_client_strike_purge = now
+        try:
+            with self._get_connection() as conn:
+                if purge_all:
+                    conn.execute("DELETE FROM client_strikes WHERE timestamp < ?", (now - window_sec,))
+                conn.execute(
+                    "DELETE FROM client_strikes WHERE client_key = ? AND timestamp < ?",
+                    (client_key, now - window_sec),
+                )
+                conn.execute("INSERT INTO client_strikes (client_key, timestamp) VALUES (?, ?)", (client_key, now))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"SQLite record_client_strike error: {e}")
+
+    def get_client_strike_count(self, client_key: str, window_sec: int = 60) -> int:
+        now = time.time()
+        l1_count = 0
+        with self._lock:
+            q = self._client_strikes_l1.get(client_key)
+            if q:
+                while q and q[0] < now - window_sec:
+                    q.popleft()
+                l1_count = len(q)
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM client_strikes WHERE client_key = ? AND timestamp >= ?",
+                    (client_key, now - window_sec),
+                ).fetchone()
+                return max(l1_count, row[0] if row else 0)
+        except Exception as e:
+            logger.error(f"SQLite get_client_strike_count error: {e}")
+            return l1_count
+
+    def consume_trajectory_fp(self, fp: str, ttl_sec: int = 3600) -> bool:
+        # SQLite only (no Rust L1): the Rust nonce cache has its own fixed TTL and namespace.
+        now = time.time()
+        purge_all = now - getattr(self, "_last_trajectory_fp_purge", 0.0) >= 60.0
+        if purge_all:
+            self._last_trajectory_fp_purge = now
+        try:
+            with self._get_connection() as conn:
+                if purge_all:
+                    conn.execute("DELETE FROM trajectory_fps WHERE expires_at < ?", (now,))
+                # An expired row for this fp is a first sighting again.
+                conn.execute("DELETE FROM trajectory_fps WHERE fp = ? AND expires_at < ?", (fp, now))
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO trajectory_fps (fp, expires_at) VALUES (?, ?)", (fp, now + ttl_sec)
+                )
+                conn.commit()
+                return cur.rowcount == 1
+        except Exception as e:
+            # Fail-open: a False here blocks the request as a replay, so a storage error must not do that.
+            logger.error(f"SQLite consume_trajectory_fp error: {e}")
+            return True
+
     def clear_all(self) -> None:
         if HAS_RUST_CORE and synapse_core_rs is not None:
             try:
@@ -471,6 +651,8 @@ class SQLiteStorageBackend(StorageBackend):
                 conn.execute("DELETE FROM used_nonces")
                 conn.execute("DELETE FROM banned_ips")
                 conn.execute("DELETE FROM ip_strikes")
+                conn.execute("DELETE FROM client_strikes")
+                conn.execute("DELETE FROM trajectory_fps")
                 conn.execute("DELETE FROM session_telemetry")
                 conn.commit()
         except Exception as e:
@@ -479,6 +661,7 @@ class SQLiteStorageBackend(StorageBackend):
         with self._lock:
             self._ip_history.clear()
             self._ip_strikes_l1.clear()
+            self._client_strikes_l1.clear()
             self._ip_ban_cache.clear()
             self._session_telemetry_l1.clear()
 
@@ -618,6 +801,15 @@ class RedisStorageBackend(StorageBackend):
             res = self.client.set(key, "1", ex=ttl_sec, nx=True)
             return bool(res)
         except Exception as e:
+            # Deliberate FAIL-OPEN (availability over strict cross-pod replay protection): while Redis is
+            # unreachable, nonces are consumed in this pod's local SQLite only. Replay inside one pod is
+            # still caught, but the same token replayed against a *different* pod during the outage is
+            # accepted once per pod (bounded by the 60 s token lifetime and by the client binding hash).
+            # Nonces consumed locally are not copied back to Redis when it recovers, so the window can
+            # extend up to the token lifetime past recovery. A fail-closed switch was not added here: a
+            # False return is reported as REPLAY and counted as a bot strike, so an outage would turn
+            # into strikes and IP bans for every user; doing it safely needs a distinct "nonce store
+            # unavailable" result (503, no strike) in tokens.py/core.py/main.py.
             logger.warning("Redis consume_nonce failed (%s), falling back to SQLite", e)
             return self.fallback.consume_nonce(nonce, ttl_sec=ttl_sec)
 
@@ -700,6 +892,38 @@ class RedisStorageBackend(StorageBackend):
         except Exception as e:
             logger.warning("Redis get_bot_strike_count failed (%s), falling back to SQLite", e)
             return self.fallback.get_bot_strike_count(ip, window_sec)
+
+    def record_client_strike(self, client_key: str, window_sec: int = 60) -> None:
+        try:
+            key = f"synapse:cstrikes:{client_key}"
+            now = time.time()
+            pipeline = self.client.pipeline()
+            pipeline.zremrangebyscore(key, 0, now - window_sec)
+            pipeline.zadd(key, {_unique_member(now): now})
+            pipeline.expire(key, window_sec * 2)
+            pipeline.execute()
+        except Exception as e:
+            logger.warning("Redis record_client_strike failed (%s), falling back to SQLite", e)
+            self.fallback.record_client_strike(client_key, window_sec)
+
+    def get_client_strike_count(self, client_key: str, window_sec: int = 60) -> int:
+        try:
+            key = f"synapse:cstrikes:{client_key}"
+            now = time.time()
+            pipeline = self.client.pipeline()
+            pipeline.zremrangebyscore(key, 0, now - window_sec)
+            pipeline.zcard(key)
+            return int(pipeline.execute()[1])
+        except Exception as e:
+            logger.warning("Redis get_client_strike_count failed (%s), falling back to SQLite", e)
+            return self.fallback.get_client_strike_count(client_key, window_sec)
+
+    def consume_trajectory_fp(self, fp: str, ttl_sec: int = 3600) -> bool:
+        try:
+            return bool(self.client.set(f"synapse:trajfp:{fp}", "1", ex=ttl_sec, nx=True))
+        except Exception as e:
+            logger.warning("Redis consume_trajectory_fp failed (%s), falling back to SQLite", e)
+            return self.fallback.consume_trajectory_fp(fp, ttl_sec=ttl_sec)
 
     def clear_all(self) -> None:
         try:

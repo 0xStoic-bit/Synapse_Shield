@@ -77,6 +77,23 @@ import { SynapseProtect } from 'synapse-shield-vue';
 </template>
 ```
 
+### Automatic Proof-of-Work retry (`submitProtected`)
+
+Same API as the React SDK. On HTTP 429 `challenge_required` it fetches a fresh challenge, solves the PoW and retries **once**. A second 429 is returned as is.
+
+```ts
+const { submitProtected } = useSynapseShield();
+
+const res = await submitProtected('/api/login', (p) => ({
+  username: username.value,
+  synapse_token: p.token,
+  pow_salt: p.pow_salt,   // set only on the retry
+  pow_nonce: p.pow_nonce, // read by the server middleware from the top level of the JSON body
+}));
+```
+
+The retry waits 1.6-3 s (up to 8 s only when needed to keep the last 3 mouse points). It then sends the most recent telemetry window the server accepts. A long session is scored on its last few seconds. Tokens only carry events their challenge can vouch for, so long SPA sessions are not rejected as stale. Autofill, paste and IME entry are recorded in `input_events` as `{ t, kind }` only (no content, `key_count` unchanged).
+
 ---
 
 ## Nuxt 3 (SSR Safe)
@@ -95,7 +112,7 @@ const { getProtectedPayload } = useSynapseShield();
 
 ---
 
-## Features (v0.10.7)
+## Features (v0.11.0)
 
 - **Universal Keystroke Zero-PII Shield (v0.10.4):** Automatic client-side masking of all single-character inputs (`rawKey.length === 1 -> "masked"`) and sensitive fields, local digraph frequency computation (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR & KVKK compliant).
 - **SPA Token Lifecycle & Coalescing Mutex (v0.10.3):** Single-use challenge token lifecycle invalidation to eliminate 403 Replay Attack loops in Vue 3 and Nuxt applications.

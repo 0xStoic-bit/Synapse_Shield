@@ -32,6 +32,10 @@ def test_codes_are_low_cardinality_identifiers():
     ("Superhuman input frequency (avg typing interval: 9.0 ms).", "keystroke_superhuman"),
     ("Session Behavioral Invariance: Zero straightness variance across consecutive session requests.",
      "session_invariance"),
+    ("Session Behavioral Invariance: Same normalized trajectory shape repeated across IP requests (Hamming 0, 1 <= 4)",
+     "session_shape_invariance"),
+    ("REPLAY_TRAJECTORY: pointer trajectory identical to one already accepted within the replay window",
+     "trajectory_replay"),
     ("Something new nobody mapped yet", "other"),
 ])
 def test_rule_code(reason, code):
