@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import base64
 import json
-import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -113,7 +112,8 @@ def test_retention_prune_runs_periodically_on_write_path(monkeypatch):
     conn.execute("INSERT INTO logs (timestamp, ip, user_agent, bot_score, classification, threat_type, reasons, features, telemetry) "
                  "VALUES (?, '1.2.3.*', 'x', 0, 'Human', 'T', '[]', '{}', '{}')", (old,))
     conn.commit()
-    count_old = lambda: conn.execute("SELECT COUNT(*) FROM logs WHERE timestamp = ?", (old,)).fetchone()[0]
+    def count_old():
+        return conn.execute("SELECT COUNT(*) FROM logs WHERE timestamp = ?", (old,)).fetchone()[0]
 
     monkeypatch.setattr(main_mod, "_last_log_prune", time.monotonic())
     assert main_mod.maybe_prune_old_records() is False  # within the interval: cheap no-op
