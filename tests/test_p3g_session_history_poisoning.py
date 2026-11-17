@@ -37,8 +37,12 @@ def test_engine_history_only_window_ignores_blocked_entries():
     _, cls, reasons, _ = analyze_behavior(victim, session_history=poisoned)
     assert cls == "Bot" and any(INV in r for r in reasons)
     blocked = [dict(e, ok=False) for e in poisoned]
-    _, cls, reasons, _ = analyze_behavior(victim, session_history=blocked)
-    assert cls == "Human" and not any(INV in r for r in reasons)
+    score, _, reasons, _ = analyze_behavior(victim, session_history=blocked)
+    assert not any(INV in r for r in reasons)
+    # Blocked entries must not change the verdict at all: same score as with no history. (The victim sits near
+    # the 50 threshold, so asserting "Human" would depend on numeric details of the installed numpy/Rust build.)
+    clean_score, _, _, _ = analyze_behavior(victim, session_history=[])
+    assert score == pytest.approx(clean_score)
 
 
 def test_engine_blocked_entries_still_count_when_the_current_request_matches():
