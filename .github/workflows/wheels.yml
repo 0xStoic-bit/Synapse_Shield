@@ -13,9 +13,15 @@ on:
 permissions:
   contents: read
 
-env:
-  # pyo3 0.22 officially supports up to 3.13; this flag allows building for 3.14.
-  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: '1'
+# A push to main and a tag push for the same commit used to start two full runs; macOS runners are
+# scarce, so the duplicate jobs queued until they were cancelled. Tag runs are never cancelled.
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+# The Rust core is built with PyO3 `abi3-py310` (crates/synapse_core_rs/Cargo.toml): one wheel per
+# platform runs on every CPython >= 3.10, so the build matrix is per platform, not per Python version.
+# The `smoke` jobs below prove the single wheel imports and runs on each supported Python.
 
 jobs:
   linux:
@@ -24,19 +30,18 @@ jobs:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
-      - name: Build Wheels (Linux manylinux)
+      - name: Build abi3 wheel (Linux manylinux)
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -i python${{ matrix.python-version }}
+          args: --release --out dist -i python3.10
           manylinux: auto
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-linux-${{ matrix.target }}-py${{ matrix.python-version }}
+          name: wheels-linux-${{ matrix.target }}
           path: dist/*.whl
 
   musllinux:
@@ -46,19 +51,18 @@ jobs:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
-      - name: Build Wheels (Alpine musllinux)
+      - name: Build abi3 wheel (Alpine musllinux)
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -i python${{ matrix.python-version }}
+          args: --release --out dist -i python3.10
           manylinux: musllinux_1_2
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-musllinux-${{ matrix.target }}-py${{ matrix.python-version }}
+          name: wheels-musllinux-${{ matrix.target }}
           path: dist/*.whl
 
   test-alpine:
@@ -68,7 +72,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: wheels-musllinux-x86_64-py3.12
+          name: wheels-musllinux-x86_64
           path: dist
       - name: Verify wheel on Alpine Linux Container
         run: |
@@ -76,29 +80,45 @@ jobs:
             pip install /dist/*.whl && \
             python -c \"import synapse_shield; from synapse_shield import synapse_core_rs; assert synapse_core_rs.is_rust_core_active() is True; assert synapse_core_rs.consume_nonce_rs('alpine_test') is True; print('Native Rust Core loaded successfully on Alpine Linux!')\""
 
-  windows:
-    runs-on: windows-latest
+  smoke:
+    name: Smoke Test abi3 Wheel (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: linux
     strategy:
       fail-fast: false
       matrix:
-        target: [x64]
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+      - name: Install and import the native core
+        run: |
+          pip install dist/*.whl
+          python -c "import synapse_shield, synapse_shield._version as v; from synapse_shield import synapse_core_rs as r; assert r.is_rust_core_active(); assert r.get_core_version().startswith(v.__version__), (r.get_core_version(), v.__version__); print('abi3 core OK on', __import__('sys').version)"
+
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         id: py
         with:
-          python-version: ${{ matrix.python-version }}
-          architecture: ${{ matrix.target }}
-      - name: Build Wheels (Windows x64)
+          python-version: '3.12'
+          architecture: x64
+      - name: Build abi3 wheel (Windows x64)
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.target }}
+          target: x64
           args: --release --out dist -i ${{ steps.py.outputs.python-path }}
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-windows-${{ matrix.target }}-py${{ matrix.python-version }}
+          name: wheels-windows-x64
           path: dist/*.whl
 
   macos:
@@ -107,14 +127,13 @@ jobs:
       fail-fast: false
       matrix:
         target: [x86_64, aarch64]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         id: py
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Build Wheels (macOS Intel & Apple Silicon)
+          python-version: '3.12'
+      - name: Build abi3 wheel (macOS Intel & Apple Silicon)
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
@@ -122,7 +141,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ matrix.target }}-py${{ matrix.python-version }}
+          name: wheels-macos-${{ matrix.target }}
           path: dist/*.whl
 
   sdist:
@@ -144,7 +163,7 @@ jobs:
     name: Publish Native Wheels to PyPI
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, musllinux, test-alpine, windows, macos, sdist]
+    needs: [linux, musllinux, test-alpine, smoke, windows, macos, sdist]
     permissions:
       id-token: write
       contents: read
