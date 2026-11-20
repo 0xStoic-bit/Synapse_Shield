@@ -81,7 +81,8 @@ def test_alert_rules_reference_real_metrics_and_labels():
         assert "200" in r["expr"], "every alert needs a minimum sample size"
 
 
-def test_all_shadow_metrics_are_documented_in_readme():
-    readme = (MON.parents[1] / "README.md").read_text(encoding="utf-8")
+def test_all_shadow_metrics_are_documented():
+    # The shadow-mode metrics are documented in docs/SHADOW_MODE.md (the root README is the short quick-start).
+    doc = (MON.parents[1] / "docs" / "SHADOW_MODE.md").read_text(encoding="utf-8")
     for name in ("synapse_shadow_cohort_total", "synapse_shadow_outcomes_total", "synapse_shadow_rules_total"):
-        assert name in readme
+        assert name in doc

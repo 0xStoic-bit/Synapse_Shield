@@ -1,632 +1,143 @@
 <div align="center">
 
-# 🛡️ SYNAPSE SHIELD (突触之盾)
+# 🛡️ Synapse Shield
 
-### 下一代开源行为生物识别与反爬虫/机器人防御引擎
+**无需验证码，即可拦截登录和注册表单上的机器人。**
 
-**以隐私为先、零摩擦感知、自托管的 Cloudflare Turnstile 替代方案。**
+可自托管的开源 Cloudflare Turnstile 替代方案。它关注访客*如何*移动、点击和输入，而从不读取*输入的内容*。
 
 [![PyPI](https://img.shields.io/pypi/v/synapse-shield?color=00F0FF&label=pypi)](https://pypi.org/project/synapse-shield/)
+[![CI](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
+[![Python 3.10–3.14](https://img.shields.io/badge/Python-3.10%E2%80%933.14-blue.svg?logo=python)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00F0FF.svg)](https://opensource.org/licenses/MIT)
-[![CI/CD](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
-[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/0xStoic-bit)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python)](https://python.org)
-[![Inference SLA](https://img.shields.io/badge/Latency-%3C0.5ms-10B981.svg)]()
-[![Zero-PII](https://img.shields.io/badge/Privacy-100%25%20Zero--PII-success.svg)]()
 
-<br/>
+🌐 [English](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/README.md) | 简体中文
 
-<a href="https://github.com/0xStoic-bit/Synapse_Shield/stargazers"><img src="https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=00F0FF&labelColor=0D1117" alt="Star Synapse Shield on GitHub"/></a>
-
-<br/>
-
-🌐 [English](README.md) | [简体中文](README_ZH.md)
-
-<br/>
-
-[核心特性](#-核心特性与安全架构-v0107) • [系统架构](#-系统架构与时序图) • [快速上手](#-30秒快速上手) • [开发者接入](#-开发者接入指南) • [基准测试](#-对抗攻击仿真基准测试) • [数学理论](#-运动学与数学理论基础) • [媒体报道](#-媒体与社区报道-featured-on) • [支持项目](#-支持本项目)
+<img src="https://raw.githubusercontent.com/0xStoic-bit/Synapse_Shield/main/docs/assets/how-it-works.gif" alt="工作流程：访客使用表单，SDK 只采集时间信息，服务器为会话打分，请求被放行、挑战或拦截" width="760"/>
 
 </div>
 
----
+## 为什么选择它
 
-## ⚡ 概述 (Overview)
+- **没有拼图。** 真实用户直接使用表单即可。当系统不确定时，浏览器会在后台完成一次简短的工作量证明（PoW），而不是弹出图片验证。
+- **你的服务器，你的数据。** 一切都在你自己的机器上运行，没有第三方服务能看到你的访客。
+- **输入的文字不会离开浏览器。** SDK 只发送移动和时间信息，所有输入的字符都会被屏蔽。
+- **即插即用。** FastAPI、Django、Flask、Litestar、Sanic 或任意 ASGI 应用只需一行中间件，再加一个轻量的浏览器 SDK（原生 JS、React 或 Vue）。
 
-**Synapse Shield** 彻底告别了干扰用户体验的传统验证码（CAPTCHA，如九宫格选图、旋转拼图）以及昂贵的专有云 WAF，采用**亚毫秒级行为生物力学分析（Sub-millisecond Behavioral Biomechanics）**构建安全护盾。
+<div align="center">
+<img src="https://raw.githubusercontent.com/0xStoic-bit/Synapse_Shield/main/docs/assets/human-vs-bot.gif" alt="类人光标轨迹被放行（风险 0），贝塞尔曲线机器人被拦截（风险 100）" width="760"/>
 
-通过精准评估人体神经肌肉的自然微颤（**加加速度 / Jerk: $\frac{da}{dt}$**）、基于菲茨定律（Fitts's Law）的终端减速模型、光标轨迹微分曲率 $\kappa(t)$ 以及毫秒级击键动力学（Keystroke Dynamics），Synapse Shield 能够在自动化爬虫、刷票脚本、撞库机器人与 LLM 自动化 Agent **触及后端业务逻辑前，毫秒内完成自主识别与无感拦截**。
+<sub>由 <a href="https://github.com/0xStoic-bit/Synapse_Shield/blob/main/scripts/make_readme_gifs.py"><code>scripts/make_readme_gifs.py</code></a> 根据项目自带的合成轨迹生成；判定结果是引擎对这些轨迹的真实输出。</sub>
+</div>
 
----
-
-## ✨ 核心特性与安全架构 (v0.11.0)
-
-| 核心特性 | 功能与技术解析 |
-| :--- | :--- |
-| 🧪 **实测修正、重放防御与诚实默认值 (v0.11.0)** | 每项改动均以相同种子做前后对比；真人误报数据来自真实 SapiMouse 数据集（120 人），机器人数据为合成。1D-CNN 默认改为 `shadow`（`SYNAPSE_CNN_MODE`）：内置权重仅用合成噪声训练，曾拦截约 19% 的真人窗口；不再从工作目录加载 `./synapse_weights.npz`（请用 `SYNAPSE_WEIGHTS_PATH`）。短轨迹（<40 个采样点）不再仅凭直线度 / FFT / 子运动规则被拦截（真实单次移动误拦 50% → 4.9%），此类灰区会话即使关闭 PoW 也会收到挑战。新增带密钥的 64 位轨迹指纹（1 小时 TTL，不存原始轨迹）与会话内形状 SimHash，用于防御重放。无触摸事件的 `touch_supported` 改为重新分类而非惩罚；60 秒设备惩罚按 HMAC(IP + UA) 计算；令牌错误不再惩罚设备；仅硬性违规或风险 ≥ 85 的 Bot 判定计入 4 次 IP 封禁。客户端信号只能提高风险。详见 [`docs/PRIVACY_OPERATOR_NOTES.md`](docs/PRIVACY_OPERATOR_NOTES.md) 与英文 README 的 *Detection policy and environment*。 |
-| ⌨️ **纯键盘访问与 React 工作量证明求解 (v0.10.8)** | 纯键盘会话（读屏软件、开关设备、Tab 导航：无鼠标移动且至少 3 次按键）不再仅因此被直接拦截：该规则由 +50 改为 +40，即使关闭 `enable_pow`，框架适配器也会对这类会话发出灰区工作量证明挑战（设置 `SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0` 可关闭），因此带抖动的自动输入脚本仍无法免费通过。React hook 现可自动求解 PoW 并重试一次（`submitProtected`、`solvePow`）；原生 SDK 求解上限提高到 2000 万次（难度 5 不再失败），重试等待时间会随输入时长调整，长时间输入不再被判为 Time Travel。仅基于合成数据测得：纯键盘真人被拦截 94% → 2.4%（其余收到挑战），纯键盘机器人无挑战直接放行 0%。 |
-| 🔭 **影子队列、规则代码与离线回放 (v0.10.7)** | 影子模式按队列（输入类型 × devicePixelRatio）统计，附稳定规则代码（`SynapseDecision.rule_codes`）；`report_shadow_outcome()` 可上报会话结果，用于判断强制拦截是否会误伤真实用户；提供现成的 Grafana 与 Prometheus 告警资源（`deploy/monitoring/`）；`synapse-shield replay` 可在本机离线评估自有录制数据的误报率/检出率。抖动（stutter）与快速打字规则已按真人数据重新校准（真实 20 秒窗口误拦截 2.7% → 0.5%，机器人检出不变）。 |
-| 🧾 **诚实的工具链与 API 契约 (v0.10.7)** | `synapse-shield test` / `redteam` 在服务不可达或判定错误时以非零状态码退出（不再在无服务时显示"全部通过"）；真人对照用例使用新鲜时间戳；`doctor` 在最小安装下可运行；`POST /api/score` 的每个分支都返回 `decision`（`allow` / `block` / `challenge` / `error`）；Prometheus 格式输出位于 `/metrics/prometheus`；除非设置 `SYNAPSE_STORE_RAW_TELEMETRY=1`，否则**不再**存储原始轨迹。 |
-| 🔬 **曲率门控与误报修复** | 修复微分曲率 $\kappa(t)$ 在低速停顿下的离散量化奇异点问题："混沌曲率"检查现在仅使用光标实际移动的点（相邻两步均 ≥ 5 px），真实用户在目标附近减速停下不再被误判。统一击键频率严格正值下界（`0 < key_interval_avg < 25ms`），消除快速连击（Rollover）误杀 Brave 隐私豁免与误打机器人标签。隔离移动端离散点击的多项式加速度误判（规则 4.C 引入 `and not is_touch`）。(v0.10.6) |
-| 🛡️ **Zero-PII 击键隐私盾与 SPA 声明周期** | 全框架（原生 JS、React、Vue 3）可打印字符脱敏（仅 `Enter`、`ArrowLeft`、`Unidentified` 等标准命名按键保留名称，其余所有字符——包括 emoji、连字按键 `لا`、组合字符序列与土耳其语 `İ`——均替换为 `key: "masked"`），并在前端内存直接评估高频双字符动力学（`is_freq_digraph`），网络传输 **0 字节个人文字与隐私数据**（完全符合 GDPR 第 5(1)(c) 条与 KVKK 第 4 条数据最小化原则）。单次使用 Challenge 令牌自动失效机制，彻底根除 SPA（React / Vue / Next.js）第二请求 403 重放误拦截。PoW 动态难度 HMAC 签名 (`salt.ts.diff.sig`)，PoW 重试遥测时间戳平移对齐（杜绝 403 零事件拦截），CIDR 反向代理白名单解析 (`10.0.0.0/8`, `172.16.0.0/12`)，CGNAT 校园网/NAT 会话隔离及桌面端 IME 击键停顿绕过修复 (v0.10.4)。 |
-| 🔐 **客户端网络绑定与 Token Relay 防御** | 密码学客户端设备与网络子网双向绑定机制（`nonce.ts.bind_hash.sig`）。通过将 challenge 令牌绑定至 `/24` IPv4 与 `/64` IPv6 子网及大小写归一化 User-Agent，结合漫游容错机制，彻底封杀自动化 Token Relay 与跨 IP 集中式打码/收割农场攻击。内置防悬挂无泄漏的 SQLite Worker 线程生命周期管理与全新的 `synapse-shield doctor` 系统诊断体检 CLI 工具 (v0.10.1)。 |
-| 📱 **移动端 SDK v2.0 与反模拟器生物识别** | 全面覆盖原生 JS、React 与 Vue 的移动端生物特征遥测：按压保持时间（`touchend - touchstart` 均值与方差）、免权限陀螺仪/加速度计微颤（`motion_variance`）、WebGL 渲染器跨维校验（`is_mobile_gpu_mismatch` 精准拦截伪装移动视口的 `SwiftShader`/桌面显卡 +85 Risk）、Android Gboard/IME 软键盘适配（`key="Unidentified"`），彻底消除移动端单次轻触（Single-Tap）与滑动后点击的误报 (v0.10.0)。 |
-| 🛡️ **运动学深度加固、动态抖动与 PoW 防御** | 真实电容触控有效性校验（防御桌面端伪造触控 +75 Risk）、固定触控半径陷阱（方差为 0 判定为模拟器 +55 Risk）、致命违规硬封禁否决与绑定 IP 的 PoW 挑战机制（限定 35.0-55.0 灰色区间）、多维模糊轨迹重放检测 ($\delta < 0.015$)、点击与指针终点空间距离校准 ($\Delta d \le 50\text{px}$)、基于密钥的动态阈值抖动 ($\pm 5\%$) 以及训练集防投毒单 IP 样本配额限制 (v0.9.9)。 |
-| ⚡ **向量化 1D-CNN、Rust L1 缓存与 Alpine musllinux 支持** | 基于 NumPy BLAS 实现向量化卷积推理（耗时仅 0.092ms，提速 5.2 倍），线程本地持久化 SQLite WAL 与 L1 内存会话/封禁缓存（中间件全链路耗时 0.84ms），支持 Alpine Linux (`musllinux_1_2`) 多架构原生轮子，全面修复 Brave 指纹伪装与直线/宏点击绕过风险 (v0.9.8)。 |
-| 🛡️ **企业级全栈安全加固与反代防护** | 原生支持 `X-Synapse-Token` 请求头与文件上传防御，完善 `SYNAPSE_TRUSTED_PROXIES` 反代透传解析 (`CF-Connecting-IP` / `X-Forwarded-For`)，无阻塞影子模式 (`mode="shadow"`)，灰度 PoW 质询，以及 Django 与 Flask 的完整密码学平权校验 (v0.9.7)。 |
-| 🚀 **Litestar, Sanic & ASGI 3.0 原生支持** | 提供 Litestar 路由守卫 (`synapse_guard`)、Sanic 双模装饰器 (`@shield_protect_sanic`) 以及零依赖的通用 ASGI 3.0 中间件，内置防挂起流重放 (`replayable_receive`) 与 256KB 内存 DoS 防御 (v0.9.6)。 |
-| 🛡️ **算法级 DoS 防御与泊松稳定性** | 将阶乘循环重构为 $O(1)$ 递推迭代乘法，并引入 $k \ge 30$ 快速截断机制（延迟 $<0.1\text{ ms}$），彻底消除突发流量下的 CPU 耗尽风险 (v0.9.3)。 |
-| ⌨️ **常量时间 $O(1)$ Deque 击键配对** | 将按键按下/释放匹配机制从 $O(N)$ 列表位移升级为 `collections.deque.popleft()`，杜绝长文本输入时异步事件循环发生 $O(N^2)$ 饿死 (v0.9.3)。 |
-| 🌐 **反向代理 IP 校验与 IPv6 归一化** | 引入 `SYNAPSE_TRUSTED_PROXIES` 白名单验证，并自动解包 IPv4 映射的 IPv6 地址（`::ffff:x.x.x.x`），确保子网精准分类及严格遵循 GDPR/KVKK 匿名化标准 (v0.9.3)。 |
-| 🔒 **RCE 防护与模型路径穿越防御** | 强制在 NumPy 模型加载时设置 `allow_pickle=False`，并在重训练导出端实施规范化 `os.path.abspath` 与 `.npz` 后缀校验 (v0.9.3)。 |
-| 📐 **微分曲率分析 ($\kappa(t)$ - 贝塞尔与 AI 机器人猎手)** | 利用微分几何计算轨迹一阶和二阶导数 $\kappa(t) = \frac{\|\dot{x}\ddot{y} - \dot{y}\ddot{x}\|}{(\dot{x}^2 + \dot{y}^2 + \epsilon)^{3/2}}$，通过 Rust AVX2 SIMD 高速识别平滑度异常的贝塞尔曲线（Bézier）与人工高斯抖动机器人 (v0.9.2)。 |
-| ⌨️ **击键动力学与双字母组香农熵** | 深度分析按键保持时间（Dwell Time $T_d$）、按键间距飞逝时间（Flight Time $T_f$）以及高频双字母组合（Digraphs），结合 8-bin 直方图香农熵分析，阻击固定延时的机器人击键注入 (v0.9.2)。 |
-| ⚡ **PyO3 零拷贝缓冲区 (Zero-Copy Buffer)** | Python 端的 NumPy `float64` 连续数组直接通过指针裸传递至 Rust 底层 SIMD 寄存器，规避跨语言内存复制损耗，实现微秒级极端性能 (v0.9.2)。 |
-| 📱 **移动端电容触控生物力学** | 模拟多点触控形变物理学：追踪 `maxTouchPoints`、平均触控半径 ($\bar{r} \ge 3.0\text{ px}$)、形变方差 ($\sigma_r^2 > 0$) 与按压力度。真人手指触控享有 -15 风险补偿，针对无头移动模拟器施加 +60 风险拦截惩罚 (v0.9.0)。 |
-| 🦀 **原生 Rust SIMD 运动学核心** | 通过 PyO3 实现高性能 C-ABI FFI，单趟 AVX2/NEON SIMD 矢量化并行处理 24 维运动学特征（延迟仅 $212.7\,\mu s$，吞吐达 ~4,700 ops/s）(v0.9.0)。 |
-| ⚡ **微秒级性能基准套件** | 内置 CLI 命令（`synapse-shield benchmark`），一键评测 19D 运动学抽取 ($73.7\,\mu s$)、1D-CNN 推理 ($451.2\,\mu s$) 及全链路端到端评估 ($828.1\,\mu s$，~1,200 req/s)，支持 ASCII 与 JSON 报告输出 (v0.7.9)。 |
-| 🧬 **拟真生物人轨迹生成引擎** | 基于菲茨定律的多峰子运动速度分解算法，模拟生理波谷、手臂生物力学弧度及惯性滤波神经肌肉微颤，达到 100% 拟真人验证精度 (v0.7.9)。 |
-| 🛡️ **隔离权重与自举校准架构** | 运行期微调保存至本地 `./synapse_weights.npz`（或环境变量 `SYNAPSE_WEIGHTS_PATH`），彻底隔离包分发静态权重。`--bootstrap` 选项支持在全新环境下进行零样本自校准 (v0.7.9)。 |
-| 🌊 **FFT 微颤频谱分析 (DSP 频域检测)** | 运用快速傅里叶变换（`np.fft.rfft`）分解速度序列，计算功率谱密度（PSD）中的频谱纯度（`spectral_purity`）与频谱熵，从频域上精准捕获合成谐波振荡微颤（$\sin(2\pi ft)$）(v0.7.8)。 |
-| 🖐️ **子运动学分解 (Sub-Movement Decomposition)** | 将鼠标移动路径拆解为离散的弹道脉冲和末端修正脉冲。缺乏生理子运动（`submovement_count <= 1`）的多项式平滑轨迹将被标记为机器人 (v0.7.8)。 |
-| 🔄 **会话级行为不变性检测 (Behavioral Invariance)** | 滑动窗口时序遥测追踪。防御使用固定随机数种子（Random Seed）或在会话中重复使用确定性运动模板的高级攻击者 (v0.7.8)。 |
-| 🎯 **对抗性 AI 重训练流水线** | 内置对抗遥测生成器（`synapse_shield.adversarial`），以生成贝塞尔、正弦波、最小急动度（Flash & Hogan Minimum Jerk）曲线主动扩充 1D-CNN 训练集，消除分布外盲区 (v0.7.8)。 |
-| 🛡️ **全面安全加固体系** | 彻底覆盖全攻击面防御：防存储型 XSS、带管理鉴权的 WebSocket 终端、Webhook 防 SSRF 与 DNS Rebinding 白名单，以及针对 Brave 浏览器 Farbling 机制的误报抑制 (v0.7.7)。 |
-| ⚡ **亚毫秒级复合 SQLite 索引** | 采用复合索引（`idx_ip_strikes_ip_ts`）消除全表扫描，在高并发高负载 DDoS 流量下保持亚毫秒级拦截计数 (v0.7.7)。 |
-| 🔄 **透明 Token 过期自动恢复** | 严格区分正常过期 Token（`HTTP 400 EXPIRED`）与恶意重放攻击，使客户端 SDK 能平滑重新协商挑战，避免正常用户因网络延迟被误封 IP (v0.7.7)。 |
-| 🧱 **O(N) 复杂度击键 DoS 防御** | 采用队列化保持时间分析并实施严格输入边界约束（最多 150 次按键/滚动），化解算法复杂度耗竭攻击 (v0.7.7)。 |
-| 🧪 **防投毒 AI 微调过滤** | 遥测数据摄取过滤器自动剔除被拦截流量或触发指纹偏斜的数据，保障主动学习数据集纯净度，维持模型高准确率 (v0.7.7)。 |
-| 🔔 **Discord & Telegram 实时 Webhook 告警** | 毫秒级安全事件告警。当发生严重威胁拦截（BLOCK）或触发 IP 封锁时，通过非阻塞后台协程自动推送到指定频道 (v0.7.6)。 |
-| ⚡ **分布式状态与 Redis 集群支持** | 企业级多机多节点架构支持（配置 `SYNAPSE_REDIS_URL`）。实现原子级跨节点防重放（`SET NX EX`）、同步 IP 隔离名单及自动降级至本地 SQLite (v0.7.5)。 |
-| 🧩 **动态非阻塞客户端工作量证明 (PoW)** | 客户端秒级完成 SHA-256 密码学谜题计算，配备 UI 线程出让（Yielding）机制，绝不卡顿前端主界面，支持重试防重放 (v0.7.2)。 |
-| 🛡️ **基于隐藏 Iframe 的原生原型解钩** | 高级反指纹伪装机制：通过创建隐藏沙箱 iframe 读取未被污染的原生浏览器原型（Canvas, WebGL），绕过攻击者的全局 Hook 伪造 (v0.7.2)。 |
-| 🔒 **SDK 运行期对象冻结 (Immutability)** | 关键逻辑均经过 `Object.freeze` 保护，防止目标页面恶意脚本或 XSS 篡改内部状态 (v0.7.2)。 |
-| 📱 **零卡顿移动端事件监听** | 全面使用被动触摸监听器（`{ passive: true }`），确保移动端 60 FPS 丝滑滚动体验 (v0.7.2)。 |
-| 🪟 **滑动时间窗口 IP 封锁盾** | 60秒有状态滑动时间窗机制（阻击 SSRT-2026-004 绕过漏洞）。防止攻击者在连续违规后通过插入单次合法请求重置计数器。 |
-| 🔄 **纯 NumPy 主动微调学习** | 提供内置 `synapse-shield retrain` 命令，直接从本地 SQLite 遥测日志在 3 秒内对 1D-CNN 全连接层完成迁移训练，无需笨重的 PyTorch/TensorFlow 运行环境。 |
-| 🕵️ **反自动化隐身伪装检测** | 动态捕获无头浏览器特征（如 `navigator.webdriver` 属性覆盖）、伪造插件列表检测，以及针对 WebGL/Canvas API 原生 `toString` 的篡改检测。 |
-| 🗄️ **自动化持续学习采集器** | 提供现成的 `store.html` 前端遥测采集组件（接入 `/api/collect_dataset`），以便在实际业务中持续收集真实真人行为数据。 |
-| 🤖 **轻量级纯 NumPy 1D-CNN 微型大脑** | 序列分词器将运动学和键盘统计特征压缩为 8D 和 5D 张量结构，由 15KB 的纯 NumPy 1D-CNN 网络全权推理（无臃肿框架依赖）。 |
-| 🛡️ **极值门控 (Max Gating 决策融合引擎)** | 动态统一启发式数学物理规则与 1D-CNN 的 AI 置信度评分。一旦任一引擎判定为机器行为，请求将无条件执行熔断拦截。 |
-| 🔗 **零外部依赖的多模态分词器** | 采用晚期融合（Late Fusion）架构，将 5D 鼠标时序序列 `[dx, dy, dt, velocity, jerk]` 与 8D 静态击键/滚动特征深度融合。 |
-| 🧩 **100% 全透明无感交互** | 没有任何令人反感的找红绿灯、选自行车、拼拼图或听音频任务。正常人类用户实现完全无感验证。 |
-| ⚡ **异步非阻塞极低延迟 (<0.5 ms)** | 密集的 CPU 运动学特征提取交由 `asyncio.to_thread` 执行，在高并发流量下绝不阻塞主事件循环。 |
-| 🔐 **密码学级防重放攻击保护** | 每一个验证会话均与单次签名的 **HMAC-SHA256** Nonce 强绑定。网络层截获的 Token 无法被第二次重放。 |
-| 🧠 **菲茨定律减速运动学** | 通过分析光标在点击前的末端减速特征，精准拆穿贝塞尔平滑光标模拟工具（如 `ghost-cursor`）的人工伪装。 |
-| ⚛️ **官方 React, Next.js & Vue 3 / Nuxt 3 支持** | 官方封装库（`synapse-shield-react` 与 `synapse-shield-vue`），提供专属 Hooks/Composables 与开箱即用的 `<SynapseProtect />` 组件。 |
-| 🐍 **主流 Python Web 框架原生适配** | 提供针对 **FastAPI**、**Django**（`SynapseShieldMiddleware`）与 **Flask**（`@shield_protect_flask`）的原生中间件与路由装饰器。 |
-| ♿ **无障碍友好模式 (Accessibility)** | 支持无障碍风险平滑适配（`accessibility_mode=True`），避免运动障碍人士或辅助设备使用者遭遇误拦截。 |
-| 📈 **企业级 Prometheus 监控指标** | 内置 `/metrics` 端点，支持通过 `PROMETHEUS_MULTIPROC_DIR` 在 Gunicorn/Uvicorn 多进程集群下统一汇聚延迟与拦截率。 |
-| 🔒 **100% 零隐私侵犯 (Zero-PII)** | 严格遵循隐私保护原则：绝不采集按键明文或表单输入内容，仅提取毫秒级相对时间戳差值（完全合规 GDPR 与数据安全规范）。 |
-| 📊 **统计学泊松洪水攻击识别** | 采用泊松分布异常评估算法（Poisson Anomaly Detection），瞬时定位高频无头 API 洪水并实施动态 IP 惩罚。 |
-| 💾 **SQLite WAL 机制与自动精简** | 内存级 TTL Nonce 缓存管理 + 启用 WAL 预写式日志（10秒忙等待超时），彻底杜绝异步后台任务中的数据库读写锁死。 |
-| 🧱 **内存耗竭 DoS 防御** | 在数据流读取阶段（`await request.body()`）执行严密的 256KB/512KB 体积限制，免疫分块传输通胀 DoS 攻击。 |
-| 🔑 **管理操作密码学鉴权** | 清理黑名单等管理操作接口（`/api/clear`）受 `SYNAPSE_ADMIN_SECRET` 密钥加密保护，严禁未授权篡改风控状态。 |
-
----
-
-## 🏛️ 系统架构与时序图 (Architecture & Sequence Diagram)
-
-```text
-┌─────────────────┐             ┌─────────────────────┐             ┌─────────────────────────┐
-│  客户端浏览器    │             │  FastAPI 网关服务   │             │  运动学与决策推理引擎   │
-│  (synapse-sdk)  │             │  (Synapse Shield)   │             │  (SLA < 0.5ms)          │
-└────────┬────────┘             └──────────┬──────────┘             └────────────┬────────────┘
-         │                                 │                                     │
-         │── 1. GET /api/challenge ───────►│                                     │
-         │◄── 2. { nonce, ts, hmac_sig } ──│  (签发单次有效加密 Nonce)           │
-         │                                 │                                     │
-   [用户移动鼠标 / 击键]                   │                                     │
-   [SDK 采样 50Hz 行为遥测数据]            │                                     │
-         │                                 │                                     │
-         │── 3. POST /api/score {token} ──►│  (1. 验证 HMAC-SHA256 签名)         │
-         │                                 │  (2. 校验 60秒 TTL 时效性)          │
-         │                                 │  (3. 校验 Nonce 防重放攻击)          │
-         │                                 │                                     │
-         │                                 │── 4. asyncio.to_thread ────────────►│ (24D 运动学抽取)
-         │                                 │                                     │ (Jerk & 菲茨定律)
-         │                                 │                                     │ (微分曲率 κ(t))
-         │                                 │                                     │ (1D-CNN AI 推理)
-         │                                 │                                     │ (泊松异常频次)
-         │                                 │◄── 5. (bot_score, ALLOW/BLOCK) ─────│
-         │                                 │                                     │
-         │                                 │── 6. 异步写入 SQLite WAL 日志       │
-         │◄── 7. HTTP 200 {ALLOW/BLOCK} ───│                                     │
-```
-
----
-
-## 🚀 30秒快速上手 (Quickstart)
-
-### 方式 1：通过 PyPI 安装运行
+## 安装
 
 ```bash
 pip install "synapse-shield[server]"
 ```
 
-> 仅执行 `pip install synapse-shield` 只会安装评分引擎（NumPy）。`run`、`test` 与驾驶舱需要 `[server]` 附加包（FastAPI + uvicorn）。
-
-直接从终端启动防御服务及 3D 实时监控驾驶舱（Cockpit）：
+启动服务器和实时仪表盘，然后打开 <http://127.0.0.1:8000>：
 
 ```bash
 synapse-shield run --port 8000
 ```
 
-针对正在运行的服务执行 9 向量红队对抗测试（先在另一个终端运行 `run`；判定错误或服务不可达时以非零状态码退出）：
+检查安装是否正确：
 
 ```bash
-synapse-shield test
+synapse-shield doctor
 ```
 
-基于本地 SQLite 累积的真实遥测数据自主重训练 1D-CNN AI 模型（主动学习）：
-
-```bash
-synapse-shield retrain --epochs 5
-```
-
----
-
-### 方式 2：克隆源码与本地开发
+<details>
+<summary><b>Docker</b></summary>
 
 ```bash
 git clone https://github.com/0xStoic-bit/Synapse_Shield.git
 cd Synapse_Shield
-pip install -e ".[all]" pytest httpx
-python test_suite.py
-```
-
-> 直接调用 `POST /api/score` 时，请依据 `decision` 字段（`"allow"` / `"block"` / `"challenge"` / `"error"`）判断，而不是 `status`：`status: "success"` 仅表示请求已被评分，机器人同样会返回该值。
-
-在浏览器中访问 [http://127.0.0.1:8000](http://127.0.0.1:8000/) 即可打开**实时可视化安全驾驶舱（Live Security Cockpit）**。
-
----
-
-### 方式 3：Docker 一键部署（推荐生产环境使用）
-
-一行命令容器化运行完整的 Synapse Shield 协议栈，内置预配置的 SQLite WAL 持久卷与静态遥测收集服务：
-
-```bash
-# 后台静默启动容器
 docker-compose up -d
-
-# 实时查看访问日志与拦截记录
-docker-compose logs -f
 ```
 
-服务就绪后，Synapse API 及驾驶舱界面将在 [http://localhost:8000](http://localhost:8000) 开放访问。
+API 和仪表盘位于 <http://localhost:8000>。
+</details>
 
----
+<details>
+<summary><b>其他安装方式</b></summary>
 
-## 🚨 实时 Webhook 告警 (Telegram & Discord)
+| 命令 | 内容 |
+| :--- | :--- |
+| `pip install synapse-shield` | 仅评分引擎（嵌入你自己的应用） |
+| `pip install "synapse-shield[server]"` | + 内置服务器和仪表盘 |
+| `pip install "synapse-shield[frameworks]"` | + Django、Flask、Sanic、Litestar 适配器 |
+| `pip install "synapse-shield[all]"` | 全部 |
 
-Synapse Shield 配备零延迟后台 Webhook 告警通道。当拦截到高危自动化行为（如 `STEALTH_AUTOMATION` 隐身工具、`POISSON_FLOOD` 洪水攻击或频繁撞库）时，系统会第一时间向管理员手机推送通知。
+已为 Linux、macOS 和 Windows 发布预编译 wheel，无需安装 Rust 工具链。
+</details>
 
-### 配置 Telegram 告警
-1. 打开 Telegram，私聊 **[@BotFather](https://t.me/BotFather)** 输入 `/newbot`。
-2. 按照提示生成你的专属 **HTTP API Token**（如 `123456:ABC-DEF...`）。
-3. 向你新建的机器人随意发送一条消息（如 "Hello"）以完成会话激活。
-4. 私聊 **[@userinfobot](https://t.me/userinfobot)** 并点击 `START`，获取你的 **Chat ID**（如 `123456789`）。
-5. 登录 Synapse Shield 驾驶舱后台（`http://127.0.0.1:8000`），点击 **WEBHOOKS** 标签页，填入 Token 与 Chat ID 即可完成绑定。
+## 5 分钟保护一个表单
 
-### 配置 Discord 告警
-1. 进入你的 Discord 服务器设置 > **整合 (Integrations)** > **Webhooks** > **创建 Webhook**。
-2. 复制生成的 **Webhook URL**。
-3. 打开 Synapse Shield 驾驶舱后台，点击 **WEBHOOKS**，粘贴该 URL 并保存生效。
-
----
-
-## 💻 开发者接入指南 (Developer Integration)
-
-### 1. FastAPI 接入
-
-可使用 `@shield_protect` 装饰器对单个端点进行细粒度防御，或使用全局中间件保护特定路径：
+**1. 服务器端**（以 FastAPI 为例，[其他框架](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md)）：
 
 ```python
-from fastapi import FastAPI, Request
-from synapse_shield import shield_protect, SynapseShieldMiddleware
+from fastapi import FastAPI
+from synapse_shield import SynapseShieldMiddleware
 
 app = FastAPI()
-
-# 全局路径中间件防护
-app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/auth"])
-
-# 细粒度接口级防护
-@app.post("/api/login")
-@shield_protect(max_risk_score=50.0, accessibility_mode=False)
-async def login(request: Request):
-    return {"status": "authenticated"}
+app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/login"])
 ```
 
----
-
-> **`protected_paths` 语义（所有适配器一致）：** 中间件只检查路径以所列前缀开头的状态变更请求（`POST`、`PUT`、`PATCH`、`DELETE`；无请求体的 `DELETE` 通过 `X-Synapse-Token` 请求头携带令牌）。**若列表为空或未设置，所有 `POST`/`PUT`/`PATCH` 路由都会受到保护。** 这一故障安全默认值在 FastAPI、原生 ASGI、Django、Flask、Sanic 与 Litestar 中完全相同。v0.10.4 及更早版本中，Flask、FastAPI 与 Django 在列表为空时 *不保护任何路由*；如果你依赖这种行为，请显式列出需要保护的路径。
-
-### 2. Django & Flask 接入
-
-**Django (`settings.py`)**:
-
-```python
-MIDDLEWARE = [
-    # ...
-    'synapse_shield.django.SynapseShieldMiddleware',
-]
-SYNAPSE_SHIELD_PROTECTED_PATHS = ['/api/login']
-SYNAPSE_SHIELD_MAX_RISK = 50.0
-SYNAPSE_SHIELD_ACCESSIBILITY = False
-```
-
-**Flask**:
-
-```python
-from flask import Flask
-from synapse_shield.flask import shield_protect_flask
-
-app = Flask(__name__)
-
-@app.route("/login", methods=["POST"])
-@shield_protect_flask(max_risk_score=50.0)
-def login():
-    return {"status": "authenticated"}
-```
-
----
-
-### 3. Litestar 接入 (v0.9.6)
-
-提供符合 Litestar 惯例的原生路由守卫（Guard）与全局中间件：
-
-```python
-from litestar import Litestar, post
-from synapse_shield.litestar import synapse_guard, LitestarSynapseMiddleware
-
-# 接口级 Guard 路由守卫
-@post("/api/checkout", guards=[synapse_guard(max_risk_score=40.0)])
-async def checkout(data: dict) -> dict:
-    return {"status": "success"}
-
-# 或全局路径中间件
-app = Litestar(
-    route_handlers=[checkout],
-    middleware=[
-        LitestarSynapseMiddleware(protected_paths=["/api/auth"], max_risk_score=50.0)
-    ]
-)
-```
-
----
-
-### 4. Sanic 接入 (v0.9.6)
-
-全面支持 Sanic 原生高性能 HTTP 服务器模式与 ASGI 模式：
-
-```python
-from sanic import Sanic, text
-from synapse_shield.sanic import shield_protect_sanic, SynapseSanicMiddleware
-
-app = Sanic("secure_app")
-
-# 路由装饰器
-@app.post("/api/login")
-@shield_protect_sanic(max_risk_score=50.0)
-async def login(request):
-    return text("Authenticated!")
-
-# 或请求中间件
-middleware = SynapseSanicMiddleware(protected_paths=["/api/auth"])
-app.register_middleware(middleware, "request")
-```
-
----
-
-### 5. 通用 ASGI 3.0 中间件 (v0.9.6)
-
-纯原生、零外部依赖的 ASGI 3.0 标准中间件。具备流重放保护（`replayable_receive`）与严格的 256KB 内存 DoS 防御。无缝兼容 **Quart**、**BlackSheep**、**Falcon** 等任意 ASGI 框架：
-
-```python
-from synapse_shield import SynapseShieldASGIMiddleware
-
-# 包装任意 ASGI 3.0 应用程序
-app = SynapseShieldASGIMiddleware(
-    base_app,
-    protected_paths=["/api/auth", "/checkout"],
-    max_risk_score=50.0
-)
-```
-
----
-
-### 6. React / Next.js 接入
-
-安装专属 npm 包，支持 App Router (`"use client"`)：
-
-```tsx
-import { useSynapseShield, SynapseProtect } from 'synapse-shield-react';
-
-export default function LoginForm() {
-  const { getProtectedPayload } = useSynapseShield();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = getProtectedPayload();
-    // 携带 payload.token 发起登录请求至业务后端
-    await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: payload.token, username, password })
-    });
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <SynapseProtect />
-      <button type="submit">登录</button>
-    </form>
-  );
-}
-```
-
----
-
-### 7. Vue 3 / Nuxt 3 接入
-
-官方封装的 Vue 3 Composable 及组件（`synapse-shield-vue`），完全兼容 Nuxt 3 SSR：
-
-```vue
-<script setup>
-import { ref } from 'vue';
-import { useSynapseShield, SynapseProtect } from 'synapse-shield-vue';
-
-const { getProtectedPayload } = useSynapseShield();
-const username = ref('');
-const password = ref('');
-
-const handleSubmit = async () => {
-  const payload = getProtectedPayload();
-  // 提交 payload.token 至后端
-  await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: payload.token, username: username.value, password: password.value })
-  });
-};
-</script>
-
-<template>
-  <form @submit.prevent="handleSubmit">
-    <SynapseProtect />
-    <input v-model="username" type="text" placeholder="用户名" />
-    <input v-model="password" type="password" placeholder="密码" />
-    <button type="submit">登录</button>
-  </form>
-</template>
-```
-
----
-
-### 8. 原生 JavaScript / HTML 接入
-
-在传统静态页面或前后端不分离项目中引入超轻量级 SDK（`<5 KB`）：
+**2. 浏览器端**（以原生 HTML 为例，[React 和 Vue](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md#frontend-sdks)）：
 
 ```html
-<script src="http://localhost:8000/static/synapse-sdk.js"></script>
+<!-- 由 `synapse-shield run` 提供；在你自己的应用中，请从已安装的包中提供 synapse_shield/static/synapse-sdk.js -->
+<script src="/static/synapse-sdk.js"></script>
 <script>
   SynapseShield.init();
-  
-  async function handleLogin() {
-    const payload = SynapseShield.getPayload();
-    // 将 payload.token 附带在登录或提交请求中
-  }
+  SynapseShield.protectFetch("/api/login"); // 为这些请求自动添加 X-Synapse-Token 请求头
+
+  // 你现有的代码保持不变
+  fetch("/api/login", { method: "POST", body: new FormData(loginForm) });
 </script>
 ```
 
----
+完成。没有有效令牌或看起来像自动化的 `/api/login` 请求，会在到达你的代码之前被拒绝。
 
-### 9. Prometheus 企业级可观测性
+> 当服务器不确定时，会返回 `429 challenge_required` 并要求后台工作量证明。React 和 Vue SDK 会自动完成（`submitProtected()`）；原生 JS 的 `protectFetch` 不会自动完成，请自行处理该响应或改用它们（[详情](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md#proof-of-work-challenges)）。
 
-先安装 `pip install "synapse-shield[metrics]"`。服务在 `GET /metrics/prometheus` 提供 Prometheus 文本格式（当抓取端发送 `Accept: text/plain` / OpenMetrics 时，`GET /metrics` 也返回该格式；普通请求仍返回 JSON 的 Rust 状态视图）。两者均受管理员保护：请发送 `Authorization: Bearer $SYNAPSE_ADMIN_SECRET`。在 Gunicorn/Uvicorn 多进程生产环境下，指定目录即可聚合：
+## 用户的实际体验
 
-```bash
-export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
-```
+| 情况 | 结果 |
+| :--- | :--- |
+| 普通访客（鼠标、触屏、触控板） | 直接通过，无感知 |
+| 纯键盘或读屏软件用户、交互非常短 | 后台完成一次简短的工作量证明后通过（由 React / Vue SDK 处理） |
+| 脚本机器人、无头浏览器、重放请求 | 被拦截 |
 
-#### 原始遥测存储
+想先在真实流量上试运行而不拦截任何人？请使用 [影子模式](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/SHADOW_MODE.md)。
 
-默认情况下，服务器**不存储原始轨迹**：日志行只保留裁决、原因与聚合特征向量，`telemetry` 列为空。设置 `SYNAPSE_STORE_RAW_TELEMETRY=1` 才会保留完整轨迹（鼠标坐标与时间；键入字符始终被脱敏），以便 `synapse-shield retrain` 从自有流量学习；否则请使用 `retrain --bootstrap`。
+## 诚实的局限
 
-#### 影子模式：按队列监控误报
+- 本项目的机器人检测数据来自合成攻击生成器，而非真实机器人流量；真人误报数据来自公开的 SapiMouse 数据集（120 人）。
+- 坚定的攻击者若录制真实用户会话并逐条略加修改后重放，可能看起来像真人。本系统会提高其成本（一次性令牌、重放指纹、工作量证明），但它只是一层防护：请保留限流以及 MFA 等账户级保护。
 
-全局拦截率可能掩盖某一类用户（触屏、高 DPI、缩放浏览器）的问题。`mode="shadow"` 下，每个行为裁决还会按粗粒度队列计数，且不保存任何指针轨迹：`synapse_shadow_cohort_total`（`action` × `input` × `dpr`）、`synapse_shadow_outcomes_total`、`synapse_shadow_rules_total`（稳定规则代码，如 `stutter`、`curvature`、`keystroke_superhuman`）。在业务代码中用 `report_shadow_outcome(decision, completed=True)` 上报会话结果；`deploy/monitoring/` 提供 Grafana 面板与 Prometheus 告警规则（PromQL 仅做了名称/标签校验，未实际执行，请先在测试 Prometheus 中加载）。
+## 文档（英文）
 
-离线回放自己的录制数据（无需服务器、令牌或网络）：
+| 我想要… | 阅读 |
+| :--- | :--- |
+| 接入 Django、Flask、Litestar、Sanic、ASGI、React、Vue | [Integrations](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md) |
+| 调整行为、告警、指标 | [Configuration](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/CONFIGURATION.md) |
+| 正式拦截前先测量误报 | [Shadow mode](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/SHADOW_MODE.md) |
+| 了解处理和存储了哪些数据 | [Privacy notes for operators](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/PRIVACY_OPERATOR_NOTES.md) |
+| 了解检测原理 | [Architecture](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/ARCHITECTURE.md) |
+| 查看攻击测试结果 | [Benchmarks](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/BENCHMARKS.md) |
+| 按版本浏览全部功能 | [Feature history](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/FEATURES.md) |
 
-```bash
-synapse-shield replay ./recordings --label human   # 误报率，以及造成拦截的规则与队列
-synapse-shield replay ./bots.jsonl --label bot     # 检出率
-```
+完整索引：[`docs/`](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/README.md)。
 
----
+## 支持
 
-## 🧪 测试体系 (Testing)
+如果 Synapse Shield 帮你摆脱了验证码或机器人攻击，点一个 ⭐ 能帮助更多开发者发现它。欢迎提交 Issue 和 Pull Request，也可以 [赞助本项目](https://github.com/sponsors/0xStoic-bit)。
 
-Synapse Shield 采用三层测试，CI 在每次 push 与 pull request 时全部运行（`.github/workflows/ci.yml`）。
+相关报道：[Mfuns：Synapse Shield 架构深度解析](https://www.mfuns.net/article/123158)。
 
-| 层级 | 测试套件 | 覆盖范围 |
-| :--- | :--- | :--- |
-| 🐍 Python | `tests/`（pytest） | API、令牌、引擎、Rust ↔ Python 一致性。同一份安全契约（无令牌 → 403、重放 → 403、机器人 → 403、影子模式、256 KB 限制）在 **真实的** FastAPI、Flask、Sanic 与 Litestar 请求管线中运行。Redis 存储通过 `fakeredis` 以真实命令语义测试，包括 Redis → SQLite 故障转移。9 向量红队套件（`synapse-shield test`）在进程内端到端运行，并逐一断言每个判定 |
-| 🦀 Rust 核心 | `crates/synapse_core_rs/src/` 中的 `#[cfg(test)]` 模块 | 击键动力学（含 IME 多数规则）、曲率（AVX2 ↔ 标量一致性）、运动学、Nonce 缓存 |
-| 🌐 JS SDK | `sdk-tests/`（Vitest + jsdom） | 同一份 Zero-PII 契约同时验证 **原生 JS、React 与 Vue**：任何键入字符都不会离开浏览器；另含令牌生命周期测试 |
+## 许可证
 
-```bash
-# Python（若原生 Rust 核心未加载，CI 将直接失败，避免一致性测试被静默跳过）
-pip install -e ".[all]" && pip install pytest pytest-cov httpx sanic-testing fakeredis
-pytest tests -rsxX --cov=synapse_shield --cov-branch --cov-fail-under=85
-
-# Rust 核心
-cd crates/synapse_core_rs
-PYO3_PYTHON=$(which python) cargo test --all-targets
-
-# 浏览器 SDK
-cd sdk-tests && npm ci && npx vitest run
-```
-
-> **本地提示：** 修改任何 `.rs` 文件后，请执行 `maturin develop --release` 重新编译扩展，否则 pytest 会继续使用旧的 `.pyd` / `.so`。
-
-**覆盖率下限。** 若 Python 行 + 分支覆盖率低于 **85%**，CI 将失败。安全核心要求更高：`tokens.py` 99%、`storage.py` 95%、`core.py` 92%。
-
-**变异测试。** 覆盖率只说明某行代码被执行过；变异测试检查的是：如果这行代码写错了，测试能否发现。[`mutmut`](https://github.com/boxed/mutmut) 对 `tokens.py`、`core.py` 与 `storage.py` 进行变异，配置位于 `pyproject.toml` 的 `[tool.mutmut]`。它每周运行一次，也可在 `.github/workflows/mutation.yml` 中手动触发。mutmut 3 需要 Linux 或 WSL：
-
-```bash
-pip install "mutmut>=3.3,<4" && mutmut run && mutmut results
-```
-
----
-
-## 🤖 对抗攻击仿真基准测试 (Attack Simulation Benchmarks)
-
-随时在控制台运行完整的红蓝对抗仿真基准套件：
-
-```bash
-synapse-shield test
-```
-
-2026-11-12 实测（v0.10.7）。可通过 `python scripts/measure_readme_benchmarks.py` 复现，无需启动服务器，数据不会离开本机。裁决与风险评分来自真实的 `POST /api/score`；延迟为评分引擎（`analyze_behavior`）200 次运行的中位数。
-
-| 攻击向量 (Attack Vector) | 模拟行为特征 (Simulated Signature) | 核心识别与拦截机制 | 风控裁决 | 风险评分 | 处理延迟 |
-| :--- | :--- | :--- | :---: | :---: | :---: |
-| **Selenium 爬虫脚本** | `navigator.webdriver = true` | WebDriver 接口检测 | 🔴 **BLOCK** | **100.0%** | **0.12 ms** |
-| **直线型机器人 (Linear)** | 直线度 = 1.000，Jerk = 0 | 直线度 + 速度方差 | 🔴 **BLOCK** | **100.0%** | **0.24 ms** |
-| **贝塞尔平滑隐形脚本** | 二次贝塞尔曲线，固定 20 ms 采样 | 固定间隔计时器 + 合成震颤检测 | 🔴 **BLOCK** | **100.0%** | **0.23 ms** |
-| **机械打字注入脚本** | 固定 50 ms 按键注入，无鼠标轨迹 | 击键生物特征 + 缺失鼠标遥测 | 🔴 **BLOCK** | **100.0%** | **0.14 ms** |
-| **突发洪水请求** | 约 330 ms 内发起 8 次看似真人的请求 | 泊松频率评分（轨迹为有机特征时被抑制） | 🟡 **仅标记**（0/8 被拦截） | **25.0%** | **0.26 ms** |
-| **重放攻击 (Replay Attack)** | 重发已截获的合法 Token | 一次性 HMAC Nonce | 🔴 **BLOCK** | **100.0%** | — |
-| **真人自然操作** | 缓出曲线、生理震颤、不规则采样间隔 | 生物 Jerk 与末端减速 | 🟢 **ALLOW**（50/50 个随机种子） | **0.0%（最大值）** | **0.54 ms** |
-
-> **突发洪水不会被单独拦截。** 当轨迹呈现有机特征时，泊松频率信号只会提高风险评分。硬拦截从极端频率限制开始：`SYNAPSE_MAX_REQ_10S`，默认每 10 秒 100 次请求，触发后封禁 15 分钟；或在 60 秒内出现 4 次机器人判定时触发。本表旧版本将此行标为 `BLOCK 60%`，该数值无法复现：自 v0.10.1 起，内置攻击套件的每个请求都在令牌绑定层被拒绝，因此旧表并未反映生物特征层的检测结果。
-
----
-
-## 🧠 运动学与数学理论基础 (Mathematical Foundations)
-
-### 1. 加加速度 (Jerk) — 神经肌肉微颤指纹
-
-$$\text{Jerk} = \frac{da}{dt} = \frac{d^3x}{dt^3}$$
-
-人类手部肌群由于中枢神经系统的反馈调节，在进行光标定位时会不可避免地产生 8–12 Hz 的生理微颤（Jerk 呈现连续的高频波动）。而由计算机数学模型生成的路径（直线插值、三次多项式插值）其 Jerk 往往近似恒为零或呈阶跃式突变。
-
----
-
-### 2. 菲茨定律末端减速指数 (Fitts's Law Deceleration)
-
-$$\text{Terminal Decel Ratio} = \frac{\bar{v}_{\text{terminal (末端 25\%)}}}{v_{\text{peak}}}$$
-
-人类大脑在控制手部接近预定点击目标时，会遵循菲茨定律产生反射性的减速修正动作（减速比通常 $< 0.40$）。缺乏末端制动的恒速或平滑匀速脚本会立刻暴露其人工合成属性。
-
----
-
-### 3. 微分曲率分析 ($\kappa(t)$)
-
-$$\kappa(t) = \frac{|\dot{x}\ddot{y} - \dot{y}\ddot{x}|}{(\dot{x}^2 + \dot{y}^2 + \epsilon)^{3/2}}$$
-
-用于揭示数学贝塞尔曲线的微观几何缺陷。人手的自然动作会形成多段弹道子运动，其曲率变化率的方差 $\text{Var}(\dot{\kappa})$ 保持在合理生理区间；而单纯调用贝塞尔算法的爬虫脚本，其曲率变化率方差呈现病态平滑（$\text{Var}(\dot{\kappa}) < 10^{-8}$）。
-
----
-
-### 4. 累积泊松反常概率分布 (Poisson Anomaly)
-
-$$P(X < k) = \sum_{i=0}^{k-1} \frac{\lambda^i e^{-\lambda}}{i!}$$
-
-用于刻画单位时间窗口内请求到达频次的统计学异常，智能过滤批量并发的撞库工具。
-
----
-
-## 🌐 媒体与社区报道 (Featured On)
-
-Synapse Shield 受到了全球安全与前沿技术社区的关注与技术剖析：
-
-| 平台 / 来源 | 深度文章 / 报道链接 | 核心内容 |
-| :--- | :--- | :--- |
-| **Mfuns (二次元与前沿科技社区)** | [Synapse Shield 架构深度解析与安全加固 (v0.5.0)](https://www.mfuns.net/article/123158#%E4%B8%BB%E8%A6%81%E7%89%B9%E6%80%A7%E4%B8%8E%E5%8A%A0%E5%9B%BA-v0-5-0) | 深入解析行为生物识别原理、无感反爬虫架构、零知识隐私机制及系统安全加固策略 |
-
----
-
-## 📁 仓库目录结构 (Repository Structure)
-
-```text
-Synapse_Shield/
-├── .github/
-│   └── workflows/
-│       └── ci.yml             # CI：Python 3.10–3.12 矩阵 + Rust 单元测试 + JS SDK 测试
-├── crates/                    # 原生 Rust 高性能底层模块
-│   └── synapse_core_rs/       # PyO3 + AVX2 SIMD 运动学核心扩展
-│       ├── Cargo.toml
-│       ├── benches/           # Criterion 微秒级性能基准测试
-│       └── src/
-│           ├── curvature.rs   # 微分曲率 κ(t) 矢量化计算
-│           ├── keystrokes.rs  # 击键动力学与香农熵
-│           ├── kinematics.rs  # 24维运动学指标抽取
-│           └── lib.rs         # PyO3 FFI 导出层
-├── src/
-│   └── synapse_shield/
-│       ├── __init__.py        # 顶层对外 API 导出
-│       ├── cli.py             # CLI 命令行入口 (run / test / benchmark / retrain)
-│       ├── engine.py          # 实时决策与泊松异常引擎 (Max Gating)
-│       ├── features.py        # 运动学特征提取、菲茨定律与多模态分词
-│       ├── models.py          # 纯 NumPy 1D-CNN 推理引擎 (零重型依赖)
-│       ├── weights.npz        # 序列化的紧凑神经网络权重
-│       ├── main.py            # 异步 FastAPI 网关与 SQLite WAL 记录器
-│       ├── middleware.py      # @shield_protect 装饰器与中间件
-│       ├── django.py          # Django 框架专用中间件适配器
-│       ├── flask.py           # Flask 框架专用路由装饰器
-│       ├── metrics.py         # Prometheus 企业级多进程导出器
-│       ├── tokens.py          # HMAC-SHA256 挑战生成与防重放核心
-│       ├── train.py           # 纯 NumPy 本地主动学习微调流水线
-│       ├── adversarial.py     # 对抗性拟真人类/机器人时序生成器
-│       └── static/            # 3D 监控驾驶舱与客户端 SDK
-│           ├── index.html
-│           └── synapse-sdk.js
-├── synapse-shield-react/      # React / Next.js SDK 官方组件包
-│   ├── src/
-│   │   ├── SynapseProtect.tsx # "use client" 无感防护组件
-│   │   ├── useSynapseShield.ts# React Hook 事件节流采样逻辑
-│   │   └── index.ts
-│   ├── package.json
-│   └── tsconfig.json
-├── synapse-shield-vue/        # Vue 3 / Nuxt 3 SDK 官方组件包
-│   ├── src/
-│   │   ├── SynapseProtect.vue # Vue 3 / Nuxt 3 专属无感防护组件
-│   │   └── useSynapseShield.ts# Vue 3 Composable
-├── sdk-tests/                 # Vitest + jsdom：原生 JS / React / Vue 三端统一 Zero-PII 契约测试
-├── tests/                     # Pytest 模块化测试套件
-│   ├── test_features.py
-│   ├── test_tokens.py
-│   ├── test_engine.py
-│   ├── test_rust_core.py
-│   └── test_v092_curvature_keystrokes.py
-├── pyproject.toml             # PEP 517/621 包分发规范定义
-├── requirements.txt           # 核心依赖清单
-├── LICENSE                    # MIT 开源许可证
-├── README.md                  # 英文官方文档
-└── README_ZH.md               # 简体中文官方文档
-```
-
----
-
-## ⭐ 支持本项目
-
-如果 **Synapse Shield** 帮你省去了验证码、挡住了爬虫机器人，或者省下了一笔 Cloudflare 账单，欢迎给项目点一个 Star。只需一次点击、完全免费，却是让更多开发者发现这个项目的最有效方式。
-
-<div align="center">
-
-<a href="https://github.com/0xStoic-bit/Synapse_Shield"><img src="https://img.shields.io/badge/%E2%AD%90%20Star%20Synapse%20Shield%20on%20GitHub-00F0FF?style=for-the-badge&logo=github&logoColor=black" alt="Star Synapse Shield on GitHub"/></a>
-
-[![GitHub stars](https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=social)](https://github.com/0xStoic-bit/Synapse_Shield/stargazers)
-
-</div>
-
-其他参与方式：[提交 Issue](https://github.com/0xStoic-bit/Synapse_Shield/issues)、发起 Pull Request（见 [CONTRIBUTING.md](CONTRIBUTING.md)）、分享给你的团队，或[赞助本项目](https://github.com/sponsors/0xStoic-bit)。
-
----
-
-## 📜 开源协议 (License)
-
-本项目基于 [MIT 许可证](https://opensource.org/licenses/MIT) 开源。欢迎自由用于商业项目与个人项目。
+[MIT](https://opensource.org/licenses/MIT)。可免费用于商业和个人用途。

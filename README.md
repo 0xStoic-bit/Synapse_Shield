@@ -1,665 +1,145 @@
 <div align="center">
 
-# 🛡️ SYNAPSE SHIELD
+# 🛡️ Synapse Shield
 
-### Next-Gen Open-Source Behavioral Biometrics & Bot Mitigation Engine
+**Stop bots on your login and signup forms without showing your users a CAPTCHA.**
 
-**A privacy-first, zero-friction, self-hosted alternative to Cloudflare Turnstile.**
+A self-hosted, open-source alternative to Cloudflare Turnstile. It looks at *how* a visitor moves, taps and types, never at *what* they type.
 
 [![PyPI](https://img.shields.io/pypi/v/synapse-shield?color=00F0FF&label=pypi)](https://pypi.org/project/synapse-shield/)
+[![CI](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
+[![Python 3.10–3.14](https://img.shields.io/badge/Python-3.10%E2%80%933.14-blue.svg?logo=python)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-00F0FF.svg)](https://opensource.org/licenses/MIT)
-[![CI/CD](https://github.com/0xStoic-bit/Synapse_Shield/actions/workflows/ci.yml/badge.svg)](https://github.com/0xStoic-bit/Synapse_Shield/actions)
-[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/0xStoic-bit)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python)](https://python.org)
-[![Inference SLA](https://img.shields.io/badge/Latency-%3C0.5ms-10B981.svg)]()
-[![Zero-PII](https://img.shields.io/badge/Privacy-100%25%20Zero--PII-success.svg)]()
+[![Stars](https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=social)](https://github.com/0xStoic-bit/Synapse_Shield/stargazers)
 
-<br/>
+🌐 English | [简体中文](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/README_ZH.md)
 
-<a href="https://github.com/0xStoic-bit/Synapse_Shield/stargazers"><img src="https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=00F0FF&labelColor=0D1117" alt="Star Synapse Shield on GitHub"/></a>
-
-<br/>
-
-🌐 [English](README.md) | [简体中文](README_ZH.md)
-
-<br/>
-
-[Key Features](#-key-features--security-architecture-v0107) • [Architecture](#-architecture--sequence-diagram) • [Quickstart](#-30-second-quickstart) • [Developer Guide](#-developer-integration) • [Benchmarks](#-attack-simulation-benchmarks) • [Math](#-kinematic--mathematical-foundations) • [Featured On](#-featured-on--community-coverage) • [Support](#-support-the-project)
+<img src="https://raw.githubusercontent.com/0xStoic-bit/Synapse_Shield/main/docs/assets/how-it-works.gif" alt="How Synapse Shield works: the visitor uses the form, the SDK collects timing only, the server scores the session, and the request is allowed, challenged or blocked" width="760"/>
 
 </div>
 
----
+## Why
 
-## ⚡ Overview
+- **No puzzles.** Real people just use your form. When the shield is unsure, the browser solves a short proof-of-work in the background instead of showing a picture puzzle.
+- **Your server, your data.** Everything runs on your own machine. No third-party service sees your visitors.
+- **No typed text leaves the browser.** The SDK sends movement and timing only; every typed character is masked.
+- **Drop-in.** One middleware line for FastAPI, Django, Flask, Litestar, Sanic or any ASGI app, plus a small browser SDK (plain JS, React or Vue).
 
-**Synapse Shield** replaces intrusive legacy CAPTCHAs and expensive proprietary cloud WAFs with **sub-millisecond behavioral biomechanics**.
+<div align="center">
+<img src="https://raw.githubusercontent.com/0xStoic-bit/Synapse_Shield/main/docs/assets/human-vs-bot.gif" alt="A human-like cursor path is allowed with risk 0, a Bezier bot path is blocked with risk 100" width="760"/>
 
-By evaluating natural human neuromuscular micro-tremors (**Jerk: $\frac{da}{dt}$**), Fitts's Law terminal deceleration profiles, cursor curvature, and millisecond keystroke dynamics, Synapse Shield autonomously classifies and mitigates bots, scrapers, and credential stuffers **before they touch your backend logic**.
+<sub>Generated from the project's own synthetic traces by <a href="https://github.com/0xStoic-bit/Synapse_Shield/blob/main/scripts/make_readme_gifs.py"><code>scripts/make_readme_gifs.py</code></a>; the verdicts are the engine's real output on those traces.</sub>
+</div>
 
----
-
-## ✨ Key Features & Security Architecture (v0.11.0)
-
-| Feature | Description |
-| :--- | :--- |
-| 🧪 **Measured Corrections, Replay Defense & Honest Defaults (v0.11.0)** | Every change below was measured before and after on the same seeds; human false-positive figures use the real SapiMouse dataset (120 people), bot figures are synthetic. **1D-CNN is `shadow` by default** (`SYNAPSE_CNN_MODE`): the bundled weights were trained on synthetic noise only and blocked ~19% of real human windows; the model no longer loads `./synapse_weights.npz` from the working directory (use `SYNAPSE_WEIGHTS_PATH`). **Short traces** (<40 pointer samples) can no longer be blocked by the straightness / FFT / sub-movement rules alone (real single movements blocked 50% → 4.9%); such gray-area sessions get a PoW challenge even with PoW off. **Replay defense:** a keyed 64-bit trajectory fingerprint blocks a recorded trace that is re-sent with a fresh token (1 h TTL, no raw trace stored), and a shape SimHash catches noisy / scaled / time-warped repeats within a session, also across User-Agent changes. **Fewer false blocks:** a spoofed or genuine `touch_supported` flag without touch events is reclassified as desktop instead of penalised (touch-screen laptops and iPads with a keyboard were blocked 71-100%); the 60 s device penalty is keyed by HMAC(IP + User-Agent), so one bot behind a CGNAT no longer penalises everyone; token errors (double submit, network retry) no longer penalise the device; only hard violations or Bot verdicts with risk ≥ 85 count toward the 4-strike IP ban; Chrome's synthetic (0,0) click on Enter is ignored. **Client signals can only raise risk:** `is_freq_digraph` and IME key names no longer lower the keystroke score on desktop. **SDKs:** each token carries only events inside its own challenge window (fixes long-session "Time Travel" rejections); Vue gained `submitProtected()`; `input_events` counts autofill / paste / IME (never content); SRI hash script. **Tooling:** PyO3 0.30 abi3 wheel (CPython 3.10-3.14), `doctor` fails on a stale native core, the red-team CLI no longer counts a misconfigured 4xx as a block, `logs.user_agent` follows `SYNAPSE_PRIVACY_MODE`. See [`docs/PRIVACY_OPERATOR_NOTES.md`](docs/PRIVACY_OPERATOR_NOTES.md). |
-| ⌨️ **Keyboard-Only Access & React PoW Solving (v0.10.8)** | Keyboard-only sessions (screen readers, switch access, Tab navigation: no mouse movement, at least 3 keystrokes) are no longer hard-blocked on their own: the rule now adds +40 instead of +50, and the framework adapters send these sessions a gray-area Proof-of-Work challenge even when `enable_pow` is off (`SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0` turns this off), so a jittered auto-typer still cannot pass for free. The React hook now solves PoW and retries once (`submitProtected`, `solvePow`); the vanilla SDK solver allows 20M attempts (difficulty 5 no longer fails) and its retry waits long enough for long typing sessions to pass the server's Time Travel check. Measured on synthetic data only: keyboard-only humans blocked 94% -> 2.4% (the rest get a challenge), keyboard-only bots allowed without a challenge 0%. |
-| 🔭 **Shadow Cohorts, Rule Codes & Offline Replay (v0.10.7)** | Per-cohort Shadow Mode counters (input class × devicePixelRatio) with stable rule codes (`SynapseDecision.rule_codes`), `report_shadow_outcome()` to learn whether enforcement would have blocked real users, ready-made Grafana + Prometheus alert assets (`deploy/monitoring/`), and `synapse-shield replay` to measure false-positive / detection rate on your own recordings offline. Stutter and fast-typing rules were recalibrated on real human data (real 20 s windows blocked 2.7% → 0.5%; bot detection unchanged). |
-| 🧾 **Honest Tooling & API Contract (v0.10.7)** | `synapse-shield test` / `redteam` exit non-zero when the server is unreachable or a verdict is wrong (no more "all passed" with no server); the human controls use fresh timestamps; `doctor` works on a bare install; `POST /api/score` returns a `decision` (`allow` / `block` / `challenge` / `error`) on every branch; Prometheus exposition on `/metrics/prometheus`; raw traces are **not** stored unless `SYNAPSE_STORE_RAW_TELEMETRY=1`. |
-| 🔬 **Curvature Gating & False-Positive Fixes** | Fixes discrete quantization stopping artifacts in differential curvature $\kappa(t)$: the "chaotic curvature" check now only uses points where the cursor is actually moving (both neighbouring steps ≥ 5 px), so real humans slowing to a stop near a target are no longer flagged. Unified positive lower bound on keystroke frequency (`0 < key_interval_avg < 25ms`) across rules, Brave shields, and threat classification, preventing rollover-typing false positives. Mobile tap isolation (`and not is_touch` on polynomial acceleration rule 4.C). (v0.10.6) |
-| 🛡️ **Zero-PII Keystroke Shield & SPA Lifecycle** | Universal client-side masking of every printed character — only keys on a closed allow-list of UI Events control keys (`Enter`, `ArrowLeft`, `Unidentified`, `F1`–`F24`, …) are sent by name, so emoji, ligature keys (`لا`), combining sequences, Turkish `İ` and whole words delivered by word completion or IME (`Mustafa`) are masked too — and of sensitive fields alongside client-side linguistic digraph scoring (`is_freq_digraph`), transmitting zero raw text or PII across the wire (GDPR Art. 5(1)(c) & KVKK Art. 4 compliance across Vanilla JS, React, and Vue). Single-use token lifecycle invalidation preventing 403 replay loops in SPAs. Dynamic cryptographically signed PoW difficulty (`salt.ts.diff.sig`), telemetry window shifting on PoW retry to prevent zero-event 403 blocks, CIDR trusted reverse proxy resolution (`10.0.0.0/8`, `172.16.0.0/12`), CGNAT User-Agent session isolation, and desktop IME dwell bypass prevention (v0.10.4). |
-| 🔐 **Client Network Binding & Token Relay Defense** | Cryptographic client device and network subnet binding (`nonce.ts.bind_hash.sig`). Defeats automated token relay and token harvesting farms by binding challenges to `/24` IPv4 and `/64` IPv6 subnets alongside case-normalized User-Agents with roaming tolerance. Includes thread-safe leak-free SQLite worker connection lifecycle management and the new `synapse-shield doctor` diagnostic audit CLI (v0.10.1). |
-| 📱 **Mobile SDK v2.0 & Anti-Emulator Biometrics** | End-to-end mobile biometric telemetry across Vanilla JS, React, and Vue: Tap Hold Time (`touchend - touchstart` duration & variance), passive gyroscope/accelerometer micro-tremor (`motion_variance`), WebGL GPU cross-validation (`is_mobile_gpu_mismatch` catching `SwiftShader`/`NVIDIA` on mobile viewports +85 Risk), Android Gboard/IME soft-keyboard support (`key="Unidentified"`), and zero false positives on Single-Tap and Flick-Scroll + Tap interactions (v0.10.0). |
-| 🛡️ **Kinematic Hardening, Dynamic Jitter & PoW Defense** | Effective capacitive touch validation (anti-spoofing +75 Risk), constant touch radius trap (+55 Risk), hard bot violation veto & IP-bound PoW challenges (35.0-55.0 gray area), fuzzy trajectory replay detection ($\delta < 0.015$), click-to-cursor spatial alignment ($\Delta d \le 50\text{px}$), secret-keyed dynamic threshold jitter ($\pm 5\%$), and anti-poisoning active learning limits (v0.9.9). |
-| ⚡ **Vectorized 1D-CNN, Rust L1 Cache & Alpine musllinux** | NumPy BLAS vectorized 1D-CNN inference (0.092ms, 5.2x speedup), thread-local persistent WAL SQLite with L1 in-memory ban/session caches (0.84ms end-to-end middleware), multi-architecture Alpine Linux (`musllinux_1_2`) wheels, and complete mitigation of Brave farbling camouflage and straight-line/macro bot vectors (v0.9.8). |
-| 🛡️ **Enterprise Hardening & Reverse Proxy Shield** | First-class `X-Synapse-Token` HTTP header, `SYNAPSE_TRUSTED_PROXIES` resolution (`CF-Connecting-IP` / `X-Forwarded-For`), non-blocking Shadow Mode (`mode="shadow"`), Smart Challenge PoW gray-area flow, and full cryptographic parity across Django and Flask (v0.9.7). |
-| 🚀 **Universal ASGI 3.0, Litestar & Sanic Support** | Drop-in support for Litestar route guards (`synapse_guard`), dual-mode Sanic decorator (`@shield_protect_sanic`), and zero-dependency ASGI 3.0 middleware with replayable receive safety and 256KB DoS limits (v0.9.6). |
-| 🎯 **Built-in Red Team Orchestrator** | Yerleşik modüler saldırı bataryası (6 plugin) ve `synapse-shield redteam` CLI arayüzü ile doğrudan test imkanı (v0.9.5). |
-| 📦 **PyO3 Universal ABI3 Wheel** | `abi3-py310` kullanılarak Python 3.10+ (3.11, 3.12, 3.13 vb.) için tek bir pre-built binary wheel derlemesi, sıfır derleme süresi (v0.9.5). |
-| 📊 **Rust State Engine Telemetry** | `/metrics` endpoint'i ve `synapse-shield telemetry` komutu ile L1 Nonce bellek ve IP Ban verilerini anlık izleme (v0.9.5). |
-| 🛡️ **Algorithmic DoS & Poisson Stability** | Replaced factorial loops with $O(1)$ iterative multiplicative terms and $k \ge 30$ short-circuit cutoff ($<0.1\text{ ms}$ latency), completely neutralizing CPU exhaustion vectors during traffic spikes (v0.9.3). |
-| ⌨️ **Constant-Time $O(1)$ Deque Keystroke Pairing** | Migrated keydown/keyup matching from $O(N)$ list shifting to `collections.deque.popleft()`, preventing $O(N^2)$ asynchronous event loop starvation during long typing sequences (v0.9.3). |
-| 🌐 **Trusted Reverse Proxies & IPv6 Normalization** | Added `SYNAPSE_TRUSTED_PROXIES` validation and automatic IPv4-mapped IPv6 unwrapping (`::ffff:x.x.x.x`), guaranteeing strict subnet classification and KVKK/GDPR anonymization compliance (v0.9.3). |
-| 🔒 **RCE & Model Path Traversal Defense** | Enforced `allow_pickle=False` on NumPy neural weight loading and canonical `os.path.abspath` `.npz` extension validation on retrainer export targets (v0.9.3). |
-| 📐 **Differential Curvature Analysis ($\kappa(t)$)** | Vectorized 1st and 2nd order spatial-temporal derivatives $\kappa(t) = \frac{|\dot{x}\ddot{y} - \dot{y}\ddot{x}|}{(\dot{x}^2 + \dot{y}^2 + \epsilon)^{3/2}}$ via Rust AVX2 SIMD to detect hyper-smooth Bézier curves and artificial Gaussian jitter bots (v0.9.2). |
-| ⌨️ **Keystroke Dynamics & Digraph Shannon Entropy** | Deep dwell time ($T_d$), flight time ($T_f$), and digraph transition analysis with 8-bin histogram Shannon entropy, detecting synthetic fixed-interval keystroke injection (v0.9.2). |
-| ⚡ **PyO3 Zero-Copy Buffer** | Direct raw pointer transfers from contiguous NumPy `float64` buffers to Rust SIMD registers without cross-boundary memory copying (v0.9.2). |
-| 📱 **Mobile Capacitive Touch Biometrics** | Multi-touch contact deformation physics: tracks `maxTouchPoints`, average touch radius ($\bar{r} \ge 3.0\text{ px}$), radius variance ($\sigma_r^2 > 0$), and pressure dynamics. Grants -15 Risk fleshy-finger compliance bonus while penalizing synthetic headless mobile emulators (+60 Risk) (v0.9.0). |
-| 🦀 **Native Rust SIMD Kinematic Core** | High-performance C-ABI FFI via PyO3 with single-pass AVX2/NEON SIMD vectorization across 24 kinematic dimensions ($212.7\,\mu s$ latency, ~4,700 ops/s) (v0.9.0). |
-| ⚡ **Microsecond Benchmark Suite** | Built-in CLI command (`synapse-shield benchmark`) profiles 19D Kinematics ($73.7\,\mu s$), 1D-CNN inference ($451.2\,\mu s$), and end-to-end evaluation ($828.1\,\mu s$, ~1,200 req/sec) with ASCII/JSON reports (v0.7.9). |
-| 🧬 **Biological Synthetic Human Generator** | Multi-bell submovement velocity decomposition with natural valleys, biomechanical arm curvature, and inertia-filtered neuromuscular micro-tremor achieving 100% human verification accuracy (v0.7.9). |
-| 🛡️ **Isolated Weight & Bootstrap Architecture** | Fine-tuning writes only where you tell it (`retrain --output` or `SYNAPSE_WEIGHTS_PATH`); the engine loads `SYNAPSE_WEIGHTS_PATH` or the bundled weights, never a file from the working directory. `--bootstrap` enables zero-data model calibration on clean installs (v0.7.9). |
-| 🌊 **FFT Tremor Spectral Analysis (DSP)** | Fast Fourier Transform (`np.fft.rfft`) decomposes velocity sequences to evaluate Power Spectral Density (`spectral_purity` & `spectral_entropy`), mitigating synthetic harmonic oscillator tremors ($\sin(2\pi ft)$) in the frequency domain (v0.7.8). |
-| 🖐️ **Sub-Movement Kinematic Decomposition** | Decomposes trajectory paths into discrete ballistic and corrective velocity pulses based on Fitts's Law. Trajectories lacking physiological sub-movements (`submovement_count <= 1`) are flagged as polynomial bots (v0.7.8). |
-| 🔄 **Session-Level Behavioral Invariance** | Stateful sliding-window telemetry tracking across session requests. Mitigates attackers rotating random seeds or repeating deterministic kinetic templates (v0.7.8). |
-| 🎯 **Adversarial AI Retraining Pipeline** | Built-in synthetic telemetry generator (`synapse_shield.adversarial`) enriches 1D-CNN active learning with adversarial Bézier, sinusoidal, and minimum-jerk curves, eliminating out-of-distribution blindspots (v0.7.8). |
-| 🛡️ **Comprehensive Security Hardening** | Full remediation across all vector layers (P0-P2): Stored XSS defense, admin-authenticated WebSocket terminal, SSRF & DNS rebinding allowlist for webhooks, and gated Brave Farbling logic (v0.7.7). |
-| ⚡ **Sub-Millisecond Composite SQLite Index** | Composite index (`idx_ip_strikes_ip_ts`) eliminates table scans, enabling sub-millisecond bot strike counting under high-throughput DDoS conditions (v0.7.7). |
-| 🔄 **Transparent Token Expiration Recovery** | Clean separation of expired tokens (`HTTP 400 EXPIRED`) from active replay attacks, allowing the SDK to seamlessly renegotiate challenges without false-positive IP bans (v0.7.7). |
-| 🧱 **O(N) Keystroke DoS Defense** | Queued hold-time analysis with strict input bounds (150 keys/scrolls max), neutralizing algorithmic complexity exhaustion attacks (v0.7.7). |
-| 🧪 **Poisoning-Resistant AI Fine-Tuning** | Telemetry ingestion filters reject non-human or farbling-exempted traffic from the active learning dataset pool, preserving model classification integrity (v0.7.7). |
-| 🔔 **Instant Discord & Telegram Webhooks** | Real-time security incident dispatch. Critical threat mitigations (BLOCK) and IP bans are automatically forwarded to configured Discord/Telegram channels via non-blocking background tasks (v0.7.6). |
-| ⚡ **Distributed State & Redis Cluster** | Enterprise multi-server architecture (`SYNAPSE_REDIS_URL`). Atomic cross-worker replay protection (`SET NX EX`), synchronized IP quarantine, and zero-downtime SQLite fallback (v0.7.5). |
-| 🧩 **Dynamic Yielding Proof-of-Work** | Sub-second client-side SHA-256 cryptographic puzzle with UI yielding to prevent main-thread blocking. Replay-attack resistant on retries (v0.7.2). |
-| 🛡️ **Iframe-based Prototype Unhooking** | Advanced anti-stealth mechanism using hidden iframes to access clean native browser prototypes (Canvas, WebGL), bypassing attacker overwrites (v0.7.2). |
-| 🔒 **SDK Runtime Immutability** | `Object.freeze` protects internal SDK states/configurations from malicious tampering on the host page (v0.7.2). |
-| 📱 **Zero-Jank Mobile Events** | Passive touch listeners (`{ passive: true }`) ensure seamless 60 FPS mobile scrolling without blocking the UI thread (v0.7.2). |
-| 🪟 **Sliding Window IP Ban Shield** | Stateful 60-second sliding time-window (SSRT-2026-004 defense). Prevents streak-reset evasion attacks even when attackers inject synthetic human requests. |
-| 🔄 **NumPy-Only Active Learning** | Built-in `synapse-shield retrain` command enabling transfer learning on 1D-CNN FC layers in <3s directly from SQLite logs without PyTorch/TensorFlow. |
-| 🕵️ **Anti-Stealth & Tamper Proofing** | Dynamically detects headless browser fingerprints (`navigator.webdriver`), fake plugin arrays, and native `toString` overwrites in WebGL/Canvas APIs. |
-| 🗄️ **Continuous Learning Collector** | Integrated drop-in `store.html` telemetry collector endpoint (`/api/collect_dataset`) for continuous 1D-CNN Fine-Tuning with raw human datasets. |
-| 🤖 **Pure-NumPy 1D-CNN Micro-Brain** | The Sequence Tokenizer fuses kinematics and keystroke stats into an 8D and 5D tensor architecture, fully processed by a 15KB NumPy-based 1D-CNN (Zero-PyTorch). |
-| 🛡️ **Max Gating (Fusion Engine)** | Dynamically unifies Heuristic/Mathematical rules with the 1D-CNN AI confidence score. If either engine flags the telemetry as a Bot, the request is unconditionally blocked. |
-| 🔗 **Zero-Dependency Multimodal Tokenizer** | Fuses 5D Mouse Sequence `[dx, dy, dt, velocity, jerk]` with 8D Static Keystroke/Scroll Vector via Late Fusion. |
-| 🧩 **100% Invisible UX** | Zero annoying puzzles, image selections, or audio challenges. Legitimate humans pass friction-free. |
-| ⚡ **Async Non-Blocking SLA (<0.5 ms)** | Heavy CPU-bound kinematics processed via `asyncio.to_thread`, guaranteeing zero event-loop blocking under high concurrency. |
-| 🔐 **Cryptographic Replay Defense** | Every session is bound to a single-use **HMAC-SHA256** signed nonce. Intercepted tokens cannot be replayed. |
-| 🧠 **Fitts's Law Deceleration Kinematics** | Distinguishes advanced Bézier curve bots (`ghost-cursor`) from organic human hands by analyzing terminal velocity drops before click actions. |
-| ⚛️ **React, Next.js & Vue 3 / Nuxt 3 Support** | Native packages (`synapse-shield-react` & `synapse-shield-vue`) with hooks/composables and `<SynapseProtect />` drop-in protection components. |
-| 🐍 **Multi-Framework Adapters** | Native middlewares and decorators for **Django** (`SynapseShieldMiddleware`) and **Flask** (`@shield_protect_flask`). |
-| ♿ **Accessibility Mode** | Graceful risk scaling (`accessibility_mode=True`) prevents false positives for motor-impaired and assistive device users. |
-| 📈 **Enterprise Prometheus Metrics** | Built-in `/metrics` endpoint supporting multi-process Gunicorn/Uvicorn aggregation via `PROMETHEUS_MULTIPROC_DIR`. |
-| 🔒 **100% Zero-PII & Privacy-First** | No keystroke characters or form values collected — strictly relative millisecond timing deltas processed (GDPR & KVKK compliant). |
-| 📊 **Poisson Flooder Defense** | Statistical Poisson anomaly detection identifies high-frequency headless API flooders and applies dynamic IP rate penalties. |
-| 💾 **SQLite WAL with Auto-Pruning** | In-memory TTL nonce management + Write-Ahead Logging (WAL) with 10s timeouts prevents database locks during async BackgroundTasks. |
-| 🧱 **Memory Exhaustion Defense** | Strict 256KB/512KB payload body limits evaluated at stream-read time (`await request.body()`) protecting against chunked-transfer inflation attacks. |
-| 🔑 **Secure Admin APIs** | Administrative operations (`/api/clear`) are cryptographically authenticated via the `SYNAPSE_ADMIN_SECRET` environment variable to prevent unauthorized telemetry tampering. |
-| 🚨 **Zero-Latency Webhook Alerts** | Instant real-time Telegram and Discord notifications upon bot detection via `asyncio.to_thread` without blocking the main event loop. Configurable directly from the Cockpit. |
-
----
-
-## 🏛️ Architecture & Sequence Diagram
-
-```text
-┌─────────────────┐             ┌─────────────────────┐             ┌─────────────────────────┐
-│  Client Browser │             │  FastAPI Gateway    │             │  Kinematic Decision     │
-│  (synapse-sdk)  │             │  (Synapse Shield)   │             │  Engine (<0.5ms SLA)    │
-└────────┬────────┘             └──────────┬──────────┘             └────────────┬────────────┘
-         │                                 │                                     │
-         │── 1. GET /api/challenge ───────►│                                     │
-         │◄── 2. { nonce, ts, hmac_sig } ──│  (Generates single-use signed nonce)│
-         │                                 │                                     │
-   [User moves cursor / types]             │                                     │
-   [SDK bundles 50Hz telemetry]            │                                     │
-         │                                 │                                     │
-         │── 3. POST /api/score {token} ──►│  (1. Validates HMAC signature)      │
-         │                                 │  (2. Checks 60s TTL freshness)      │
-         │                                 │  (3. Checks Replay Attack nonce)    │
-         │                                 │                                     │
-         │                                 │── 4. asyncio.to_thread ────────────►│ (19D Kinematics)
-         │                                 │                                     │ (Jerk & Fitts's Law)
-         │                                 │                                     │ (Poisson Anomaly)
-         │                                 │◄── 5. (bot_score, ALLOW/BLOCK) ─────│
-         │                                 │                                     │
-         │                                 │── 6. Save Log to SQLite (WAL)       │
-         │◄── 7. HTTP 200 {ALLOW/BLOCK} ───│                                     │
-```
-
----
-
-## 🚀 30-Second Quickstart
-
-### Option 1: Install via PyPI
+## Install
 
 ```bash
 pip install "synapse-shield[server]"
 ```
 
-> The bare `pip install synapse-shield` installs only the scoring engine (NumPy). The `[server]` extra adds FastAPI + uvicorn, which `run`, `test` and the cockpit need. Framework adapters come with `[frameworks]` (Django, Flask, Sanic, Litestar), or install everything with `[all]`.
-
-Run the server and live cockpit directly from your terminal:
+Start the server with its live dashboard, then open <http://127.0.0.1:8000>:
 
 ```bash
 synapse-shield run --port 8000
 ```
 
-Run comprehensive system diagnostics & security health audit:
+Check that everything is set up correctly:
 
 ```bash
 synapse-shield doctor
 ```
 
-Run the 9-vector adversarial test suite against the running server (start `run` first, in another terminal). It exits non-zero if any verdict is wrong or the server cannot be reached:
-
-```bash
-synapse-shield test
-```
-
-Retrain the 1D-CNN AI model autonomously on local SQLite telemetry (Active Learning):
-
-```bash
-synapse-shield retrain --epochs 5 --output /data/synapse_weights.npz
-export SYNAPSE_WEIGHTS_PATH=/data/synapse_weights.npz   # load it
-export SYNAPSE_CNN_MODE=enforce                          # only after validating it on your own traffic
-```
-
-The 1D-CNN runs in `shadow` mode by default: it is computed (`details["ai_raw_score"]`) but does not affect the decision.
-
-### Option 2: Clone & Local Development
+<details>
+<summary><b>Docker</b></summary>
 
 ```bash
 git clone https://github.com/0xStoic-bit/Synapse_Shield.git
 cd Synapse_Shield
-pip install -e ".[all]" pytest httpx
-python test_suite.py
-```
-
-See [🧪 Testing](#-testing) for the full Python, Rust and JS SDK test suites.
-
-Visit [http://127.0.0.1:8000](http://127.0.0.1:8000/) in your browser to launch the **Live Security Cockpit**.
-
-### Option 3: Docker Deployment (Recommended)
-
-Run the entire Synapse Shield stack, including the backend engine, SQLite WAL persistence, and the telemetry collector in a single container.
-
-```bash
-# Start the container in detached mode
 docker-compose up -d
-
-# View real-time logs
-docker-compose logs -f
 ```
 
-The Synapse API and Live Cockpit will be available at [http://localhost:8000](http://localhost:8000).
+The API and dashboard are on <http://localhost:8000>.
+</details>
 
----
+<details>
+<summary><b>Other install options</b></summary>
 
-## 🚨 Real-time Webhook Alerts (Telegram & Discord)
+| Command | What you get |
+| :--- | :--- |
+| `pip install synapse-shield` | Scoring engine only (for use inside your own app) |
+| `pip install "synapse-shield[server]"` | + the built-in server and dashboard |
+| `pip install "synapse-shield[frameworks]"` | + Django, Flask, Sanic and Litestar adapters |
+| `pip install "synapse-shield[all]"` | Everything |
 
-Synapse Shield features zero-latency background webhook notifications. When a critical threat is blocked (e.g., `STEALTH_AUTOMATION`, `POISSON_FLOOD`), you receive an instant alert on your phone.
+Pre-built wheels are published for Linux, macOS and Windows, so no Rust toolchain is needed.
+</details>
 
-### Setting up Telegram Alerts
-1. Open Telegram and message **[@BotFather](https://t.me/BotFather)** with `/newbot`.
-2. Follow the steps to get your **HTTP API Token** (e.g., `123456:ABC-DEF...`).
-3. Send a message like "Hello" to your newly created bot to initialize the chat.
-4. Message **[@userinfobot](https://t.me/userinfobot)** and press `START` to get your **Chat ID** (e.g., `123456789`).
-5. Open the Synapse Shield Cockpit (`http://127.0.0.1:8000`), click **WEBHOOKS**, and paste your Token and Chat ID.
+## Protect a form in 5 minutes
 
-### Setting up Discord Alerts
-1. Go to your Discord Server settings > **Integrations** > **Webhooks** > **New Webhook**.
-2. Copy the **Webhook URL**.
-3. Open the Synapse Shield Cockpit, click **WEBHOOKS**, and paste the URL.
-
----
-
-## 💻 Developer Integration
-
-### 1. FastAPI Integration
-
-Protect any API endpoint using the `@shield_protect` decorator or global middleware:
+**1. Server** (FastAPI shown, [other frameworks](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md)):
 
 ```python
-from fastapi import FastAPI, Request
-from synapse_shield import shield_protect, SynapseShieldMiddleware
+from fastapi import FastAPI
+from synapse_shield import SynapseShieldMiddleware
 
 app = FastAPI()
-app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/auth"])
-
-@app.post("/api/login")
-@shield_protect(max_risk_score=50.0, accessibility_mode=False)
-async def login(request: Request):
-    return {"status": "authenticated"}
+app.add_middleware(SynapseShieldMiddleware, protected_paths=["/api/login"])
 ```
 
-> **`protected_paths` semantics (all adapters):** the middleware checks only state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`; a body-less `DELETE` sends its token in the `X-Synapse-Token` header) whose path starts with one of the listed prefixes. **If the list is empty or missing, every `POST`/`PUT`/`PATCH` route is protected.** This fail-safe default is the same in FastAPI, raw ASGI, Django, Flask, Sanic and Litestar. Up to v0.10.4, Flask, FastAPI and Django protected *nothing* when the list was empty, so list your paths explicitly if you relied on that.
-
-> **Calling `POST /api/score` yourself?** Branch on `decision` (`"allow"` / `"block"` / `"challenge"` / `"error"`), not on `status`. `status: "success"` only means the request was scored, and is returned for bots too.
-
-> **Gray-area PoW and keyboard-only sessions:** the middleware adapters default to `enable_pow=False`, which turns the gray-area (risk 35-55) Proof-of-Work challenge off. One segment keeps it anyway: keyboard-only sessions (no mouse movement, at least 3 keystrokes, not touch) that would otherwise be allowed get an HTTP 429 `challenge_required` response with a `pow_salt`, so a keyboard-only auto-typer cannot pass without paying the PoW cost. Your client must solve it and retry: the vanilla `synapse-sdk.js` `submit()` does this automatically, the Vue composable's `submitProtected()` solves it and retries once automatically, and the React hook's `submitProtected()` solves it and retries once automatically (its `solvePow()` is also exported). A client that cannot solve PoW is refused, as it was before keyboard-only sessions were moved out of the block range. Set `SYNAPSE_KEYBOARD_ONLY_CHALLENGE=0` (or pass `keyboard_only_challenge=False` to `evaluate_synapse_request[_sync]`) to turn this off.
-
-### 2. Django & Flask Integration
-
-Native support for Django and Flask environments.
-
-**Django (`settings.py`)**:
-
-```python
-MIDDLEWARE = [
-    # ...
-    'synapse_shield.django.SynapseShieldMiddleware',
-]
-SYNAPSE_SHIELD_PROTECTED_PATHS = ['/api/login']
-SYNAPSE_SHIELD_MAX_RISK = 50.0
-SYNAPSE_SHIELD_ACCESSIBILITY = False
-```
-
-**Flask**:
-
-```python
-from flask import Flask
-from synapse_shield.flask import shield_protect_flask
-
-app = Flask(__name__)
-
-@app.route("/login", methods=["POST"])
-@shield_protect_flask(max_risk_score=50.0)
-def login():
-    return {"status": "authenticated"}
-```
-
-### 3. Litestar Integration (v0.9.6)
-
-Idiomatic route guards and application middleware for **Litestar**:
-
-```python
-from litestar import Litestar, post
-from synapse_shield.litestar import synapse_guard, LitestarSynapseMiddleware
-
-# Route-level Guard protection
-@post("/api/checkout", guards=[synapse_guard(max_risk_score=40.0)])
-async def checkout(data: dict) -> dict:
-    return {"status": "success"}
-
-# Or application-wide middleware
-app = Litestar(
-    route_handlers=[checkout],
-    middleware=[
-        LitestarSynapseMiddleware(protected_paths=["/api/auth"], max_risk_score=50.0)
-    ]
-)
-```
-
-### 4. Sanic Integration (v0.9.6)
-
-Dual-mode support for **Sanic** (Native HTTP Server & ASGI):
-
-```python
-from sanic import Sanic, text
-from synapse_shield.sanic import shield_protect_sanic, SynapseSanicMiddleware
-
-app = Sanic("secure_app")
-
-# Route Decorator
-@app.post("/api/login")
-@shield_protect_sanic(max_risk_score=50.0)
-async def login(request):
-    return text("Authenticated!")
-
-# Or Request Middleware
-middleware = SynapseSanicMiddleware(protected_paths=["/api/auth"])
-app.register_middleware(middleware, "request")
-```
-
-### 5. Universal ASGI 3.0 Middleware (v0.9.6)
-
-Zero-dependency standard ASGI 3.0 wrapper with stream replay protection (`replayable_receive`) and strict 256KB DoS limits. Works with **Quart**, **BlackSheep**, **Falcon**, or raw ASGI:
-
-```python
-from synapse_shield import SynapseShieldASGIMiddleware
-
-# Wrap any ASGI 3.0 application
-app = SynapseShieldASGIMiddleware(
-    base_app,
-    protected_paths=["/api/auth", "/checkout"],
-    max_risk_score=50.0
-)
-```
-
-### 6. React / Next.js Integration
-
-We provide a drop-in `"use client"` compatible React package.
-
-```tsx
-import { useSynapseShield, SynapseProtect } from 'synapse-shield-react';
-
-export default function LoginForm() {
-  const { getProtectedPayload } = useSynapseShield();
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const payload = getProtectedPayload();
-    // Send payload.token to your backend
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <SynapseProtect />
-      <button type="submit">Login</button>
-    </form>
-  );
-}
-```
-
-### 7. Vue 3 / Nuxt 3 Integration
-
-Official Vue 3 composable and component package (`synapse-shield-vue`). Fully SSR-safe for Nuxt 3.
-
-```vue
-<script setup>
-import { ref } from 'vue';
-import { useSynapseShield, SynapseProtect } from 'synapse-shield-vue';
-
-const { getProtectedPayload } = useSynapseShield();
-const username = ref('');
-const password = ref('');
-
-const handleSubmit = async () => {
-  const payload = getProtectedPayload();
-  // Submit payload.token to backend
-};
-</script>
-
-<template>
-  <form @submit.prevent="handleSubmit">
-    <SynapseProtect />
-    <input v-model="username" type="text" placeholder="Username" />
-    <input v-model="password" type="password" placeholder="Password" />
-    <button type="submit">Login</button>
-  </form>
-</template>
-```
-
-### 8. Vanilla JS / HTML SDK
-
-Add the lightweight SDK (`<5 KB`) to your vanilla project:
+**2. Browser** (plain HTML shown, [React and Vue](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md#frontend-sdks)):
 
 ```html
-<script src="http://localhost:8000/static/synapse-sdk.js"></script>
+<!-- served by `synapse-shield run`; in your own app, serve synapse_shield/static/synapse-sdk.js from the installed package -->
+<script src="/static/synapse-sdk.js"></script>
 <script>
   SynapseShield.init();
-  async function handleLogin() {
-    const payload = SynapseShield.getPayload();
-    // Submit payload
-  }
+  SynapseShield.protectFetch("/api/login"); // adds the X-Synapse-Token header to these requests
+
+  // your existing code stays the same
+  fetch("/api/login", { method: "POST", body: new FormData(loginForm) });
 </script>
 ```
 
-Serving the SDK on a payment page (PCI DSS 6.4.3)? Pin it with Subresource Integrity and regenerate the hash for every SDK release with `python scripts/sri_hash.py` (`--check <hash>` in CI):
+That's it. Requests to `/api/login` without a valid token, or that look automated, are refused before they reach your code.
 
-```html
-<script src="/static/synapse-sdk.js" integrity="sha384-..." crossorigin="anonymous"></script>
-```
+> When the server is unsure it answers `429 challenge_required` and asks for a background proof-of-work. The React and Vue SDKs solve it automatically (`submitProtected()`); with plain JS, `protectFetch` does not, so handle that response or use one of them ([details](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md#proof-of-work-challenges)).
 
-### 9. Prometheus Metrics
+## What your users experience
 
-Install `pip install "synapse-shield[metrics]"`. The server exposes the Prometheus exposition format on `GET /metrics/prometheus`
-(and on `GET /metrics` when the scraper sends `Accept: text/plain` / OpenMetrics, which Prometheus does; a plain request keeps the JSON
-Rust-state view). Both are admin-protected: send `Authorization: Bearer $SYNAPSE_ADMIN_SECRET` (Prometheus `authorization:` scrape config).
-To enable multi-process support (e.g., Gunicorn workers), set the environment variable:
+| Situation | Result |
+| :--- | :--- |
+| Normal visitor (mouse, touch, trackpad) | Passes, sees nothing |
+| Keyboard-only or screen-reader user, very short interaction | Passes after a short background proof-of-work (handled by the React / Vue SDK) |
+| Scripted bot, headless browser, replayed request | Blocked |
 
-```bash
-export PROMETHEUS_MULTIPROC_DIR=/tmp/synapse_metrics
-```
+Want to try it on real traffic first without blocking anyone? Use [shadow mode](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/SHADOW_MODE.md).
 
-### Raw telemetry storage
+## Honest limits
 
-By default the server stores **no raw traces**: a log row keeps the verdict, reasons and the aggregate feature vector, with an empty
-`telemetry` column. Set `SYNAPSE_STORE_RAW_TELEMETRY=1` to keep full traces (mouse coordinates and timings; typed characters are
-always masked) so `synapse-shield retrain` can learn from your own traffic. Without it, use `retrain --bootstrap`.
+- Bot detection numbers in this project come from synthetic attack generators, not from real bot traffic. Human false-positive numbers come from the public SapiMouse dataset (120 people).
+- A determined attacker who records real human sessions and replays each one with small changes can look human. The shield raises the cost (single-use tokens, replay fingerprints, proof-of-work), but it is one layer: keep rate limits and account-level protections such as MFA.
 
-### Detection policy and environment
+## Documentation
 
-| Setting | Default | Effect |
-| :--- | :--- | :--- |
-| `SYNAPSE_ENABLE_POW` | `0` (adapters) | Gray-area (35-55) PoW challenge. The reference server (`synapse-shield run`) always challenges the gray area; set `1` for the same behaviour in the framework adapters. |
-| `SYNAPSE_KEYBOARD_ONLY_CHALLENGE` | `1` | Keyboard-only sessions that would otherwise be allowed get a PoW challenge even with PoW off. |
-| `SYNAPSE_SHORT_TRACE_CHALLENGE` | `1` | Same for short pointer traces (<40 samples) whose risk was capped. Short humanised bots pass more often without PoW, so keep this on (or enable PoW). Keyboard-only and short-trace challenges always use difficulty 5, and a solved PoW lowers the risk by only 10 points (20 elsewhere): PoW does not tell humans from bots, it makes automation cost more. |
-| `SYNAPSE_TRAJECTORY_REPLAY` / `SYNAPSE_TRAJECTORY_FP_TTL` | `1` / `3600` | Keyed trajectory fingerprint against re-sent traces. Consumed only on `allow`, so SDK retries after a challenge or an expired token are not treated as replays. Known limit: adding 1 px of noise defeats the exact fingerprint (the in-session shape check still applies). |
-| `SYNAPSE_CNN_MODE` / `SYNAPSE_WEIGHTS_PATH` | `shadow` / bundled | See above. |
-| `SYNAPSE_PRIVACY_MODE` | `strict` | Log rows keep a masked IP (/24, /64) and a coarse User-Agent family (`Chrome/131 Windows`); `hash` keeps HMACs, `off` keeps raw values. |
-| `SYNAPSE_MAX_REQ_10S` | `100` | Extreme-rate limit (15-minute ban); now shared by the reference server and the adapters. |
-| `SYNAPSE_SECRET_KEY` | generated | Signs challenges and keys every HMAC (device penalty, trajectory fingerprint, shape hash). **All pods must share it.** |
+| I want to… | Read |
+| :--- | :--- |
+| Add it to Django, Flask, Litestar, Sanic, ASGI, React, Vue | [Integrations](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/INTEGRATIONS.md) |
+| Tune behaviour, alerts, metrics | [Configuration](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/CONFIGURATION.md) |
+| Measure false positives before enforcing | [Shadow mode](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/SHADOW_MODE.md) |
+| Know what data is processed and stored | [Privacy notes for operators](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/PRIVACY_OPERATOR_NOTES.md) |
+| Understand how detection works | [Architecture](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/ARCHITECTURE.md) |
+| See attack test results | [Benchmarks](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/BENCHMARKS.md) |
+| Browse every feature by release | [Feature history](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/FEATURES.md) |
+| Run the tests or build the Rust core | [Tests](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/tests/README.md) · [Rust core](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/crates/synapse_core_rs/README.md) · [SDK tests](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/sdk-tests/README.md) |
 
-**IP ban:** 4 strikes in 60 s ban the IP for 60 s. Strikes are token errors (replay, forged, malformed, stale, relay; expired tokens excluded) and hard violations (no interaction, scroll-only, webdriver / stealth, session invariance on the same IP + User-Agent, trajectory replay) or Bot verdicts with risk ≥ 85. Borderline Bot verdicts block the request and add a 60 s penalty to that device only (HMAC of IP + User-Agent), not to everyone behind the same NAT. A repeated trajectory shape seen only across User-Agents on the same IP blocks the request but does not count as an IP strike, so it cannot be used to ban a shared IP. Blocked requests are recorded in the session history as blocked and are not used as the reference for history-only invariance checks, so an attacker sharing a CGNAT IP and a common User-Agent cannot poison a victim's session.
+Full index: [`docs/`](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/docs/README.md).
 
-What is processed and stored, for how long, and how to turn it off: [`docs/PRIVACY_OPERATOR_NOTES.md`](docs/PRIVACY_OPERATOR_NOTES.md).
+## Support
 
----
+If Synapse Shield saves you from a CAPTCHA or a bot swarm, a ⭐ helps other developers find it. Issues and pull requests are welcome ([CONTRIBUTING.md](https://github.com/0xStoic-bit/Synapse_Shield/blob/main/CONTRIBUTING.md)), and you can [sponsor the project](https://github.com/sponsors/0xStoic-bit).
 
-## 🔬 Shadow Mode: per-cohort false-positive monitoring
+Featured on [Mfuns](https://www.mfuns.net/article/123158) (architecture review, in Chinese).
 
-A single global block rate can hide one broken group (touch, high-DPI, zoomed browsers). In `mode="shadow"` every
-behavioural verdict is also counted per coarse cohort, with no pointer traces stored:
+## License
 
-| Metric | Labels |
-|---|---|
-| `synapse_shadow_cohort_total` | `action` (`allow`/`block`), `input` (`touch`/`pointer`/`keyboard`/`none`), `dpr` (`lt1`/`1x`/`1.25-1.9x`/`2x+`/`unknown`) |
-| `synapse_shadow_outcomes_total` | `simulated_action`, `input`, `dpr`, `outcome` (`completed`/`abandoned`) |
-| `synapse_shadow_rules_total` | `input`, `dpr`, `rule` (stable rule code such as `stutter`, `curvature`, `keystroke_superhuman`) |
-
-`pointer` covers mouse and trackpad (they cannot be told apart reliably); `dpr` also separates zoomed sessions.
-To learn whether enforcing would have blocked real users, report what happened to the session from your own code:
-
-```python
-from synapse_shield import evaluate_synapse_request_sync, report_shadow_outcome
-
-decision = evaluate_synapse_request_sync(ip, ua, token, mode="shadow")
-# ... later, once your app knows the outcome (e.g. the login succeeded):
-report_shadow_outcome(decision, completed=True)
-```
-
-A high `simulated_action="block"` x `outcome="completed"` count in one cohort means enforcement would hurt real
-users there, even if the global rate looks fine.
-
-`SynapseDecision.rule_codes` (and `to_dict()["rule_codes"]`) list the same codes per verdict, so a log line can say *which*
-rule would have blocked.
-
-**Ready-made monitoring** (`deploy/monitoring/`): `grafana-shadow-cohorts.json` (would-block rate per cohort,
-completed-but-would-block, top rules, rule x cohort) and `shadow-alerts.yml` (Prometheus rules that compare cohorts
-with each other and require at least 200 sessions before firing). The PromQL is checked against the metric and
-label names in CI, but not executed; load it in a test Prometheus first.
-
-**Replay your own recordings offline** (no server, no token, no network):
-
-```bash
-synapse-shield replay ./recordings --label human   # false-positive rate, rules and cohorts behind the blocks
-synapse-shield replay ./bots.jsonl --label bot     # detection rate
-```
-
-Input is `.json` / `.jsonl` telemetry (the SDK payload, or an object with a `telemetry` key).
-
-## 🧪 Testing
-
-Synapse Shield is tested in three layers. CI runs all three on every push and pull request (`.github/workflows/ci.yml`).
-
-| Layer | Suite | What it guards |
-| :--- | :--- | :--- |
-| 🐍 Python | `tests/` (pytest) | API, tokens, engine, Rust ↔ Python parity. One security contract (no token → 403, replay → 403, bot → 403, shadow mode, 256 KB limit) runs against the **real** FastAPI, Flask, Sanic and Litestar pipelines. Redis storage runs on `fakeredis` with real command semantics, including the Redis → SQLite failover. The 9-vector red-team suite (`synapse-shield test`) runs end-to-end in-process, and each verdict is asserted |
-| 🦀 Rust core | `#[cfg(test)]` modules in `crates/synapse_core_rs/src/` | Keystroke dynamics (incl. IME majority rule), curvature (AVX2 ↔ scalar parity), kinematics, nonce cache |
-| 🌐 JS SDKs | `sdk-tests/` (Vitest + jsdom) | One Zero-PII contract run against **Vanilla JS, React and Vue**: no typed character ever leaves the browser, plus token lifecycle |
-
-```bash
-# Python (CI fails if the native Rust core is not loaded, so parity tests can never silently skip)
-pip install -e ".[all]" && pip install pytest pytest-cov httpx sanic-testing fakeredis
-pytest tests -rsxX --cov=synapse_shield --cov-branch --cov-fail-under=85
-
-# Rust core (point PyO3 at the interpreter you build against)
-cd crates/synapse_core_rs
-PYO3_PYTHON=$(which python) cargo test --all-targets   # Windows: point it at the official CPython, not an MSYS2/MinGW python on PATH
-
-# Browser SDKs
-cd sdk-tests && npm ci && npx vitest run
-```
-
-> **Local tip:** after editing any `.rs` file, rebuild the extension with `maturin develop --release`. Otherwise pytest silently runs against the previously compiled `.pyd` / `.so`.
-
-**Coverage floor.** CI fails if Python line + branch coverage drops below **85%**. The security core is held higher: `tokens.py` 99%, `storage.py` 95%, `core.py` 92%.
-
-**Mutation testing.** Coverage only shows that a line ran. Mutation testing checks that the tests would notice if the line were wrong. [`mutmut`](https://github.com/boxed/mutmut) mutates `tokens.py`, `core.py` and `storage.py`; config is in `[tool.mutmut]` in `pyproject.toml`. It runs weekly and on demand in `.github/workflows/mutation.yml`. mutmut 3 needs Linux or WSL:
-
-```bash
-pip install "mutmut>=3.3,<4" && mutmut run && mutmut results
-```
-
-Last local measurement (mutmut 2.5.1, 1,145 evaluated mutants): about 88% killed. Treat it as approximate; the weekly CI run is authoritative.
-
-Known gaps are kept visible instead of hidden: they are marked `xfail(strict=True)` (pytest) or `#[ignore = "..."]` (Rust) with the reason in the test, so the suite flips to failing the moment behaviour changes.
-
----
-
-## 🤖 Attack Simulation Benchmarks
-
-Run the full adversarial suite anytime:
-
-```bash
-synapse-shield test
-```
-
-This is a smoke test, not a measurement of real-user false positives or real-bot detection: the human controls are synthetic, and an HTTP error that carries no Synapse verdict counts as `Error`, never as a block. Vector #10 (humanised Bézier) is printed as a separate measurement row and does not affect the exit code.
-
-Measured on 2026-11-12 (v0.10.7). Reproduce with `python scripts/measure_readme_benchmarks.py`, which needs no server and sends nothing off the machine. Decision and risk come from a real `POST /api/score`. Latency is the median engine time (`analyze_behavior`) over 200 runs.
-
-| Attack Vector          | Simulated Signature                     | Detection Mechanism                              | Decision                 | Risk Score  | Latency |
-| ---------------------- | --------------------------------------- | ------------------------------------------------ | ------------------------ | ----------- | ------- |
-| **Selenium Crawler**   | `navigator.webdriver = true`            | WebDriver API detection                          | 🔴 BLOCK                 | 100.0%      | 0.12 ms |
-| **Linear Bot**         | Straightness = 1.000 & zero jerk        | Straightness + velocity variance                 | 🔴 BLOCK                 | 100.0%      | 0.24 ms |
-| **Bézier Stealth Bot** | Quadratic Bézier, fixed 20 ms timer     | Fixed-interval timer + synthetic tremor          | 🔴 BLOCK                 | 100.0%      | 0.23 ms |
-| **Robotic Auto-Typer** | Fixed 50 ms key injections, no mouse    | Keystroke biometrics + missing mouse telemetry   | 🔴 BLOCK                 | 100.0%      | 0.14 ms |
-| **Burst Flooder**      | 8 human-looking requests in ~330 ms     | Poisson frequency score (suppressed for organic kinematics) | 🟡 FLAG only (0/8 blocked) | 25.0% | 0.26 ms |
-| **Replay Attack**      | Re-sending a captured valid token       | Single-use HMAC nonce                            | 🔴 BLOCK                 | 100.0%      | —       |
-| **Natural Human**      | Ease-out curve, tremor, jittered timing | Biologic jerk & deceleration                     | 🟢 ALLOW (50/50 seeds)   | 0.0% (max)  | 0.54 ms |
-
-> **Burst flooding is not blocked on its own.** When the trajectories look organic, the Poisson frequency signal only raises the risk score. Hard blocking starts at the extreme-rate limit (`SYNAPSE_MAX_REQ_10S`, default 100 requests per 10 s, which leads to a 15-minute ban) or after 4 IP strikes in 60 s (see *Detection policy and environment*). Earlier versions of this table listed this row as `BLOCK 60%`. That figure could not be reproduced: the bundled attack suite had been rejecting every request at the token-binding layer since v0.10.1, so the table did not reflect the biometric layers.
-
----
-
-## 🧠 Kinematic & Mathematical Foundations
-
-### 1. Jerk — Neuromuscular Tremor Fingerprint
-
-$$\text{Jerk} = \frac{da}{dt} = \frac{d^3x}{dt^3}$$
-
-Human muscle tremors produce continuous high-frequency Jerk. Mathematical bot curves (Bézier/Linear) produce near-zero or static Jerk.
-
-### 2. Fitts's Law Terminal Deceleration Index
-
-$$\text{Terminal Decel Ratio} = \frac{\bar{v}_{\text{terminal (last 25\%)}}}{v_{\text{peak}}}$$
-
-Humans naturally decelerate ($< 0.40$) as they approach the target click point.
-
-### 3. Cumulative Poisson Anomaly Distribution
-
-$$P(X < k) = \sum_{i=0}^{k-1} \frac{\lambda^i e^{-\lambda}}{i!}$$
-
----
-
-## 🌐 Featured On & Community Coverage (媒体报道与社区分享)
-
-Synapse Shield is featured and discussed across global security and developer communities:
-
-| Platform / Source | Article / Coverage | Topic |
-| :--- | :--- | :--- |
-| **Mfuns (二次元与前沿科技社区)** | [Synapse Shield 架构深度解析与安全加固 (v0.5.0)](https://www.mfuns.net/article/123158#%E4%B8%BB%E8%A6%81%E7%89%B9%E6%80%A7%E4%B8%8E%E5%8A%A0%E5%9B%BA-v0-5-0) | In-depth architectural review of behavioral biometrics, zero-friction CAPTCHA alternatives, and bot mitigation engine hardening |
-
----
-
-## 📁 Repository Structure
-
-```text
-Synapse_Shield/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml             # CI: Python 3.10–3.12 matrix + Rust unit tests + JS SDK tests
-│       └── wheels.yml         # Multi-Platform Native Binary Wheel Builder (Linux, macOS, Windows)
-├── crates/
-│   └── synapse_core_rs/       # High-Performance Native Rust Core (AVX2/NEON SIMD & PyO3)
-├── src/
-│   └── synapse_shield/
-│       ├── __init__.py        # Public API exports
-│       ├── core.py            # Centralized Security Evaluator & Decision Model
-│       ├── asgi.py            # Universal Zero-Dependency ASGI 3.0 Middleware
-│       ├── litestar.py        # Litestar Route Guards & Middleware Adapter
-│       ├── sanic.py           # Sanic Native & ASGI Middleware/Decorator
-│       ├── cli.py             # CLI Controller (run / test / redteam commands)
-│       ├── redteam_plugin.py  # Modular Built-in Red Team Attack Battery
-│       ├── engine.py          # Real-time Decision & Poisson Engine
-│       ├── features.py        # 19D Kinematics, Fitts's Law & Multimodal Tokenizer
-│       ├── models.py          # Zero-Dependency NumPy 1D-CNN Inference Engine
-│       ├── weights.npz        # 4KB Serialized Neural Network Weights
-│       ├── main.py            # Async FastAPI Gateway & SQLite Logger
-│       ├── middleware.py      # @shield_protect & Middleware classes
-│       ├── django.py          # Django Middleware Adapter
-│       ├── flask.py           # Flask Route Decorator
-│       ├── metrics.py         # Prometheus Multi-Process Exporter
-│       ├── tokens.py          # HMAC-SHA256 Challenge & Replay Defense
-│       ├── train.py           # Zero-Dependency NumPy Active Learning Pipeline
-│       ├── live_attacker.py   # 7-Vector Red Team Simulation Suite
-│       └── static/            # Embedded 3D Cockpit & Client SDK
-│           ├── index.html
-│           └── synapse-sdk.js
-├── synapse-shield-react/      # React / Next.js SDK Package
-│   ├── src/
-│   │   ├── SynapseProtect.tsx # "use client" Drop-in Component
-│   │   ├── useSynapseShield.ts# React Hook with event throttling
-│   │   └── index.ts
-│   ├── package.json
-│   └── tsconfig.json
-├── synapse-shield-vue/        # Vue 3 / Nuxt 3 SDK Package
-├── sdk-tests/                 # Vitest + jsdom suite for Vanilla JS, React & Vue SDKs
-│   └── tests/
-│       ├── zero_pii_contract.test.js   # Same Zero-PII contract run against all 3 SDKs
-│       └── vanilla_token_lifecycle.test.js
-├── tests/                     # Modular Pytest Suite
-│   ├── test_features.py
-│   ├── test_tokens.py
-│   ├── test_engine.py
-│   └── test_api.py
-├── test_suite.py              # Standalone Zero-Dependency Test Runner
-├── pyproject.toml             # PEP 517/621 Package Definition
-├── requirements.txt           # Core Dependencies
-├── LICENSE                    # MIT License
-└── README.md
-```
-
----
-
-## ⭐ Support the Project
-
-If **Synapse Shield** saves you from a CAPTCHA, a bot swarm, or a Cloudflare bill, please consider giving it a star. It takes one click, costs nothing, and is the single best way to help other developers discover the project.
-
-<div align="center">
-
-<a href="https://github.com/0xStoic-bit/Synapse_Shield"><img src="https://img.shields.io/badge/%E2%AD%90%20Star%20Synapse%20Shield%20on%20GitHub-00F0FF?style=for-the-badge&logo=github&logoColor=black" alt="Star Synapse Shield on GitHub"/></a>
-
-[![GitHub stars](https://img.shields.io/github/stars/0xStoic-bit/Synapse_Shield?style=social)](https://github.com/0xStoic-bit/Synapse_Shield/stargazers)
-
-</div>
-
-Other ways to help: [open an issue](https://github.com/0xStoic-bit/Synapse_Shield/issues), send a pull request (see [CONTRIBUTING.md](CONTRIBUTING.md)), share it with your team, or [sponsor the project](https://github.com/sponsors/0xStoic-bit).
-
----
-
-## 📜 License
-
-Distributed under the [MIT License](https://opensource.org/licenses/MIT). Free for commercial and personal use.
+[MIT](https://opensource.org/licenses/MIT). Free for commercial and personal use.
